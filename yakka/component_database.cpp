@@ -211,9 +211,12 @@ std::optional<json> component_database::get_blueprint_provider(std::string_view 
 
 std::expected<void, std::error_code> component_database::parse_yakka_file(const path &path, std::string_view id)
 {
-  std::vector<char> contents = yakka::get_file_contents<std::vector<char>>(path.string());
-  ryml::Tree tree            = ryml::parse_in_place(ryml::to_substr(contents));
-  auto root                  = tree.crootref();
+  auto result = yakka::get_file_contents<std::vector<char>>(path.string());
+  if (!result) {
+    return std::unexpected(result.error());
+  }
+  ryml::Tree tree = ryml::parse_in_place(ryml::to_substr(*result));
+  auto root       = tree.crootref();
 
   if (root.has_child("blueprints")) {
     for (const auto &b: root["blueprints"].children()) {
@@ -236,9 +239,12 @@ std::optional<json> component_database::get_feature_provider(std::string_view fe
 std::expected<void, std::error_code> component_database::parse_slcc_file(const path &path)
 {
   try {
-    std::vector<char> contents = yakka::get_file_contents<std::vector<char>>(path.string());
-    ryml::Tree tree            = ryml::parse_in_place(ryml::to_substr(contents));
-    auto root                  = tree.crootref();
+    auto file_content = yakka::get_file_contents<std::vector<char>>(path.string());
+    if (!file_content) {
+      return std::unexpected(file_content.error());
+    }
+    ryml::Tree tree = ryml::parse_in_place(ryml::to_substr(*file_content));
+    auto root       = tree.crootref();
 
     c4::yml::ConstNodeRef id_node;
     c4::yml::ConstNodeRef provides_node;

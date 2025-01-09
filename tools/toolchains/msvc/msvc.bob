@@ -15,7 +15,8 @@ flags:
   c:
     global:
       - /Fm /c /EHsc /Ox /FS -MT /utf-8
-      - /GL
+      - /Zi
+#      - /GL
       - -I"{{components.msvc.tooling.build_tool_path}}/include"
       - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/um"
       - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/shared"
@@ -25,7 +26,8 @@ flags:
   cpp:
     global:
       - /Fm /c /EHsc /Ox /FS -MT /utf-8 /std:c++latest
-      - /GL
+      - /Zi
+#      - /GL
       - -I"{{components.msvc.tooling.build_tool_path}}/include" 
       - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/um"
       - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/shared" 

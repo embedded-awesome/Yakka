@@ -403,12 +403,11 @@ std::expected<fs::path, std::error_code> workspace::do_fetch_component(std::stri
       };
 
       // Check for phase transitions
-      using enum GitPhase;
-      update_phase(Compressing, "Comp");
-      update_phase(Receiving, "Rece");
-      update_phase(Resolving, "Reso");
-      update_phase(Updating, "Updat");
-      update_phase(LfsCheckout, "Filt");
+      update_phase(GitPhase::Compressing, "Comp");
+      update_phase(GitPhase::Receiving, "Rece");
+      update_phase(GitPhase::Resolving, "Reso");
+      update_phase(GitPhase::Updating, "Updat");
+      update_phase(GitPhase::LfsCheckout, "Filt");
 
       // Parse progress information
       std::string data_str{ data };

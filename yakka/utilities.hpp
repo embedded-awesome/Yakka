@@ -32,37 +32,42 @@ std::string try_render_file(inja::Environment &env, const std::string &filename,
 std::pair<std::string, int> download_resource(const std::string url, fs::path destination);
 nlohmann::json::json_pointer create_condition_pointer(const nlohmann::json condition);
 
-std::expected<bool, std::string> has_data_dependency_changed(
-    std::string_view data_path,
-    const nlohmann::json& left,
-    const nlohmann::json& right) noexcept;
-    
+std::expected<bool, std::string> has_data_dependency_changed(std::string_view data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept;
+
 void add_common_template_commands(inja::Environment &inja_env);
 
-template <class CharContainer> static size_t get_file_contents(const std::string &filename, CharContainer *container)
+template <class CharContainer>
+static std::expected<size_t, std::error_code> get_file_contents(std::filesystem::path filename, CharContainer *container)
 {
-  ::FILE *file = ::fopen(filename.c_str(), "rb");
-  if (file == nullptr) {
-    return 0;
+  std::ifstream file(filename, std::ios::binary | std::ios::ate);
+  if (!file) {
+    return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
-  ::fseek(file, 0, SEEK_END);
-  long size = ::ftell(file);
-  container->resize(static_cast<typename CharContainer::size_type>(size));
-  if (size) {
-    ::rewind(file);
-    size_t ret = ::fread(&(*container)[0], 1, container->size(), file);
-    (void)ret;
-    //C4_CHECK(ret == (size_t)size);
+
+  const auto file_size = file.tellg();
+  if (file_size < 0) {
+    return std::unexpected(std::make_error_code(std::errc::io_error));
   }
-  ::fclose(file);
+
+  container->resize(static_cast<typename CharContainer::size_type>(file_size));
+
+  file.seekg(0);
+  if (!file.read(reinterpret_cast<char *>(container->data()), file_size)) {
+    return std::unexpected(std::make_error_code(std::errc::io_error));
+  }
+
   return container->size();
 }
 
-template <class CharContainer> CharContainer get_file_contents(const std::string &filename)
+template <class CharContainer>
+static std::expected<CharContainer, std::error_code> get_file_contents(std::filesystem::path filename)
 {
   CharContainer cc;
-  get_file_contents(filename, &cc);
-  return cc;
+  auto result = get_file_contents(filename, &cc);
+  if (result) {
+    return cc;
+  }
+  return std::unexpected(result.error());
 }
 
 } // namespace yakka

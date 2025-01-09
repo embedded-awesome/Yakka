@@ -6,12 +6,6 @@
 #include <optional>
 #include <filesystem>
 
-#ifdef EXPERIMENTAL_FILESYSTEM
-namespace fs = std::experimental::filesystem;
-#else
-namespace fs = std::filesystem;
-#endif
-
 namespace yakka {
 
 struct blueprint {

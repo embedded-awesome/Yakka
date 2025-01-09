@@ -44,6 +44,7 @@ struct task_group {
 struct construction_task {
   std::shared_ptr<blueprint_match> match;
   fs::file_time_type last_modified;
+  std::size_t hash_value;
   tf::Task task;
   std::shared_ptr<task_group> group;
   // construction_task_state state;
