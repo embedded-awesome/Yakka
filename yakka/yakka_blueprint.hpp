@@ -14,7 +14,7 @@ struct blueprint {
     std::string name;
   };
   std::string target;
-  std::optional<std::string> regex;
+  std::string regex;
   std::vector<std::string> requirements;
   std::vector<dependency> dependencies; // Unprocessed dependencies. Raw values as found in the YAML.
   nlohmann::json process;
@@ -22,5 +22,7 @@ struct blueprint {
   std::string task_group;
 
   blueprint(const std::string &target, const nlohmann::json &blueprint, const std::string &parent_path);
+
+  nlohmann::json as_json() const;
 };
 } // namespace yakka

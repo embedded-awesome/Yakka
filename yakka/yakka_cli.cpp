@@ -357,6 +357,8 @@ int main(int argc, char **argv)
   t1 = std::chrono::high_resolution_clock::now();
   project.process_blueprints();
 
+  project.save_blueprints();
+
   // Ensure all the commands have a blueprint
   spdlog::info("Checking for missing blueprints");
   for (const auto &c: project.commands) {

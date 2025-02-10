@@ -4,6 +4,7 @@
 #include "yakka_component.hpp"
 #include "yakka_workspace.hpp"
 #include "component_database.hpp"
+#include "target_database.hpp"
 #include "blueprint_database.hpp"
 //#include "yaml-cpp/yaml.h"
 #include "nlohmann/json.hpp"
@@ -95,7 +96,6 @@ public:
   void generate_project_summary();
 
   // Target database management
-  //void add_to_target_database( const std::string target );
   void generate_target_database();
 
   void load_common_commands();

@@ -5,6 +5,7 @@ sources:
   - yakka_component.cpp
   - yakka_workspace.cpp
   - component_database.cpp
+  - target_database.cpp
   - yakka_blueprint.cpp
   - blueprint_database.cpp
   - utilities.cpp

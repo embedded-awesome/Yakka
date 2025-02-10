@@ -37,4 +37,42 @@ blueprint::blueprint(const std::string &target, const nlohmann::json &blueprint,
   if (blueprint.contains("group"))
     this->task_group = blueprint["group"].get<std::string>();
 }
+
+nlohmann::json blueprint::as_json() const
+{
+  nlohmann::json j;
+  j["target"] = target;
+
+  if (!regex.empty())
+    j["regex"] = regex;
+
+  if (!requirements.empty())
+    j["requires"] = requirements;
+
+  if (!dependencies.empty()) {
+    nlohmann::json deps = nlohmann::json::array();
+    for (const auto &dep: dependencies) {
+      if (dep.type == dependency::DATA_DEPENDENCY) {
+        nlohmann::json d;
+        d["data"] = dep.name;
+        deps.push_back(d);
+      } else if (dep.type == dependency::DEPENDENCY_FILE_DEPENDENCY) {
+        nlohmann::json d;
+        d["dependency_file"] = dep.name;
+        deps.push_back(d);
+      } else {
+        deps.push_back(dep.name);
+      }
+    }
+    j["depends"] = deps;
+  }
+
+  if (!process.empty())
+    j["process"] = process;
+
+  if (!task_group.empty())
+    j["group"] = task_group;
+
+  return j;
+}
 } // namespace yakka

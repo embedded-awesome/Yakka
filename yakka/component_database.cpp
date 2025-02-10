@@ -1,3 +1,4 @@
+#include "yakka.hpp"
 #include "component_database.hpp"
 #include "spdlog/spdlog.h"
 #include "ryml.hpp"
@@ -39,7 +40,7 @@ void component_database::insert(std::string_view id, const path &config_file)
 std::expected<void, error> component_database::load(const path &workspace_path)
 {
   this->workspace_path = workspace_path;
-  database_filename    = this->workspace_path / "yakka-components.json";
+  database_filename    = this->workspace_path / yakka::database_filename;
 
   try {
     if (!fs::exists(database_filename)) {

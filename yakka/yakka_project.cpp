@@ -1203,10 +1203,11 @@ void project::create_tasks(const std::string target_name, tf::Task &parent)
     }
     // Check if target name matches an existing file in filesystem
     else if (fs::exists(target_name)) {
-      // Create a new task to retrieve the file timestamp
+      // Create a new task to retrieve the file timestamp and calculate hash
       task.data(&new_todo->second).work([=]() {
         auto *d          = static_cast<construction_task *>(task.data());
         d->last_modified = fs::last_write_time(target_name);
+        d->hash_value    = fs::hash_value(target_name);
         //spdlog::info("{}: timestamp {}", target_name, (uint)d->last_modified.time_since_epoch().count());
         return;
       });
@@ -1713,6 +1714,11 @@ void project::process_tools(const std::shared_ptr<component> c)
       project_summary["tools"][key] = try_render(inja_env, value.get<std::string>(), project_summary);
     }
   }
+}
+
+void project::save_blueprints()
+{
+  blueprint_database.save(this->output_path + "/blueprints.json");
 }
 
 void project::add_additional_tool(const fs::path component_path)

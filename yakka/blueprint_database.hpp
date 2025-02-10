@@ -5,6 +5,9 @@
 #include <vector>
 #include <memory>
 #include <map>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 namespace yakka {
 struct blueprint_match {
@@ -15,9 +18,10 @@ struct blueprint_match {
 
 class blueprint_database {
 public:
-  void load(const std::string path);
-  void save(const std::string path);
   std::vector<std::shared_ptr<blueprint_match>> find_match(const std::string target, const nlohmann::json &project_summary);
+
+  void load(const fs::path filename);
+  void save(const fs::path filename);
 
   // void generate_task_database(std::vector<std::string> command_list);
   // void process_blueprint_target( const std::string target );
@@ -25,11 +29,4 @@ public:
   std::multimap<std::string, std::shared_ptr<blueprint>> blueprints;
 };
 
-class target_database {
-public:
-  void load(const fs::path file_path);
-  void save(const fs::path file_path);
-
-  std::multimap<std::string, std::shared_ptr<blueprint_match>> targets;
-};
 } // namespace yakka
