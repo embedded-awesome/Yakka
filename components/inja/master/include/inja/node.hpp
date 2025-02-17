@@ -1,11 +1,15 @@
 #ifndef INCLUDE_INJA_NODE_HPP_
 #define INCLUDE_INJA_NODE_HPP_
 
+#include <cstddef>
+#include <memory>
 #include <string>
 #include <string_view>
-#include <utility>
+#include <tuple>
+#include <vector>
 
 #include "function_storage.hpp"
+#include "inja.hpp"
 #include "utils.hpp"
 
 namespace inja {
@@ -112,12 +116,12 @@ public:
 
   static std::string convert_dot_to_ptr(std::string_view ptr_name) {
     std::string result;
-    do {
+    while (!ptr_name.empty()) {
       std::string_view part;
       std::tie(part, ptr_name) = string_view::split(ptr_name, '.');
       result.push_back('/');
       result.append(part.begin(), part.end());
-    } while (!ptr_name.empty());
+    }
     return result;
   }
 
@@ -143,7 +147,7 @@ public:
   Op operation;
 
   std::string name;
-  int number_args; // Should also be negative -> -1 for unknown number
+  int number_args; // Can also be negative -> -1 for unknown number
   std::vector<std::shared_ptr<ExpressionNode>> arguments;
   CallbackFunction callback;
 
@@ -339,7 +343,7 @@ public:
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
-  };
+  }
 };
 
 class BlockStatementNode : public StatementNode {
@@ -352,7 +356,7 @@ public:
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
-  };
+  }
 };
 
 class SetStatementNode : public StatementNode {

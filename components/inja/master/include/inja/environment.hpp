@@ -3,17 +3,16 @@
 
 #include <fstream>
 #include <iostream>
-#include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
 
 #include "config.hpp"
 #include "function_storage.hpp"
+#include "inja.hpp"
 #include "parser.hpp"
 #include "renderer.hpp"
 #include "template.hpp"
-#include "utils.hpp"
 
 namespace inja {
 
@@ -21,14 +20,14 @@ namespace inja {
  * \brief Class for changing the configuration.
  */
 class Environment {
-  LexerConfig lexer_config;
-  ParserConfig parser_config;
-  RenderConfig render_config;
-
   FunctionStorage function_storage;
   TemplateStorage template_storage;
 
 protected:
+  LexerConfig lexer_config;
+  ParserConfig parser_config;
+  RenderConfig render_config;
+
   std::string input_path;
   std::string output_path;
 
@@ -93,6 +92,11 @@ public:
     render_config.throw_at_missing_includes = will_throw;
   }
 
+  /// Sets whether we'll automatically perform HTML escape
+  void set_html_autoescape(bool will_escape) {
+    render_config.html_autoescape = will_escape;
+  }
+
   Template parse(std::string_view input) {
     Parser parser(parser_config, lexer_config, template_storage, function_storage);
     return parser.parse(input, input_path);
@@ -100,7 +104,7 @@ public:
 
   Template parse_template(const std::string& filename) {
     Parser parser(parser_config, lexer_config, template_storage, function_storage);
-    auto result = Template(parser.load_file(input_path + static_cast<std::string>(filename)));
+    auto result = Template(Parser::load_file(input_path + static_cast<std::string>(filename)));
     parser.parse_into_template(result, input_path + static_cast<std::string>(filename));
     return result;
   }
@@ -155,9 +159,13 @@ public:
     return os;
   }
 
+  std::ostream& render_to(std::ostream& os, const std::string_view input, const json& data) {
+    return render_to(os, parse(input), data);
+  }
+
   std::string load_file(const std::string& filename) {
     Parser parser(parser_config, lexer_config, template_storage, function_storage);
-    return parser.load_file(input_path + filename);
+    return Parser::load_file(input_path + filename);
   }
 
   json load_json(const std::string& filename) {
