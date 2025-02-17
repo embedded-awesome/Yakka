@@ -335,8 +335,9 @@ void add_common_template_commands(inja::Environment &inja_env)
     auto path = std::filesystem::path{ args.at(0)->get<std::string>() };
     return path.has_filename() ? path.parent_path().string() : path.string();
   });
-  inja_env.add_callback("notdir", 1, [](inja::Arguments &args) {
-    return std::filesystem::path{ args.at(0)->get<std::string>() }.filename();
+  inja_env.add_callback("not_dir", 1, [](inja::Arguments &args) {
+    return std::filesystem::path{ args.at(0)->get<std::string>() }.filename().string();
+  });
   });
   inja_env.add_callback("glob", [](inja::Arguments &args) {
     nlohmann::json aggregate = nlohmann::json::array();
