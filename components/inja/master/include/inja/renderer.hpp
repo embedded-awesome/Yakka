@@ -532,7 +532,8 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Capitalize: {
       auto input = get_arguments<1>(node)[0]->get<std::string>();
-      make_result(std::transform(input.begin(), input.end(), input.begin(), ::toupper));
+      std::transform(input.begin(), input.end(), input.begin(), ::toupper);
+      make_result(input);
     } break;
     case Op::None:
       break;
