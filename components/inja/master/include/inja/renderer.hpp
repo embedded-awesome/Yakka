@@ -530,6 +530,10 @@ class Renderer : public NodeVisitor {
     case Op::Hex: {
       make_result(fmt::format("{:x}", get_arguments<1>(node)[0]->get<int>()));
     } break;
+    case Op::Capitalize: {
+      auto input = get_arguments<1>(node)[0]->get<std::string>();
+      make_result(std::transform(input.begin(), input.end(), input.begin(), ::toupper));
+    } break;
     case Op::None:
       break;
     }
