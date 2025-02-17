@@ -779,6 +779,22 @@ void project::load_common_commands()
         if (command.contains("replace")) {
           std::string r = std::regex_replace(line, regex_search, command["replace"].get<std::string>(), std::regex_constants::format_no_copy);
           captured_output.append(r);
+        } else if (command.contains("match")) {
+          std::smatch sm;
+          std::string new_output      = command.contains("prefix") ? command["prefix"].get<std::string>() : "";
+          inja::Environment local_env = inja_env; // Create copy and override `$()` function
+          const auto match_string     = command["match"].get<std::string>();
+          local_env.add_callback("reg", 1, [&](const inja::Arguments &args) {
+            return sm[args[0]->get<int>()].str();
+          });
+          for (; std::regex_search(captured_output, sm, regex_search);) {
+            // Render the match template
+            new_output += try_render(local_env, match_string, generated_json);
+            captured_output = sm.suffix();
+          }
+          if (command.contains("suffix"))
+            new_output += command["suffix"].get<std::string>();
+          captured_output = new_output;
         } else if (command.contains("to_yaml")) {
           std::smatch s;
           if (!std::regex_match(line, s, regex_search))
@@ -789,8 +805,12 @@ void project::load_common_commands()
           for (auto &v: command["to_yaml"])
             node[0][v.get<std::string>()] = s[i++].str();
 
+          if (command.contains("prefix"))
+            captured_output.append(try_render(inja_env, command["prefix"].get<std::string>(), generated_json));
           captured_output.append(YAML::Dump(node));
           captured_output.append("\n");
+          if (command.contains("suffix"))
+            captured_output.append(try_render(inja_env, command["suffix"].get<std::string>(), generated_json));
         }
       }
     } else if (command.contains("to_yaml")) {
@@ -804,8 +824,14 @@ void project::load_common_commands()
         captured_output = sm.suffix();
       }
 
-      captured_output = YAML::Dump(yaml);
+      captured_output.erase();
+
+      if (command.contains("prefix"))
+        captured_output.append(try_render(inja_env, command["prefix"].get<std::string>(), generated_json));
+      captured_output.append(YAML::Dump(yaml));
       captured_output.append("\n");
+      if (command.contains("suffix"))
+        captured_output.append(try_render(inja_env, command["suffix"].get<std::string>(), generated_json));
     } else if (command.contains("replace")) {
       captured_output = std::regex_replace(captured_output, regex_search, command["replace"].get<std::string>());
     } else if (command.contains("match")) {
