@@ -335,8 +335,11 @@ void add_common_template_commands(inja::Environment &inja_env)
     auto path = std::filesystem::path{ args.at(0)->get<std::string>() };
     return path.has_filename() ? path.parent_path().string() : path.string();
   });
-  inja_env.add_callback("notdir", 1, [](inja::Arguments &args) {
-    return std::filesystem::path{ args.at(0)->get<std::string>() }.filename();
+  inja_env.add_callback("not_dir", 1, [](inja::Arguments &args) {
+    return std::filesystem::path{ args.at(0)->get<std::string>() }.filename().string();
+  });
+  inja_env.add_callback("parent_path", 1, [](inja::Arguments &args) {
+    return std::filesystem::path{ args.at(0)->get<std::string>() }.parent_path().string();
   });
   inja_env.add_callback("glob", [](inja::Arguments &args) {
     nlohmann::json aggregate = nlohmann::json::array();
@@ -416,6 +419,38 @@ void add_common_template_commands(inja::Environment &inja_env)
     const std::regex metacharacters(R"([\.\^\$\+\(\)\[\]\{\}\|\?])");
     return std::regex_replace(input, metacharacters, "\\$&");
   });
+  inja_env.add_callback("split", 2, [](const inja::Arguments &args) {
+    auto input = args[0]->get<std::string>();
+    auto delim = args[1]->get<std::string>();
+    nlohmann::json output;
+    for (auto word: std::views::split(input, delim))
+      output.push_back(std::string_view(word));
+    return output;
+  });
+  inja_env.add_callback("starts_with", 2, [](const inja::Arguments &args) {
+    auto input = args[0]->get<std::string>();
+    auto start = args[1]->get<std::string>();
+    return input.starts_with(start);
+  });
+  inja_env.add_callback("substring", 2, [](const inja::Arguments &args) {
+    auto input = args[0]->get<std::string>();
+    auto index = args[1]->get<int>();
+    return input.substr(index);
+  });
+  inja_env.add_callback("trim", 1, [](const inja::Arguments &args) {
+    auto input = args[0]->get<std::string>();
+    input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) {
+                  return !std::isspace(ch);
+                }));
+    input.erase(std::find_if(input.rbegin(),
+                             input.rend(),
+                             [](unsigned char ch) {
+                               return !std::isspace(ch);
+                             })
+                  .base(),
+                input.end());
+    return input;
+  });
 }
 
 std::pair<std::string, int> run_command(const std::string target, construction_task *task, project *project)
@@ -465,6 +500,11 @@ std::pair<std::string, int> run_command(const std::string target, construction_t
   inja_env.add_callback("fetch", 1, [&](const inja::Arguments &args) {
     nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
     return data_store[ptr];
+  });
+  inja_env.add_callback("erase", 1, [&](const inja::Arguments &args) {
+    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+    data_store[ptr].clear();
+    return nlohmann::json{};
   });
   inja_env.add_callback("$", 1, [&blueprint](const inja::Arguments &args) {
     return blueprint->regex_matches[args[0]->get<int>()];

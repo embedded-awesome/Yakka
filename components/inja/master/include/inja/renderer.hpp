@@ -2,17 +2,27 @@
 #define INCLUDE_INJA_RENDERER_HPP_
 
 #include <algorithm>
+#include <array>
+#include <cctype>
+#include <cmath>
+#include <cstddef>
+#include <memory>
 #include <numeric>
+#include <ostream>
+#include <sstream>
+#include <stack>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "config.hpp"
 #include "exceptions.hpp"
+#include "fmt/fmt.h"
+#include "function_storage.hpp"
+#include "inja.hpp"
 #include "node.hpp"
 #include "template.hpp"
 #include "utils.hpp"
-#include "fmt/fmt.h"
 
 namespace inja {
 
@@ -56,10 +66,43 @@ class Renderer : public NodeVisitor {
     return !data->empty();
   }
 
-  void print_data(const std::shared_ptr<json> value) {
-    if (value->is_null()) {
-    } else if (value->is_string()) {
-      *output_stream << value->get_ref<const json::string_t&>();
+  static std::string htmlescape(const std::string& data) {
+    std::string buffer;
+    buffer.reserve(1.1 * data.size());
+    for (size_t pos = 0; pos != data.size(); ++pos) {
+      switch (data[pos]) {
+      case '&':
+        buffer.append("&amp;");
+        break;
+      case '\"':
+        buffer.append("&quot;");
+        break;
+      case '\'':
+        buffer.append("&apos;");
+        break;
+      case '<':
+        buffer.append("&lt;");
+        break;
+      case '>':
+        buffer.append("&gt;");
+        break;
+      default:
+        buffer.append(&data[pos], 1);
+        break;
+      }
+    }
+    return buffer;
+  }
+
+  void print_data(const std::shared_ptr<json>& value) {
+    if (value->is_string()) {
+      if (config.html_autoescape) {
+        *output_stream << htmlescape(value->get_ref<const json::string_t&>());
+      } else {
+        *output_stream << value->get_ref<const json::string_t&>();
+      }
+    } else if (value->is_number_unsigned()) {
+      *output_stream << value->get<const json::number_unsigned_t>();
     } else if (value->is_number_integer()) {
       *output_stream << value->get<const json::number_integer_t>();
     } else if (value->is_null()) {
@@ -91,7 +134,7 @@ class Renderer : public NodeVisitor {
   }
 
   void throw_renderer_error(const std::string& message, const AstNode& node) {
-    SourceLocation loc = get_source_location(current_template->content, node.pos);
+    const SourceLocation loc = get_source_location(current_template->content, node.pos);
     INJA_THROW(RenderError(message, loc));
   }
 
@@ -133,7 +176,7 @@ class Renderer : public NodeVisitor {
 
   template <bool throw_not_found = false> Arguments get_argument_vector(const FunctionNode& node) {
     const size_t N = node.arguments.size();
-    for (auto a : node.arguments) {
+    for (const auto& a : node.arguments) {
       a->accept(*this);
     }
 
@@ -159,7 +202,7 @@ class Renderer : public NodeVisitor {
   }
 
   void visit(const BlockNode& node) {
-    for (auto& n : node.nodes) {
+    for (const auto& n : node.nodes) {
       n->accept(*this);
 
       if (break_rendering) {
@@ -179,7 +222,10 @@ class Renderer : public NodeVisitor {
   }
 
   void visit(const DataNode& node) {
-    if (additional_data.contains(node.ptr)) {
+    if (node.ptr.empty()) {
+      // root document
+      data_eval_stack.push(data_input);
+    } else if (additional_data.contains(node.ptr)) {
       data_eval_stack.push(&(additional_data[node.ptr]));
     } else if (data_input->contains(node.ptr)) {
       data_eval_stack.push(&(*data_input)[node.ptr]);
@@ -283,7 +329,8 @@ class Renderer : public NodeVisitor {
     case Op::Power: {
       const auto args = get_arguments<2>(node);
       if (args[0]->is_number_integer() && args[1]->get<const json::number_integer_t>() >= 0) {
-        const auto result = static_cast<json::number_integer_t>(std::pow(args[0]->get<const json::number_integer_t>(), args[1]->get<const json::number_integer_t>()));
+        const auto result =
+            static_cast<json::number_integer_t>(std::pow(args[0]->get<const json::number_integer_t>(), args[1]->get<const json::number_integer_t>()));
         make_result(result);
       } else {
         const auto result = std::pow(args[0]->get<const json::number_float_t>(), args[1]->get<const json::number_integer_t>());
@@ -391,7 +438,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Round: {
       const auto args = get_arguments<2>(node);
-      const int precision = args[1]->get<const json::number_integer_t>();
+      const auto precision = args[1]->get<const json::number_integer_t>();
       const double result = std::round(args[0]->get<const json::number_float_t>() * std::pow(10.0, precision)) / std::pow(10.0, precision);
       if (precision == 0) {
         make_result(int(result));
@@ -482,6 +529,11 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Hex: {
       make_result(fmt::format("{:x}", get_arguments<1>(node)[0]->get<int>()));
+    } break;
+    case Op::Capitalize: {
+      auto input = get_arguments<1>(node)[0]->get<std::string>();
+      std::transform(input.begin(), input.end(), input.begin(), ::toupper);
+      make_result(input);
     } break;
     case Op::None:
       break;

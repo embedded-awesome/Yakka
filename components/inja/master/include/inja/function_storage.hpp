@@ -1,8 +1,14 @@
 #ifndef INCLUDE_INJA_FUNCTION_STORAGE_HPP_
 #define INCLUDE_INJA_FUNCTION_STORAGE_HPP_
 
+#include <functional>
+#include <map>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include "inja.hpp"
 
 namespace inja {
 
@@ -34,6 +40,7 @@ public:
     Modulo,
     AtId,
     At,
+    Capitalize,
     Default,
     DivisibleBy,
     Even,
@@ -77,6 +84,7 @@ private:
 
   std::map<std::pair<std::string, int>, FunctionData> function_storage = {
       {std::make_pair("at", 2), FunctionData {Operation::At}},
+      {std::make_pair("capitalize", 1), FunctionData {Operation::Capitalize}},
       {std::make_pair("default", 2), FunctionData {Operation::Default}},
       {std::make_pair("divisibleBy", 2), FunctionData {Operation::DivisibleBy}},
       {std::make_pair("even", 1), FunctionData {Operation::Even}},
