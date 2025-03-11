@@ -2,7 +2,7 @@ name: Yakka Build
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, 'nik/0.8.0' ]
   pull_request:
     branches: [ master ]
 
