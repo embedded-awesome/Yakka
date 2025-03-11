@@ -1,4 +1,5 @@
 #include "yakka_project.hpp"
+#include "blueprint_commands.hpp"
 #include "utilities.hpp"
 #include "subprocess.hpp"
 #include "spdlog/spdlog.h"
@@ -578,10 +579,10 @@ std::pair<std::string, int> run_command(const std::string target, construction_t
         spdlog::info(captured_output);
       }
       // Else check if it is a built-in command
-      else if (project->blueprint_commands.contains(command_name)) {
-        yakka::process_return test_result = project->blueprint_commands.at(command_name)(target, command.value(), captured_output, project->project_summary, inja_env);
-        captured_output                   = test_result.result;
-        retcode                           = test_result.retcode;
+      else if (blueprint_commands.contains(command_name)) {
+        yakka::blueprint_return test_result = blueprint_commands.at(command_name)(target, command.value(), captured_output, project->project_summary, inja_env);
+        captured_output                     = test_result.result;
+        retcode                             = test_result.retcode;
       } else {
         spdlog::error("{} tool doesn't exist", command_name);
       }
@@ -605,9 +606,9 @@ std::pair<std::string, int> download_resource(const std::string url, fs::path de
 {
   fs::path filename = destination / url.substr(url.find_last_not_of('/'));
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
-  return exec("powershell", "Invoke-WebRequest " + url + " -OutFile " + filename.generic_string());
+  return exec("powershell", std::format("Invoke-WebRequest {} -OutFile {}", url, filename.generic_string()));
 #else
-  return exec("curl", url + " -o " + filename.generic_string());
+  return exec("curl", std::format("{} -o {}", url, filename.generic_string()));
 #endif
 }
 

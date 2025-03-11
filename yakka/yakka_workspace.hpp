@@ -44,6 +44,7 @@ public:
   YAML::Node registries;
   YAML::Node configuration;
   nlohmann::json configuration_json;
+  nlohmann::json projects;
   std::map<std::string, std::future<void>> fetching_list;
   std::filesystem::path workspace_path;
   std::filesystem::path shared_components_path;

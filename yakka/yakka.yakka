@@ -8,6 +8,7 @@ sources:
   - target_database.cpp
   - yakka_blueprint.cpp
   - blueprint_database.cpp
+  - blueprint_commands.cpp
   - utilities.cpp
 
 includes:

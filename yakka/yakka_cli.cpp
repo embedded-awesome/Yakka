@@ -64,7 +64,7 @@ int main(int argc, char **argv)
 
   // Create a workspace
   yakka::workspace workspace;
-  workspace.init(".");
+  workspace.init(fs::current_path());
 
   cxxopts::Options options("yakka", "Yakka the embedded builder. Ver " + yakka_version.str());
   options.allow_unrecognised_options();
@@ -395,7 +395,6 @@ int main(int argc, char **argv)
 
   duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to process blueprints", duration);
-  project.load_common_commands();
 
   run_taskflow(project);
 

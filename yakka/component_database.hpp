@@ -64,6 +64,12 @@ public:
     return this->has_scanned;
   }
 
+  // Add ability to dump the database for debugging
+  std::string dump() const
+  {
+    return this->database.dump(2);
+  }
+
 private:
   json database;
   path workspace_path;

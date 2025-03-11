@@ -24,8 +24,6 @@ namespace fs = std::filesystem;
 namespace yakka {
 const std::string default_output_directory = "output/";
 
-typedef std::function<yakka::process_return(std::string, const nlohmann::json &, std::string, const nlohmann::json &, inja::Environment &)> blueprint_command;
-
 struct task_group {
   std::string name;
   int total_count;
@@ -98,7 +96,6 @@ public:
   // Target database management
   void generate_target_database();
 
-  void load_common_commands();
   void set_project_file(const std::string filepath);
   void process_construction(indicators::ProgressBar &bar);
   void save_summary();
@@ -159,7 +156,6 @@ public:
   tf::Taskflow taskflow;
   std::atomic<bool> abort_build;
 
-  std::map<std::string, blueprint_command> blueprint_commands;
   std::function<void(std::shared_ptr<task_group> group)> task_complete_handler;
 
   // SLC specific

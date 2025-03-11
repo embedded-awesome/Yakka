@@ -73,6 +73,11 @@ std::expected<void, std::error_code> workspace::init(const fs::path &workspace_p
     });
   }
 
+  // Check for project file
+  if (fs::exists(workspace_path / "projects.json")) {
+    projects = nlohmann::json::parse(std::ifstream(workspace_path / "projects.json"));
+  }
+
   configuration["host_os"]              = host_os_string;
   configuration["executable_extension"] = executable_extension;
   configuration_json                    = configuration.as<nlohmann::json>();
