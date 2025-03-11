@@ -29,15 +29,27 @@ provides the ability to **parse**, **compare**, and **increment** semantic versi
    FetchContent_Declare(
        cpp-semver
        GIT_REPOSITORY https://github.com/z4kn4fein/cpp-semver.git
-       GIT_TAG v0.3.3)
+       GIT_TAG v0.4.0)
    FetchContent_MakeAvailable(cpp-semver)
    ```
-
+   
    This will produce the target `semver` which you can link against the typical way:
 
    ```cmake
    target_link_libraries(your_target_name PRIVATE semver)
    ```
+
+   To use the lib as a **C++20 module**, you have to turn the `SEMVER_BUILD_MODULE` option `ON`:
+   ```cmake
+   set(SEMVER_BUILD_MODULE ON)
+   
+   FetchContent_Declare(#[[...]])
+   ```
+   Then you can import the package:
+   ```cpp
+   import semver;
+   ```
+
 3. With `vcpkg`
 
    If you are using vcpkg for external dependencies, then you can install the package with:
