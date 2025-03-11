@@ -387,7 +387,7 @@ std::expected<fs::path, std::error_code> workspace::do_fetch_component(std::stri
     };
 
     // Progress tracking state
-    /*static constexpr*/ auto progress_pattern = std::regex(R"(\((.*)/(.*))\))");
+    /*static constexpr*/ auto progress_pattern = std::regex(R"(\((.*)/(.*)\))");
     struct {
       GitPhase current_phase = GitPhase::Counting;
       int last_progress      = 0;
@@ -438,7 +438,7 @@ std::expected<fs::path, std::error_code> workspace::do_fetch_component(std::stri
     progress_state = {};
 
     // Execute checkout command
-    const auto checkout_args = std::format(R"(--git-dir "{}/{}.git" --work-tree "{}" checkout {} --progress --force)", git_location.string(), name, checkout_location.string(), branch);
+    const auto checkout_args = std::format(R"(--git-dir "{}/{}/.git" --work-tree "{}" checkout {} --progress --force)", git_location.string(), name, checkout_location.string(), branch);
 
     auto checkout_result = execute_git_command("git", checkout_args, handle_progress);
     if (!checkout_result) {
