@@ -44,7 +44,7 @@ std::expected<void, error> component_database::load(const path &workspace_path)
 
   try {
     if (!fs::exists(database_filename)) {
-      database = { { "components", nullptr }, { "features", nullptr } };
+      database = { { "blueprints", nullptr }, { "components", nullptr }, { "features", nullptr }, { "types", nullptr } };
       scan_for_components(this->workspace_path);
       return save();
     }
@@ -53,7 +53,7 @@ std::expected<void, error> component_database::load(const path &workspace_path)
     database = json::parse(ifs);
 
     if (!database.contains("components")) {
-      database = { { "components", nullptr }, { "features", nullptr } };
+      database = { { "blueprints", nullptr }, { "components", nullptr }, { "features", nullptr }, { "types", nullptr } };
       scan_for_components(this->workspace_path);
       return save();
     }
@@ -222,6 +222,18 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
   if (root.has_child("blueprints")) {
     for (const auto &b: root["blueprints"].children()) {
       process_blueprint(database, id, b);
+    }
+  }
+
+  if (root.has_child("type")) {
+    if (root["type"].is_seq()) {
+      for (const auto &t: root["type"].children()) {
+        std::string type_name = std::string{ t.val().str, t.val().len };
+        database["types"][type_name].push_back(std::string{ id });
+      }
+    } else {
+      std::string type_name = std::string{ root["type"].val().str, root["type"].val().len };
+      database["types"][type_name].push_back(std::string{ id });
     }
   }
 

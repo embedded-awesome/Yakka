@@ -1,4 +1,7 @@
 name: Yakka CLI app
+type: application
+description: Yakka CLI app
+version: 0.8.0-alpha
 
 sources:
   - yakka_cli.cpp
