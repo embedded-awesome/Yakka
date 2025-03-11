@@ -858,7 +858,7 @@ void project::load_common_commands()
     return { captured_output, 0 };
   };
 
-  blueprint_commands["inja"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
+  blueprint_commands["template"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
     try {
       std::string template_string;
       std::string template_filename;
