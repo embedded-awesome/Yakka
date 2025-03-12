@@ -2,6 +2,7 @@
 #include "utilities.hpp"
 #include "spdlog/spdlog.h"
 #include <regex>
+#include <charconv>
 
 namespace yakka {
 
