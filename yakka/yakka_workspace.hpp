@@ -16,7 +16,7 @@ public:
   workspace()  = default;
   ~workspace() = default;
 
-  std::expected<void, std::error_code> init(const fs::path &workspace_path = ".");
+  std::expected<void, std::error_code> init(const fs::path &workspace_path = fs::current_path());
 
   std::future<fs::path> fetch_component(std::string_view name, const YAML::Node &node, std::function<void(std::string_view, size_t)> progress_handler);
   void load_component_registries();

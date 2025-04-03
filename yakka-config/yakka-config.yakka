@@ -1,0 +1,11 @@
+name: Yakka config server
+
+sources:
+  - server.cpp
+
+requires:
+  components:
+    - cpp-httplib
+    - spdlog
+    - yakka
+
