@@ -19,6 +19,9 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
   // XXX: Start time should be determined at the start of the executable and not here
   auto start_time = std::filesystem::file_time_type::clock::now();
 
+  if (target_name.empty()) {
+    spdlog::error("Empty target name");
+  }
   //spdlog::info("Create tasks for: {}", target_name);
 
   // Check if this target has already been processed
@@ -43,7 +46,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
 
     // Check if target is a data dependency
     if (target_name.front() == data_dependency_identifier) {
-      task.data(&new_todo->second).work([&]() {
+      task.data(&new_todo->second).work([=, this]() {
         // spdlog::info("{}: data", target_name);
         auto *d     = static_cast<construction_task *>(task.data());
         auto result = has_data_dependency_changed(target_name, project.previous_summary, project.project_summary);
@@ -357,7 +360,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   return { captured_output, 0 };
 }
 
-void task_engine::run_taskflow(yakka::project &project, task_engine_ui& ui)
+void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
 {
   tf::Executor executor(std::min(32U, std::thread::hardware_concurrency()));
   todo_task_groups["Processing"] = std::make_shared<yakka::task_group>("Processing");
@@ -368,15 +371,15 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui& ui)
   for (auto &i: project.commands)
     create_tasks(i, finish, project);
 
-  ui.init(*this);
+  ui->init(*this);
 
   auto execution_future = executor.run(taskflow);
 
   do {
-	  ui.update(*this);
+    ui->update(*this);
   } while (execution_future.wait_for(500ms) != std::future_status::ready);
 
-  ui.finish(*this);
+  ui->finish(*this);
 }
 
 } // namespace yakka

@@ -44,9 +44,9 @@ struct construction_task {
 };
 
 struct task_engine_ui {
-	void init(task_engine& task_engine) {};
-	void update(task_engine& task_engine) {};
-	void finish(task_engine& task_engine) {};
+  virtual void init(task_engine &task_engine)   = 0;
+  virtual void update(task_engine &task_engine) = 0;
+  virtual void finish(task_engine &task_engine) = 0;
 };
 
 class task_engine {
@@ -59,7 +59,7 @@ public:
   void init(task_complete_type task_complete_handler);
   void create_tasks(const std::string target_name, tf::Task &parent, yakka::project &project);
   std::pair<std::string, int> run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project);
-  void run_taskflow(yakka::project &project, task_engine_ui& ui);
+  void run_taskflow(yakka::project &project, task_engine_ui *ui);
 
   std::atomic<bool> abort_build;
   nlohmann::json project_data;

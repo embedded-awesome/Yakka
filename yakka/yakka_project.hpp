@@ -70,7 +70,6 @@ public:
   void process_construction(indicators::ProgressBar &bar);
   void save_summary();
   void save_blueprints();
-  // void create_tasks(const std::string target_name, tf::Task &parent);
 
   void validate_schema();
 

@@ -28,28 +28,30 @@ static void evaluate_project_dependencies(yakka::workspace &workspace, yakka::pr
 static void download_unknown_components(yakka::workspace &workspace, yakka::project &project);
 static void print_project_choice_errors(yakka::project &project);
 
-struct progress_bar_task_ui: yakka::task_engine_ui {
+struct progress_bar_task_ui : yakka::task_engine_ui {
   DynamicProgress<ProgressBar> task_progress_ui;
   std::vector<std::shared_ptr<ProgressBar>> task_progress_bars;
 
-  void init(yakka::task_engine& task_engine) {
-    for (auto &i : task_engine.todo_task_groups) {
-      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth { 50 }, option::ShowPercentage { true }, option::PrefixText { i.second->name }, option::MaxProgress { i.second->total_count });
+  void init(yakka::task_engine &task_engine)
+  {
+    for (auto &i: task_engine.todo_task_groups) {
+      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ i.second->name }, option::MaxProgress{ i.second->total_count });
       task_progress_bars.push_back(new_task_bar);
       i.second->ui_id = task_progress_ui.push_back(*new_task_bar);
-      task_progress_ui[i.second->ui_id].set_option(option::PostfixText { std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
+      task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
     }
     task_progress_ui.print_progress();
 
-//    project.task_complete_handler = [&](std::shared_ptr<yakka::task_group> group) {
-//      ++group->current_count;
-//    };
+    //    project.task_complete_handler = [&](std::shared_ptr<yakka::task_group> group) {
+    //      ++group->current_count;
+    //    };
   };
 
-  void update(yakka::task_engine& task_engine) {
-    for (const auto &i : task_engine.todo_task_groups) {
+  void update(yakka::task_engine &task_engine)
+  {
+    for (const auto &i: task_engine.todo_task_groups) {
       if (i.second->current_count != i.second->last_progress_update) {
-        task_progress_ui[i.second->ui_id].set_option(option::PostfixText { std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
+        task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
         //size_t new_progress = (100 * i.second->current_count) / i.second->total_count;
         task_progress_ui[i.second->ui_id].set_progress(i.second->current_count);
         i.second->last_progress_update = i.second->current_count;
@@ -60,9 +62,10 @@ struct progress_bar_task_ui: yakka::task_engine_ui {
     }
   };
 
-  void finish(yakka::task_engine& task_engine) {
-    for (const auto &i : task_engine.todo_task_groups) {
-      task_progress_ui[i.second->ui_id].set_option(option::PostfixText { std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
+  void finish(yakka::task_engine &task_engine)
+  {
+    for (const auto &i: task_engine.todo_task_groups) {
+      task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
       task_progress_ui[i.second->ui_id].set_progress(i.second->current_count);
     }
     task_progress_ui.print_progress();
@@ -439,7 +442,7 @@ int main(int argc, char **argv)
   spdlog::info("{}ms to process blueprints", duration);
 
   progress_bar_task_ui progress_bar_ui;
-  task_engine.run_taskflow(project, progress_bar_ui);
+  task_engine.run_taskflow(project, &progress_bar_ui);
 
   auto yakka_end_time = fs::file_time_type::clock::now();
   std::cout << "Complete in " << std::chrono::duration_cast<std::chrono::milliseconds>(yakka_end_time - yakka_start_time).count() << " milliseconds" << std::endl;
