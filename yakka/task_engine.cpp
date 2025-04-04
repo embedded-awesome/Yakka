@@ -46,7 +46,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
 
     // Check if target is a data dependency
     if (target_name.front() == data_dependency_identifier) {
-      task.data(&new_todo->second).work([=, this]() {
+      task.data(&new_todo->second).work([=]() {
         // spdlog::info("{}: data", target_name);
         auto *d     = static_cast<construction_task *>(task.data());
         auto result = has_data_dependency_changed(target_name, project.previous_summary, project.project_summary);
