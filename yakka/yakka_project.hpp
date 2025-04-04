@@ -24,36 +24,6 @@ namespace fs = std::filesystem;
 namespace yakka {
 const std::string default_output_directory = "output/";
 
-struct task_group {
-  std::string name;
-  int total_count;
-  std::atomic<int> current_count;
-  size_t ui_id;
-  int last_progress_update;
-
-  task_group(const std::string name) : name(name)
-  {
-    total_count          = 0;
-    current_count        = 0;
-    ui_id                = 0;
-    last_progress_update = 0;
-  }
-};
-
-struct construction_task {
-  std::shared_ptr<blueprint_match> match;
-  fs::file_time_type last_modified;
-  std::size_t hash_value;
-  tf::Task task;
-  std::shared_ptr<task_group> group;
-  // construction_task_state state;
-  // std::future<std::pair<std::string, int>> thread_result;
-
-  construction_task() : match(nullptr), last_modified(fs::file_time_type::min())
-  {
-  }
-};
-
 class project {
 public:
   enum class state {
@@ -100,7 +70,7 @@ public:
   void process_construction(indicators::ProgressBar &bar);
   void save_summary();
   void save_blueprints();
-  void create_tasks(const std::string target_name, tf::Task &parent);
+  // void create_tasks(const std::string target_name, tf::Task &parent);
 
   void validate_schema();
 
@@ -149,14 +119,14 @@ public:
   // Blueprint evaluation
   inja::Environment inja_environment;
   //std::multimap<std::string, std::shared_ptr<blueprint_match> > target_database;
-  std::multimap<std::string, construction_task> todo_list;
+  // std::multimap<std::string, construction_task> todo_list;
   // int work_task_count;
-  std::map<std::string, std::shared_ptr<task_group>> todo_task_groups;
+  // std::map<std::string, std::shared_ptr<task_group>> todo_task_groups;
 
-  tf::Taskflow taskflow;
-  std::atomic<bool> abort_build;
+  // tf::Taskflow taskflow;
+  // std::atomic<bool> abort_build;
 
-  std::function<void(std::shared_ptr<task_group> group)> task_complete_handler;
+  // std::function<void(std::shared_ptr<task_group> group)> task_complete_handler;
 
   // SLC specific
   nlohmann::json template_contributions;
@@ -174,6 +144,4 @@ private:
   void init_project();
 };
 
-//std::string try_render(inja::Environment& env, const std::string& input, const nlohmann::json& data, std::shared_ptr<spdlog::logger> log);
-std::pair<std::string, int> run_command(const std::string target, construction_task *task, project *project);
 } /* namespace yakka */

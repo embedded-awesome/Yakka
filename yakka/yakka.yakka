@@ -10,6 +10,7 @@ sources:
   - blueprint_database.cpp
   - blueprint_commands.cpp
   - utilities.cpp
+  - task_engine.cpp
 
 includes:
   global:

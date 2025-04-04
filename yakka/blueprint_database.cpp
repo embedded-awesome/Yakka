@@ -16,7 +16,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
     auto match = std::make_shared<blueprint_match>();
 
     // Check if rule is a regex, otherwise do a string comparison
-    if (blueprint.second->regex.empty() == false) {
+    if (blueprint.second->regex.has_value()) {
       std::smatch s;
       if (!std::regex_match(target, s, std::regex{ blueprint.first }))
         continue;
@@ -166,7 +166,7 @@ void blueprint_database::save(const fs::path filename)
   for (const auto &bp: blueprints) {
     nlohmann::json blueprint;
     blueprint["target"]      = bp.second->target;
-    blueprint["regex"]       = bp.second->regex;
+    blueprint["regex"]       = bp.second->regex.value_or("");
     blueprint["parent_path"] = bp.second->parent_path;
 
     nlohmann::json dependencies = nlohmann::json::array();

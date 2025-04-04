@@ -14,7 +14,7 @@ struct blueprint {
     std::string name;
   };
   std::string target;
-  std::string regex;
+  std::optional<std::string> regex;
   std::vector<std::string> requirements;
   std::vector<dependency> dependencies; // Unprocessed dependencies. Raw values as found in the YAML.
   nlohmann::json process;

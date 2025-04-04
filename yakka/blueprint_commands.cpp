@@ -1,12 +1,13 @@
 #include "blueprint_commands.hpp"
 #include "utilities.hpp"
 #include "spdlog/spdlog.h"
+#include "yakka.hpp"
 #include <regex>
 #include <charconv>
 
 namespace yakka {
 
-blueprint_return echo_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return echo_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   if (!command.is_null())
     captured_output = try_render(inja_env, command.get<std::string>(), generated_json);
@@ -16,7 +17,7 @@ blueprint_return echo_command(std::string target, const nlohmann::json &command,
 }
 
 // blueprint_commands["execute"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return execute_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return execute_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   if (command.is_null())
     return { "", -1 };
@@ -40,7 +41,7 @@ blueprint_return execute_command(std::string target, const nlohmann::json &comma
 };
 
 // blueprint_commands["shell"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return shell_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return shell_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   if (command.is_null())
     return { "", -1 };
@@ -72,7 +73,7 @@ blueprint_return shell_command(std::string target, const nlohmann::json &command
 // };
 
 // blueprint_commands["regex"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return regex_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return regex_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   assert(command.contains("search"));
   std::regex regex_search(command["search"].get<std::string>());
@@ -165,7 +166,7 @@ blueprint_return regex_command(std::string target, const nlohmann::json &command
 };
 
 // blueprint_commands["template"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return template_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return template_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   try {
     std::string template_string;
@@ -212,13 +213,13 @@ blueprint_return template_command(std::string target, const nlohmann::json &comm
 
 // Backwards compatibility with old 'inja' command
 // blueprint_commands["inja"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return inja_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return inja_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   return template_command(target, command, captured_output, generated_json, inja_env);
 };
 
 // blueprint_commands["save"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return save_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return save_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   std::string save_filename;
 
@@ -248,7 +249,7 @@ blueprint_return save_command(std::string target, const nlohmann::json &command,
 };
 
 // blueprint_commands["create_directory"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return create_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return create_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   if (!command.is_null()) {
     std::string filename = "";
@@ -268,7 +269,7 @@ blueprint_return create_command(std::string target, const nlohmann::json &comman
 };
 
 // blueprint_commands["verify"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return verify_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return verify_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   std::string filename = command.get<std::string>();
   filename             = try_render(inja_env, filename, generated_json);
@@ -282,7 +283,7 @@ blueprint_return verify_command(std::string target, const nlohmann::json &comman
 };
 
 // blueprint_commands["rm"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return rm_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return rm_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   std::string filename = command.get<std::string>();
   filename             = try_render(inja_env, filename, generated_json);
@@ -305,7 +306,7 @@ blueprint_return rm_command(std::string target, const nlohmann::json &command, s
 };
 
 // blueprint_commands["rmdir"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return rmdir_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return rmdir_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   std::string path = command.get<std::string>();
   path             = try_render(inja_env, path, generated_json);
@@ -319,7 +320,7 @@ blueprint_return rmdir_command(std::string target, const nlohmann::json &command
 };
 
 // blueprint_commands["pack"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return pack_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return pack_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   std::vector<std::byte> data_output;
 
@@ -390,7 +391,7 @@ blueprint_return pack_command(std::string target, const nlohmann::json &command,
 };
 
 // blueprint_commands["copy"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return copy_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return copy_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   std::string destination;
   nlohmann::json source;
@@ -458,7 +459,7 @@ blueprint_return copy_command(std::string target, const nlohmann::json &command,
 };
 
 // blueprint_commands["cat"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return cat_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return cat_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   std::string filename = try_render(inja_env, command.get<std::string>(), generated_json);
   std::ifstream datafile;
@@ -478,20 +479,20 @@ blueprint_return cat_command(std::string target, const nlohmann::json &command, 
 // };
 
 // blueprint_commands["as_json"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return as_json_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return as_json_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   const auto temp_json = nlohmann::json::parse(captured_output);
   return { temp_json.dump(2), 0 };
 };
 
 // blueprint_commands["as_yaml"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return as_yaml_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return as_yaml_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   const auto temp_yaml = YAML::Load(captured_output);
   return { YAML::Dump(temp_yaml), 0 };
 };
 // blueprint_commands["diff"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-blueprint_return diff_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
+process_return diff_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   if (!command.is_object()) {
     spdlog::error("'diff' command invalid");

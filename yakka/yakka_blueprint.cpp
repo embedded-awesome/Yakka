@@ -43,8 +43,8 @@ nlohmann::json blueprint::as_json() const
   nlohmann::json j;
   j["target"] = target;
 
-  if (!regex.empty())
-    j["regex"] = regex;
+  if (!regex.has_value())
+    j["regex"] = regex.value();
 
   if (!requirements.empty())
     j["requires"] = requirements;
