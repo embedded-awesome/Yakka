@@ -140,7 +140,13 @@ public:
     return the_validator;
   }
 
-  enum merge_strategy { DEFAULT, MAX, MIN, SORT, UNIQUE };
+  enum merge_strategy {
+    DEFAULT,
+    MAX,
+    MIN,
+    SORT,
+    UNIQUE
+  };
 
 private:
   schema_validator() : yakka_validator(nullptr, nlohmann::json_schema::default_string_format_check), slcc_validator(nullptr, nlohmann::json_schema::default_string_format_check)
