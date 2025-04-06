@@ -3,6 +3,8 @@
 #include "spdlog.h"
 #include "slcc_schema.hpp"
 
+#define STRINGIFY(x) R"(#x)"
+
 namespace yakka {
 
 class schema_validator {
