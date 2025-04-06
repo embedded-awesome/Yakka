@@ -3,6 +3,7 @@
 #include "subprocess.hpp"
 #include "spdlog/spdlog.h"
 #include "glob/glob.h"
+#include "yakka_schema.hpp"
 #include <concepts>
 #include <string_view>
 #include <expected>
@@ -250,7 +251,10 @@ std::vector<std::string> parse_gcc_dependency_file(const std::string &filename)
   return dependencies;
 }
 
-void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node)
+/**
+ * @param path  Path relative to Yakka component schema
+ */
+void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node)
 {
   switch (node.type()) {
     case nlohmann::detail::value_t::object:
@@ -263,7 +267,8 @@ void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node)
         // Check if the key is already in merge_target
         auto it2 = merge_target.find(it.key());
         if (it2 != merge_target.end()) {
-          json_node_merge(it2.value(), it.value());
+            auto merge_path = path / nlohmann::json::json_pointer(it.key());
+            json_node_merge(merge_path, it2.value(), it.value());
           continue;
         } else {
           merge_target[it.key()] = it.value();
@@ -301,6 +306,15 @@ void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node)
           break;
       }
       break;
+  }
+
+  // Apply addition merge strategy
+  // Check if there is an additional stategy, if not return
+  if (auto schema = schema_validator::get_schema(path)) {
+    spdlog::error("Found schema");
+  } else {
+    spdlog::error("No schema found for path {}", path.to_string());
+    return;
   }
 }
 
