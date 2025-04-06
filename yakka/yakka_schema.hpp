@@ -134,6 +134,14 @@ public:
     return the_validator;
   }
 
+  enum merge_strategy {
+    DEFAULT,
+    MAX,
+    MIN,
+    SORT,
+    UNIQUE
+  };
+
 private:
   schema_validator() : yakka_validator(nullptr, nlohmann::json_schema::default_string_format_check), slcc_validator(nullptr, nlohmann::json_schema::default_string_format_check)
   {
@@ -162,7 +170,17 @@ public:
       return true;
     }
   }
+
+  static std::optional<schema_validator::merge_strategy> get_schema(const nlohmann::json::json_pointer& path)
+  {
+    const auto &yakka_schema = schema_validator::get().yakka_schema;
+    if (yakka_schema.contains(path)) {
+      return yakka_schema[path];
+    } else {
+      return {};
+    }
+  }
 };
 
-schema_validator yakka_validator();
+// schema_validator yakka_validator();
 } // namespace yakka

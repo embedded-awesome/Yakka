@@ -18,7 +18,7 @@ using command_list_t   = std::unordered_set<std::string>;
 std::pair<std::string, int> exec(const std::string &command_text, const std::string &arg_text);
 int exec(const std::string &command_text, const std::string &arg_text, std::function<void(std::string &)> function);
 bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2);
-void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node);
+void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node);
 YAML::Node yaml_path(const YAML::Node &node, std::string path);
 nlohmann::json json_path(const nlohmann::json &node, std::string path);
 nlohmann::json::json_pointer json_pointer(std::string path);
