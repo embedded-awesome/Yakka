@@ -2,6 +2,7 @@
 #include <nlohmann/json-schema.hpp>
 #include "spdlog.h"
 #include "slcc_schema.hpp"
+#include <ranges>
 
 namespace yakka {
 
@@ -26,6 +27,7 @@ class schema_validator {
       properties:
         features:
           type: [array, null]
+          merge: concatenate
           description: Collection of features
           uniqueItems: true
           items:
@@ -58,7 +60,7 @@ class schema_validator {
       type: object
       description: Blueprints
       propertyNames:
-        pattern: "^[A-Za-z_.{][A-Za-z0-9.{}/\\\\_]*$"
+        pattern: "^[A-Za-z_.{][A-Za-z0-9.{}/\\\\_-]*$"
       patternProperties:
         '.*':
           type: object
@@ -173,12 +175,17 @@ public:
 
   static std::optional<schema_validator::merge_strategy> get_schema(const nlohmann::json::json_pointer& path)
   {
-    const auto &yakka_schema = schema_validator::get().yakka_schema;
-    if (yakka_schema.contains(path)) {
-      return yakka_schema[path];
-    } else {
-      return {};
+    std::string path_str = path.to_string();
+    auto yakka_schema = schema_validator::get().yakka_schema;
+    for (const auto &part_range : std::views::split(path_str, '/')) {
+        std::string part(part_range.begin(), part_range.end());
+        if (yakka_schema["properties"].contains(part)) {
+            yakka_schema = yakka_schema["properties"][part];
+        } else {
+            return std::nullopt;
+        }
     }
+    return std::nullopt;
   }
 };
 
