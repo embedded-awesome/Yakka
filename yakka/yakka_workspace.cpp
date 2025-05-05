@@ -78,9 +78,8 @@ std::expected<void, std::error_code> workspace::init(const fs::path &workspace_p
     projects = nlohmann::json::parse(std::ifstream(workspace_path / "projects.json"));
   }
 
-  configuration["host_os"]              = host_os_string;
-  configuration["executable_extension"] = executable_extension;
-  configuration_json                    = configuration.as<nlohmann::json>();
+  summary["configuration"]["host_os"]              = host_os_string;
+  summary["configuration"]["executable_extension"] = executable_extension;
 
   return {};
 }
@@ -211,7 +210,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
     if (!fs::exists(config_file_path))
       return {};
 
-    configuration = YAML::LoadFile(config_file_path.string());
+    const auto configuration = YAML::LoadFile(config_file_path.string());
 
     if (configuration["path"]) {
       std::string path;
@@ -219,6 +218,8 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
         path += std::format("{}{}", p.as<std::string>(), host_os_path_seperator);
       }
       path += std::getenv("PATH");
+
+      summary["configuration"]["path"] = path;
 
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
       _putenv_s("PATH", path.c_str());
@@ -240,11 +241,13 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
           path = homepath + path.substr(1);
         }
         packages.push_back(path);
+        summary["configuration"]["packages"].push_back(path);
       }
     }
 
     if (configuration["home"]) {
-      yakka_shared_home = fs::path(configuration["home"].Scalar());
+      yakka_shared_home                = fs::path(configuration["home"].Scalar());
+      summary["configuration"]["home"] = yakka_shared_home.string();
     }
 
     return {};
@@ -257,9 +260,9 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
 // Modern implementation of component fetching
 std::future<fs::path> workspace::fetch_component(std::string_view name, const YAML::Node &node, std::function<void(std::string_view, size_t)> progress_handler)
 {
-  const auto url = try_render(inja_environment, node["packages"]["default"]["url"].as<std::string>(), configuration_json);
+  const auto url = try_render(inja_environment, node["packages"]["default"]["url"].as<std::string>(), summary);
 
-  const auto branch = try_render(inja_environment, node["packages"]["default"]["branch"].as<std::string>(), configuration_json);
+  const auto branch = try_render(inja_environment, node["packages"]["default"]["branch"].as<std::string>(), summary);
 
   const bool shared_components_write_access = (fs::status(shared_components_path).permissions() & fs::perms::owner_write) != fs::perms::none;
 

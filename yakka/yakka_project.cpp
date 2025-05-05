@@ -11,6 +11,8 @@
 #include <string>
 #include <charconv>
 
+using namespace std;
+
 namespace yakka {
 using namespace std::chrono_literals;
 
@@ -102,7 +104,7 @@ void project::init_project()
 void project::process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node)
 {
   // Merge the feature values into the parent component
-  json_node_merge("/"_json_pointer, component->json, child_node);
+  json_node_merge(""_json_pointer, component->json, child_node);
 
   // Process required components
   if (child_node.contains("/requires/components"_json_pointer)) {
@@ -184,6 +186,8 @@ void project::update_summary()
 {
   // Check if any component files have been modified
   for (const auto &[name, value]: project_summary["components"].items()) {
+    if (value.is_null())
+      continue;
     if (!value.contains("yakka_file")) {
       spdlog::error("Project summary for component '{}' is missing 'yakka_file' entry", name);
       project_summary["components"].erase(name);
@@ -599,11 +603,9 @@ void project::evaluate_choices()
 void project::generate_project_summary()
 {
   // Add standard information into the project summary
-  project_summary["project_name"]                          = project_name;
-  project_summary["project_output"]                        = default_output_directory + project_name;
-  project_summary["configuration"]["host_os"]              = host_os_string;
-  project_summary["configuration"]["executable_extension"] = executable_extension;
-  project_summary["configuration"]["path"]                 = workspace.configuration_json["path"];
+  project_summary["project_name"]   = project_name;
+  project_summary["project_output"] = default_output_directory + project_name;
+  project_summary["configuration"]  = workspace.summary["configuration"];
 
   if (!project_summary.contains("tools"))
     project_summary["tools"] = nlohmann::json::object();

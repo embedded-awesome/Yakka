@@ -267,7 +267,7 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
         // Check if the key is already in merge_target
         auto it2 = merge_target.find(it.key());
         if (it2 != merge_target.end()) {
-            auto merge_path = path / nlohmann::json::json_pointer(it.key());
+            auto merge_path = path / it.key();
             json_node_merge(merge_path, it2.value(), it.value());
           continue;
         } else {
@@ -292,6 +292,8 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
           break;
       }
       break;
+    
+    case nlohmann::detail::value_t::null:
     default:
       switch (merge_target.type()) {
         case nlohmann::detail::value_t::object:
