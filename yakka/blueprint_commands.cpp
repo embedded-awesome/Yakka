@@ -76,7 +76,9 @@ process_return shell_command(std::string target, const nlohmann::json &command, 
 process_return regex_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   assert(command.contains("search"));
-  std::regex regex_search(command["search"].get<std::string>());
+  std::regex regex_search(command["search"].get<std::string>(), std::regex::multiline);
+  std::string prefix = command.contains("prefix") ? try_render(inja_env, command["prefix"].get<std::string>(), generated_json) : "";
+  std::string suffix = command.contains("suffix") ? try_render(inja_env, command["suffix"].get<std::string>(), generated_json) : "";
   if (command.contains("split")) {
     std::istringstream ss(captured_output);
     std::string line;
@@ -132,18 +134,16 @@ process_return regex_command(std::string target, const nlohmann::json &command, 
     }
 
     captured_output.erase();
-
-    if (command.contains("prefix"))
-      captured_output.append(try_render(inja_env, command["prefix"].get<std::string>(), generated_json));
-    captured_output.append(YAML::Dump(yaml));
-    captured_output.append("\n");
-    if (command.contains("suffix"))
-      captured_output.append(try_render(inja_env, command["suffix"].get<std::string>(), generated_json));
+    captured_output = prefix + YAML::Dump(yaml) + "\n" + suffix;
+    // captured_output.append(prefix);
+    // captured_output.append(YAML::Dump(yaml));
+    // captured_output.append("\n");
+    // captured_output.append(suffix);
   } else if (command.contains("replace")) {
-    captured_output = std::regex_replace(captured_output, regex_search, command["replace"].get<std::string>());
+    captured_output = prefix + std::regex_replace(captured_output, regex_search, command["replace"].get<std::string>()) + suffix;
   } else if (command.contains("match")) {
     std::smatch sm;
-    std::string new_output      = command.contains("prefix") ? command["prefix"].get<std::string>() : "";
+    std::string new_output      = prefix;
     inja::Environment local_env = inja_env; // Create copy and override `$()` function
     const auto match_string     = command["match"].get<std::string>();
     local_env.add_callback("reg", 1, [&](const inja::Arguments &args) {
@@ -154,9 +154,7 @@ process_return regex_command(std::string target, const nlohmann::json &command, 
       new_output += try_render(local_env, match_string, generated_json);
       captured_output = sm.suffix();
     }
-    if (command.contains("suffix"))
-      new_output += command["suffix"].get<std::string>();
-    captured_output = new_output;
+    captured_output = new_output + suffix;
     //captured_output = std::regex_replace(captured_output, regex_search, command["match"].get<std::string>(), std::regex_constants::format_no_copy);
   } else {
     spdlog::error("'regex' command does not have enough information");
