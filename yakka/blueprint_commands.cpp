@@ -76,7 +76,11 @@ process_return shell_command(std::string target, const nlohmann::json &command, 
 process_return regex_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env)
 {
   assert(command.contains("search"));
+#if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
+  std::regex regex_search(command["search"].get<std::string>());
+#else
   std::regex regex_search(command["search"].get<std::string>(), std::regex::multiline);
+#endif
   std::string prefix = command.contains("prefix") ? try_render(inja_env, command["prefix"].get<std::string>(), generated_json) : "";
   std::string suffix = command.contains("suffix") ? try_render(inja_env, command["suffix"].get<std::string>(), generated_json) : "";
   if (command.contains("split")) {
