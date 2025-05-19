@@ -382,9 +382,15 @@ class Renderer : public NodeVisitor {
     case Op::ExistsInObject: {
       const auto args = get_arguments<2>(node);
       auto&& name = args[1]->get_ref<const json::string_t&>();
-      if (args[0])
-        make_result(args[0]->find(name) != args[0]->end());
-      else
+      if (args[0]) {
+        if (args[0]->is_object())
+          make_result(args[0]->find(name) != args[0]->end());
+        else if (args[0]->is_array())
+          make_result(std::any_of(args[0]->begin(), args[0]->end(),
+                                  [&](const auto& obj) { return obj.is_string() && obj.get_ref<const json::string_t&>().compare(name) == 0; }));
+        else
+          make_result(false);
+      } else
         make_result(false);
     } break;
     case Op::First: {
@@ -528,7 +534,12 @@ class Renderer : public NodeVisitor {
       make_result(os.str());
     } break;
     case Op::Hex: {
-      make_result(fmt::format("{:x}", get_arguments<1>(node)[0]->get<int>()));
+      const auto args = get_arguments<1>(node);
+      if (args[0] != nullptr) {
+        make_result(fmt::format("{:x}", args[0]->get<int>()));
+      } else {
+        throw_renderer_error("NULL arguments to hex()", node);
+      }
     } break;
     case Op::Capitalize: {
       auto input = get_arguments<1>(node)[0]->get<std::string>();
