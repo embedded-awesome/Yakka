@@ -141,12 +141,20 @@ void component_database::scan_for_components(std::optional<path> search_start_pa
   };
 
   auto entries = fs::recursive_directory_iterator(scan_path) | std::views::filter([](const auto &e) {
-                   return !e.is_directory() && e.path().filename().string().front() != '.'
+                   std::error_code ec;
+                   fs::perms permissions = fs::status(e.path()).permissions();
+                   if ((permissions & fs::perms::owner_read) == fs::perms::none) {
+                     return false;
+                   }
+                   return e.exists(ec) && !e.is_directory() && e.path().filename().string().front() != '.'
                           && (e.path().extension() == yakka::yakka_component_extension || e.path().extension() == yakka::yakka_component_old_extension || e.path().extension() == yakka::slcc_component_extension
                               || e.path().extension() == yakka::slcp_component_extension);
                  });
-
-  std::ranges::for_each(entries, process_entry);
+  try {
+    std::ranges::for_each(entries, process_entry);
+  } catch (const std::filesystem::filesystem_error &e) {
+    spdlog::error("Error scanning for components: {}. See '{}'", e.what(), e.path1().string());
+  }
   has_scanned = true;
 }
 
