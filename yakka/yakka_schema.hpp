@@ -1,4 +1,5 @@
 #include "yaml-cpp/yaml.h"
+#include "yakka_component.hpp"
 #include <nlohmann/json-schema.hpp>
 #include "spdlog.h"
 #include "slcc_schema.hpp"
@@ -34,6 +35,7 @@ class schema_validator {
             type: string
         components:
           type: [array, null]
+          merge: concatenate
           description: Collection of components
           uniqueItems: true
           items:
@@ -136,13 +138,7 @@ public:
     return the_validator;
   }
 
-  enum merge_strategy {
-    DEFAULT,
-    MAX,
-    MIN,
-    SORT,
-    UNIQUE
-  };
+  enum merge_strategy { DEFAULT, MAX, MIN, SORT, UNIQUE };
 
 private:
   schema_validator() : yakka_validator(nullptr, nlohmann::json_schema::default_string_format_check), slcc_validator(nullptr, nlohmann::json_schema::default_string_format_check)
@@ -158,35 +154,8 @@ public:
   schema_validator(schema_validator const &) = delete;
   void operator=(schema_validator const &)   = delete;
 
-  bool validate(yakka::component *component)
-  {
-    custom_error_handler err;
-    err.component = component;
-    if (component->type == component::YAKKA_FILE)
-      auto patch = yakka_validator.validate(component->json, err);
-    else if (component->type == component::SLCC_FILE)
-      auto patch = slcc_validator.validate(component->json, err);
-    if (err) {
-      return false;
-    } else {
-      return true;
-    }
-  }
-
-  static std::optional<schema_validator::merge_strategy> get_schema(const nlohmann::json::json_pointer& path)
-  {
-    std::string path_str = path.to_string();
-    auto yakka_schema = schema_validator::get().yakka_schema;
-    for (const auto &part_range : std::views::split(path_str, '/')) {
-        std::string part(part_range.begin(), part_range.end());
-        if (yakka_schema["properties"].contains(part)) {
-            yakka_schema = yakka_schema["properties"][part];
-        } else {
-            return std::nullopt;
-        }
-    }
-    return std::nullopt;
-  }
+  bool validate(yakka::component *component);
+  static std::optional<schema_validator::merge_strategy> get_schema(const nlohmann::json::json_pointer &path);
 };
 
 // schema_validator yakka_validator();

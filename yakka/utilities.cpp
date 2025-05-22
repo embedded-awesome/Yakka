@@ -267,8 +267,8 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
         // Check if the key is already in merge_target
         auto it2 = merge_target.find(it.key());
         if (it2 != merge_target.end()) {
-            auto merge_path = path / it.key();
-            json_node_merge(merge_path, it2.value(), it.value());
+          auto merge_path = path / it.key();
+          json_node_merge(merge_path, it2.value(), it.value());
           continue;
         } else {
           merge_target[it.key()] = it.value();
@@ -292,7 +292,7 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
           break;
       }
       break;
-    
+
     case nlohmann::detail::value_t::null:
     default:
       switch (merge_target.type()) {
@@ -312,12 +312,11 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
 
   // Apply addition merge strategy
   // Check if there is an additional stategy, if not return
-  if (auto schema = schema_validator::get_schema(path)) {
-    spdlog::error("Found schema");
-  } else {
-    spdlog::error("No schema found for path {}", path.to_string());
-    return;
-  }
+  // if (auto schema = schema_validator::get_schema(path)) {
+  //   spdlog::error("Found schema");
+  // } else {
+  //   spdlog::error("No schema found for path {}", path.to_string());
+  // }
 }
 
 std::string component_dotname_to_id(const std::string dotname)

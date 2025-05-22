@@ -11,6 +11,7 @@ sources:
   - blueprint_commands.cpp
   - utilities.cpp
   - task_engine.cpp
+  - yakka_schema.cpp
 
 includes:
   global:
