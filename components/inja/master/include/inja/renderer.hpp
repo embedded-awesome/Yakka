@@ -387,7 +387,7 @@ class Renderer : public NodeVisitor {
           make_result(args[0]->find(name) != args[0]->end());
         else if (args[0]->is_array())
           make_result(std::any_of(args[0]->begin(), args[0]->end(),
-                                  [&](const auto& obj) { return obj.is_string() && obj.get_ref<const json::string_t&>().compare(name) == 0; }));
+                                  [&](const auto& obj) { return obj.is_string() && obj.template get_ref<const json::string_t&>().compare(name) == 0; }));
         else
           make_result(false);
       } else
