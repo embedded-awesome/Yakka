@@ -3,6 +3,7 @@ name: xcode toolchain
 flags:
   c:
     global:
+      - --target=arm64-apple-darwin
       - -Os
       - -MD
       - -ffunction-sections
@@ -10,6 +11,7 @@ flags:
 
   cpp:
     global:
+      - --target=arm64-apple-darwin
       - -O3
       - -std=c++2b
       - -MD
@@ -19,7 +21,8 @@ flags:
       - -g
 
   ld:
-    global:
+    global: 
+      - --target=arm64-apple-darwin
       - -O3
       - -lpthread
       - -dead_strip
