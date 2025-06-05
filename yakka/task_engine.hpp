@@ -66,7 +66,7 @@ public:
   tf::Taskflow taskflow;
 
   task_complete_type task_complete_handler;
-  std::multimap<std::string, construction_task> todo_list;
+  std::multimap<std::string, std::shared_ptr<construction_task>> todo_list;
   std::map<std::string, std::shared_ptr<task_group>> todo_task_groups;
 };
 } // namespace yakka

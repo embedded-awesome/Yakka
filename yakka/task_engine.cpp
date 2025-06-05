@@ -29,7 +29,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
   if (existing_todo.first != existing_todo.second) {
     // Add parent to the dependency graph
     for (auto i = existing_todo.first; i != existing_todo.second; ++i)
-      i->second.task.precede(parent);
+      i->second->task.precede(parent);
 
     // Nothing else to do
     return;
@@ -41,22 +41,23 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
   // If there is no targets then it must be a leaf node (source file, data dependency, etc)
   if (targets.first == targets.second) {
     //spdlog::info("{}: leaf node", target_name);
-    auto new_todo = todo_list.insert(std::make_pair(target_name, construction_task()));
-    auto task     = taskflow.placeholder();
+    auto construct_task = std::make_shared<construction_task>();
+    todo_list.insert(std::make_pair(target_name, construct_task));
+    construct_task->task     = taskflow.placeholder();
 
     // Check if target is a data dependency
     if (target_name.front() == data_dependency_identifier) {
-      task.data(&new_todo->second).work([=]() {
+      construct_task->task.work([&, construct_task, target_name]() {
         // spdlog::info("{}: data", target_name);
-        auto *d     = static_cast<construction_task *>(task.data());
+        // auto d     = static_cast<std::shared_ptr<construction_task>>(task.data());
         auto result = has_data_dependency_changed(target_name, project.previous_summary, project.project_summary);
         if (result) {
-          d->last_modified = *result ? fs::file_time_type::max() : fs::file_time_type::min();
+          construct_task->last_modified = *result ? fs::file_time_type::max() : fs::file_time_type::min();
         } else {
           spdlog::error("Data dependency '{}' error: {}", target_name, result.error());
           return;
         }
-        if (d->last_modified > start_time)
+        if (construct_task->last_modified > start_time)
           spdlog::info("{} has been updated", target_name);
         return;
       });
@@ -64,82 +65,85 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
     // Check if target name matches an existing file in filesystem
     else if (fs::exists(target_name)) {
       // Create a new task to retrieve the file timestamp
-      task.data(&new_todo->second).work([=]() {
-        auto *d          = static_cast<construction_task *>(task.data());
-        d->last_modified = fs::last_write_time(target_name);
+      construct_task->task.work([construct_task, target_name]() {
+        // auto d     = static_cast<std::shared_ptr<construction_task>>(task.data());
+        construct_task->last_modified = fs::last_write_time(target_name);
         //spdlog::info("{}: timestamp {}", target_name, (uint)d->last_modified.time_since_epoch().count());
         return;
       });
     } else {
       spdlog::info("Target {} has no action", target_name);
     }
-    new_todo->second.task = task;
-    new_todo->second.task.precede(parent);
+    construct_task->task.precede(parent);
+    // new_todo->second.task = task;
     return;
   }
 
   for (auto i = targets.first; i != targets.second; ++i) {
     // spdlog::info("{}: Not a leaf node", target_name);
     // ++work_task_count;
-    auto new_todo          = todo_list.insert(std::make_pair(target_name, construction_task()));
-    new_todo->second.match = i->second;
+    auto construct_task = std::make_shared<construction_task>();
+    todo_list.insert(std::make_pair(target_name, construct_task));
+    construct_task->match = i->second;
+    
     if (i->second->blueprint->task_group.empty()) {
-      new_todo->second.group = todo_task_groups["Processing"];
+      construct_task->group = todo_task_groups["Processing"];
     } else {
       if (todo_task_groups.contains(i->second->blueprint->task_group))
-        new_todo->second.group = todo_task_groups[i->second->blueprint->task_group];
+        construct_task->group = todo_task_groups[i->second->blueprint->task_group];
       else {
-        new_todo->second.group                             = std::make_shared<yakka::task_group>(i->second->blueprint->task_group);
-        todo_task_groups[i->second->blueprint->task_group] = new_todo->second.group;
+        construct_task->group                             = std::make_shared<yakka::task_group>(i->second->blueprint->task_group);
+        todo_task_groups[i->second->blueprint->task_group] = construct_task->group;
       }
     }
-    ++new_todo->second.group->total_count;
+    ++construct_task->group->total_count;
 
-    auto task = taskflow.placeholder();
-    task.data(&new_todo->second).work([=, this]() {
+    construct_task->task = taskflow.placeholder();
+    
+    construct_task->task.work([construct_task, target_name, this, i, &project]() {
       if (abort_build)
         return;
       // spdlog::info("{}: process --- {}", target_name, task.hash_value());
-      auto *d = static_cast<construction_task *>(task.data());
-      if (d->last_modified != fs::file_time_type::min()) {
+      // auto d     = static_cast<std::shared_ptr<construction_task>>(task.data());
+      if (construct_task->last_modified != fs::file_time_type::min()) {
         // I don't think this event happens. This check can probably be removed
         spdlog::info("{} already done", target_name);
         return;
       }
       if (fs::exists(target_name)) {
-        d->last_modified = fs::last_write_time(target_name);
+        construct_task->last_modified = fs::last_write_time(target_name);
         // spdlog::info("{}: timestamp {}", target_name, (uint)d->last_modified.time_since_epoch().count());
       }
-      if (d->match) {
+      if (construct_task->match) {
         // Check if there are no dependencies
-        if (d->match->dependencies.size() == 0) {
+        if (construct_task->match->dependencies.size() == 0) {
           // If it doesn't exist as a file, run the command
           if (!fs::exists(target_name)) {
-            auto result      = run_command(i->first, d->match, project);
-            d->last_modified = fs::file_time_type::clock::now();
+            auto result      = run_command(target_name, construct_task->match, project);
+            construct_task->last_modified = fs::file_time_type::clock::now();
             if (result.second != 0) {
               spdlog::info("Aborting: {} returned {}", target_name, result.second);
               abort_build = true;
               return;
             }
           }
-        } else if (!d->match->blueprint->process.is_null()) {
+        } else if (!construct_task->match->blueprint->process.is_null()) {
           auto max_element = todo_list.end();
-          for (auto j: d->match->dependencies) {
+          for (auto j: construct_task->match->dependencies) {
             auto temp         = todo_list.equal_range(j);
             auto temp_element = std::max_element(temp.first, temp.second, [](auto const &i, auto const &j) {
-              return i.second.last_modified < j.second.last_modified;
+              return i.second->last_modified < j.second->last_modified;
             });
             //spdlog::info("{}: Check max element {}: {} vs {}", target_name, temp_element->first, (int64_t)temp_element->second.last_modified.time_since_epoch().count(), (int64_t)max_element->second.last_modified.time_since_epoch().count());
-            if (max_element == todo_list.end() || temp_element->second.last_modified > max_element->second.last_modified) {
+            if (max_element == todo_list.end() || temp_element->second->last_modified > max_element->second->last_modified) {
               max_element = temp_element;
             }
           }
           //spdlog::info("{}: Max element is {}", target_name, max_element->first);
-          if (!fs::exists(target_name) || max_element->second.last_modified.time_since_epoch() > d->last_modified.time_since_epoch()) {
+          if (!fs::exists(target_name) || max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch()) {
             spdlog::info("{}: Updating because of {}", target_name, max_element->first);
-            auto [output, retcode] = run_command(i->first, d->match, project);
-            d->last_modified       = fs::file_time_type::clock::now();
+            auto [output, retcode] = run_command(i->first, construct_task->match, project);
+            construct_task->last_modified       = fs::file_time_type::clock::now();
             if (retcode < 0) {
               spdlog::info("Aborting: {} returned {}", target_name, retcode);
               abort_build = true;
@@ -155,19 +159,19 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
         task_complete_handler(d->group);
       }
 #else
-      ++d->group->current_count;
+      ++construct_task->group->current_count;
 #endif
 
       return;
     });
 
-    new_todo->second.task = task;
-    new_todo->second.task.precede(parent);
+    construct_task->task.precede(parent);
+    // new_todo->second.task = task;
 
     // For each dependency described in blueprint, retrieve or create task, add relationship, and add item to todo list
     if (i->second)
       for (auto &dep_target: i->second->dependencies)
-        create_tasks(dep_target.starts_with("./") ? dep_target.substr(dep_target.find_first_not_of("/", 2)) : dep_target, new_todo->second.task, project);
+        create_tasks(dep_target.starts_with("./") ? dep_target.substr(dep_target.find_first_not_of("/", 2)) : dep_target, construct_task->task, project);
     // else
     //     spdlog::info("{} does not have blueprint match", i->first);
   }
