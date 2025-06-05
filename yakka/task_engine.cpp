@@ -368,8 +368,14 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
     // execution_progress = 100;
   });
 
+  auto t1 = std::chrono::high_resolution_clock::now();
+
   for (auto &i: project.commands)
     create_tasks(i, finish, project);
+
+  auto t2 = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  spdlog::info("{}ms to create tasks", duration);
 
   ui->init(*this);
 

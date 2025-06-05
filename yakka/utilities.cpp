@@ -410,8 +410,13 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
   });
   inja_env.add_callback("load_json", 1, [](const inja::Arguments &args) {
-    std::ifstream file_stream(args[0]->get<std::string>());
-    return nlohmann::json::parse(file_stream);
+    const auto file_path = args[0]->get<std::string>();
+    if (std::filesystem::exists(file_path)) {
+      std::ifstream file_stream(file_path);
+      return nlohmann::json::parse(file_stream);
+    } else {
+      return nlohmann::json();
+    }
   });
   inja_env.add_callback("quote", 1, [](const inja::Arguments &args) {
     std::stringstream ss;
