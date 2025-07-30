@@ -43,7 +43,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
     //spdlog::info("{}: leaf node", target_name);
     auto construct_task = std::make_shared<construction_task>();
     todo_list.insert(std::make_pair(target_name, construct_task));
-    construct_task->task     = taskflow.placeholder();
+    construct_task->task     = taskflow.placeholder().name(target_name);
 
     // Check if target is a data dependency
     if (target_name.front() == data_dependency_identifier) {
@@ -98,7 +98,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
     }
     ++construct_task->group->total_count;
 
-    construct_task->task = taskflow.placeholder();
+    construct_task->task = taskflow.placeholder().name(target_name);
     
     construct_task->task.work([construct_task, target_name, this, i, &project]() {
       if (abort_build)
@@ -119,10 +119,16 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
         if (construct_task->match->dependencies.size() == 0) {
           // If it doesn't exist as a file, run the command
           if (!fs::exists(target_name)) {
-            auto result      = run_command(target_name, construct_task->match, project);
-            construct_task->last_modified = fs::file_time_type::clock::now();
-            if (result.second != 0) {
-              spdlog::info("Aborting: {} returned {}", target_name, result.second);
+            try {
+              auto result      = run_command(target_name, construct_task->match, project);
+              construct_task->last_modified = fs::file_time_type::clock::now();
+              if (result.second != 0) {
+                spdlog::info("Aborting: {} returned {}", target_name, result.second);
+                abort_build = true;
+                return;
+              }
+            } catch (const std::exception &e) {
+              spdlog::error("Error running command for {}: {}", target_name, e.what());
               abort_build = true;
               return;
             }
@@ -142,10 +148,16 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
           //spdlog::info("{}: Max element is {}", target_name, max_element->first);
           if (!fs::exists(target_name) || max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch()) {
             spdlog::info("{}: Updating because of {}", target_name, max_element->first);
-            auto [output, retcode] = run_command(i->first, construct_task->match, project);
-            construct_task->last_modified       = fs::file_time_type::clock::now();
-            if (retcode < 0) {
-              spdlog::info("Aborting: {} returned {}", target_name, retcode);
+            try {
+              auto [output, retcode] = run_command(i->first, construct_task->match, project);
+              construct_task->last_modified       = fs::file_time_type::clock::now();
+              if (retcode < 0) {
+                spdlog::info("Aborting: {} returned {}", target_name, retcode);
+                abort_build = true;
+                return;
+              }
+            } catch (const std::exception &e) {
+              spdlog::error("Error running command for {}: {}", target_name, e.what());
               abort_build = true;
               return;
             }
@@ -377,6 +389,8 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
   for (auto &i: project.commands)
     create_tasks(i, finish, project);
 
+  // taskflow.dump(std::cout);
+  
   auto t2 = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to create tasks", duration);

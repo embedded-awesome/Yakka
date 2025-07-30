@@ -394,7 +394,8 @@ void add_common_template_commands(inja::Environment &inja_env)
     return fs::exists(args[0]->get<std::string>());
   });
   inja_env.add_callback("hex2dec", 1, [](const inja::Arguments &args) {
-    return std::stoul(args[0]->get<std::string>(), nullptr, 16);
+    std::string hex_string = args[0]->get<std::string>();
+    return std::stoul(hex_string, nullptr, 16);
   });
   inja_env.add_callback("read_file", 1, [](const inja::Arguments &args) {
     auto file = std::ifstream(args[0]->get<std::string>());
