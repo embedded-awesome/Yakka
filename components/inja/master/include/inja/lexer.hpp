@@ -115,6 +115,8 @@ class Lexer {
       return make_token(Token::Kind::Comma);
     case ':':
       return make_token(Token::Kind::Colon);
+    case '|':
+      return make_token(Token::Kind::Pipe);
     case '(':
       return make_token(Token::Kind::LeftParen);
     case ')':
@@ -273,7 +275,7 @@ class Lexer {
   }
 
 public:
-  explicit Lexer(const LexerConfig& config): config(config), state(State::Text), minus_state(MinusState::Number) {}
+  explicit Lexer(const LexerConfig& config): config(config), state(State::Text), minus_state(MinusState::Number), tok_start(0), pos(0) {}
 
   SourceLocation current_position() const {
     return get_source_location(m_in, tok_start);

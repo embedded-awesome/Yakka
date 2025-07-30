@@ -4,29 +4,24 @@
   <a href="https://github.com/pantor/inja/actions">
     <img src="https://github.com/pantor/inja/workflows/CI/badge.svg" alt="CI Status">
   </a>
-
   <a href="https://github.com/pantor/inja/actions">
     <img src="https://github.com/pantor/inja/workflows/Documentation/badge.svg" alt="Documentation Status">
   </a>
-
-  <a href="https://www.codacy.com/manual/pantor/inja?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=pantor/inja&amp;utm_campaign=Badge_Grade">
+  <a href="https://app.codacy.com/gh/pantor/inja/dashboard">
     <img src="https://app.codacy.com/project/badge/Grade/211718f7a36541819d1244c0e2ee6f08"/>
   </a>
-
   <a href="https://github.com/pantor/inja/releases">
     <img src="https://img.shields.io/github/release/pantor/inja.svg" alt="Github Releases">
   </a>
-
   <a href="http://github.com/pantor/inja/issues">
     <img src="https://img.shields.io/github/issues/pantor/inja.svg" alt="Github Issues">
   </a>
-
   <a href="https://raw.githubusercontent.com/pantor/inja/master/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="GitHub License">
   </a>
 </p>
 
-Inja is a template engine for modern C++, loosely inspired by [jinja](http://jinja.pocoo.org) for python. It has an easy and yet powerful template syntax with all variables, loops, conditions, includes, callbacks, and comments you need, nested and combined as you like. Inja uses the wonderful [json](https://github.com/nlohmann/json) library by nlohmann for data input. Most importantly, inja needs only two header files, which is (nearly) as trivial as integration in C++ can get. Of course, everything is tested on all relevant compilers. Here is what it looks like:
+Inja is a template engine for modern C++, loosely inspired by [jinja](http://jinja.pocoo.org) for python. It has an easy and yet powerful template syntax with all variables, loops, conditions, includes, callbacks, and comments you need, nested and combined as you like. Of course, everything is tested in CI on all relevant compilers. Here is what it looks like:
 
 ```.cpp
 json data;
@@ -115,6 +110,7 @@ env.set_expression("{{", "}}"); // Expressions
 env.set_comment("{#", "#}"); // Comments
 env.set_statement("{%", "%}"); // Statements {% %} for many things, see below
 env.set_line_statement("##"); // Line statements ## (just an opener)
+env.set_html_autoescape(true); // Perform HTML escaping on all strings
 ```
 
 ### Variables
@@ -187,7 +183,7 @@ render("{% include \"footer.html\" %}", data);
 If a corresponding template could not be found in the file system, the *include callback* is called:
 ```.cpp
 // The callback takes the current path and the wanted include name and returns a template
-env.set_include_callback([&env](const std::string& path, const std::string& template_name) {
+env.set_include_callback([&env](const std::filesystem::path& path, const std::string& template_name) {
   return env.parse("Hello {{ neighbour }} from " + template_name);
 });
 
@@ -211,9 +207,10 @@ Assignments only set the value within the rendering context; they do not modify 
 
 A few functions are implemented within the inja template syntax. They can be called with
 ```.cpp
-// Upper and lower function, for string cases
+// Upper, lower and capitalize function, for string cases
 render("Hello {{ upper(neighbour) }}!", data); // "Hello PETER!"
 render("Hello {{ lower(neighbour) }}!", data); // "Hello peter!"
+render("Hello {{ capitalize(neighbour) }}!", data); // "Hello Peter!"
 
 // Range function, useful for loops
 render("{% for i in range(4) %}{{ loop.index1 }}{% endfor %}", data); // "1234"
@@ -268,6 +265,16 @@ render("{{ existsIn(time, neighbour) }}", data); // "false"
 render("{{ isString(neighbour) }}", data); // "true"
 render("{{ isArray(guests) }}", data); // "true"
 // Implemented type checks: isArray, isBoolean, isFloat, isInteger, isNumber, isObject, isString,
+```
+
+The Jinja2 pipe call syntax of functions is also supported:
+
+```.cpp
+// Upper neighbour value
+render("Hello {{ neighbour | upper }}!", data); // "Hello PETER!"
+
+// Sort array and join with comma
+render("{{ [\"B\", \"A\", \"C\"] | sort | join(\",\") }}", data); // "A,B,C"
 ```
 
 ### Callbacks
@@ -368,6 +375,13 @@ render("{% if neighbour in guests -%}   I was there{% endif -%}   !", data); // 
 
 Stripping behind a statement or expression also removes any newlines.
 
+### HTML escaping
+
+Templates are frequently used to creat HTML pages. Source data that contains
+characters that have meaning within HTML (like <. >, &) needs to be escaped.
+It is often inconvenient to perform such escaping within the JSON data. With `Environment::set_html_autoescape(true)`, Inja can be configured to
+HTML escape each and every string created.
+
 ### Comments
 
 Comments can be written with the `{# ... #}` syntax.
@@ -384,7 +398,7 @@ Inja uses exceptions to handle ill-formed template input. However, exceptions ca
 
 Inja uses the `string_view` feature of the C++17 STL. Currently, the following compilers are tested:
 
-- GCC 7 - 11 (and possibly later)
+- GCC 8 - 11 (and possibly later)
 - Clang 5 - 12 (and possibly later)
 - Microsoft Visual C++ 2017 15.0 - 2022 (and possibly later)
 
