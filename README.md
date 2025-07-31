@@ -2,14 +2,14 @@
 
 Yakka is a modern, data-focused build tool designed to aid embedded software development.
 
-It recognizes that creating and delivering software is more than just compilation or linking and thus makes it easy to define new processes.
+It recognizes that creating and delivering software is more than just compilation or linking and thus makes it easy to define processes that act on the project data.
 
-Yakka can be utilized as a full build system but also recognizes the value of tooling diversity and thus can integrate as part of an 
-existing build system by only providing required functionality
+Yakka can be utilized as a full build system but also recognizes the value of tooling diversity and can integrate as part of an 
+existing build system by only providing required functionality, or can be used to generate build files for other build systems such as CMake.
 
 ## Why use Yakka
 
-Yakka aims to be descriptive, storing information as data rather than encoding it within a programming language. 
+One of the guiding design principles of Yakka is to be descriptive, storing information as data rather than encoding it within a programming language. 
 This enables an ecosystem of open tooling and allows the use simple tools such as `jq` or `yq` to analyze components or projects.
 
 It uses standard, commonly used technologies; YAML, JSON, template engine (Jinja*), regular expressions.
