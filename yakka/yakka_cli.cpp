@@ -4,6 +4,7 @@
 #include "yakka_project.hpp"
 #include "target_database.hpp"
 #include "utilities.hpp"
+#include "yakka_config.hpp"
 #include "cxxopts.hpp"
 #include "subprocess.hpp"
 #include "spdlog/spdlog.h"
@@ -124,7 +125,7 @@ int main(int argc, char **argv)
                        ("d,data", "Additional data", cxxopts::value<std::string>())
                        ("no-slcc", "Ignore SLC files", cxxopts::value<bool>()->default_value("false"))
                        ("no-yakka", "Ignore Yakka files", cxxopts::value<bool>()->default_value("false"))
-                       ("action", "Select from 'register', 'list', 'update', 'git', 'remove', 'fetch' or a command", cxxopts::value<std::string>());
+                       ("action", "Select from 'register', 'list', 'update', 'git', 'remove', 'fetch', 'serve' or a command", cxxopts::value<std::string>());
   // clang-format on
 
   options.parse_positional({ "action" });
@@ -242,6 +243,11 @@ int main(int argc, char **argv)
 
     // Fetch the components
     download_unknown_components(workspace, project);
+    return 0;
+  } else if (action == "serve") {
+    spdlog::info("Starting configuration server...");
+    bool server_running = false;
+    yakka::start_config_server(workspace, server_running);
     return 0;
   } else if (action.back() != '!') {
     std::cout << "Must provide an action or a command (commands end with !)\n";

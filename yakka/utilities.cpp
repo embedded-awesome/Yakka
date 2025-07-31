@@ -472,6 +472,31 @@ void add_common_template_commands(inja::Environment &inja_env)
                 input.end());
     return input;
   });
+  inja_env.add_callback("filter", 2, [](const inja::Arguments &args) {
+    json output            = nlohmann::json::array();
+    const auto input       = args[0];
+    const auto regex_match = std::regex(args[1]->get<std::string>());
+    std::copy_if(input->begin(), input->end(), std::back_inserter(output), [&](const auto &item) {
+      return std::regex_match(item.template get<std::string>(), regex_match);
+    });
+    return output;
+  });
+  inja_env.add_callback("join", 2, [](const inja::Arguments &args) {
+    const auto input = args[0];
+    if (input->empty() || !input->is_array()) {
+      spdlog::error("join() expects an array as the first argument");
+      return std::string{};
+    }
+    const auto separator = args[1]->get<std::string>();
+    // Add the first element (input already checked to be not empty)
+    auto it = input->begin();
+    std::string output = it->template get<std::string>();
+    // Iterate through the rest of the elements and append them with the separator
+    for (++it; it != input->end(); ++it) {
+      output += separator + it->template get<std::string>();
+    }
+    return output;
+  });
 }
 
 std::pair<std::string, int> download_resource(const std::string url, fs::path destination)
