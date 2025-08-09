@@ -538,6 +538,35 @@ class Renderer : public NodeVisitor {
         throw_renderer_error("NULL arguments to hex()", node);
       }
     } break;
+    case Op::Map: {
+      auto args = get_argument_vector(node);
+      const auto number_of_args = args.size();
+      if (number_of_args < 2) {
+        throw_renderer_error("map() needs at least two arguments", node);
+      }
+      inja::json output;
+      const auto data = args[0];
+      const auto found_function = function_storage.find_function(args[1]->get<std::string>(), number_of_args - 2);
+      if (found_function.operation == FunctionStorage::Operation::None) {
+        throw_renderer_error("map() function '" + args[1]->get<std::string>() + "' not found", node);
+      }
+      // Remove the function name and the data from the arguments
+      args.erase(args.begin());
+      args.erase(args.begin());
+      
+      // Iterate through the data and call the function for each item
+      for (const auto& i: data->items()) {
+        args.emplace(args.begin(), &i.value());
+        const auto result = found_function.callback(args);
+        args.erase(args.begin());
+        if (result.is_null()) {
+          continue;
+        } else {
+          output.push_back(result);
+        }
+      }
+    } break;
+    
     case Op::None:
       break;
     }
