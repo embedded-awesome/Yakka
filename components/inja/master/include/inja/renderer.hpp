@@ -349,7 +349,13 @@ class Renderer : public NodeVisitor {
     case Op::At: {
       const auto args = get_arguments<2>(node);
       if (args[0]->is_object()) {
-        data_eval_stack.push(&args[0]->at(args[1]->get<std::string>()));
+        auto key = args[1]->get<std::string>();
+        if (key[0] == '/') {
+          nlohmann::json::json_pointer ptr(key);
+          data_eval_stack.push(&args[0]->at(ptr));
+        }
+        else
+          data_eval_stack.push(&args[0]->at(args[1]->get<std::string>()));
       } else {
         data_eval_stack.push(&args[0]->at(args[1]->get<int>()));
       }
@@ -546,25 +552,53 @@ class Renderer : public NodeVisitor {
       }
       inja::json output;
       const auto data = args[0];
-      const auto found_function = function_storage.find_function(args[1]->get<std::string>(), number_of_args - 2);
+      const auto function_name = args[1]->get<std::string>();
+      const auto found_function = function_storage.find_function(function_name, number_of_args - 1);
       if (found_function.operation == FunctionStorage::Operation::None) {
         throw_renderer_error("map() function '" + args[1]->get<std::string>() + "' not found", node);
       }
       // Remove the function name and the data from the arguments
+      // Perhaps it's better to create a splice of the arguments vector?
       args.erase(args.begin());
       args.erase(args.begin());
-      
-      // Iterate through the data and call the function for each item
-      for (const auto& i: data->items()) {
-        args.emplace(args.begin(), &i.value());
-        const auto result = found_function.callback(args);
-        args.erase(args.begin());
-        if (result.is_null()) {
-          continue;
-        } else {
-          output.push_back(result);
+
+      if (found_function.operation == FunctionStorage::Operation::Callback) {
+        for (const auto& i: data->items()) {
+          args.emplace(args.begin(), &i.value());
+          const auto result = found_function.callback(args);
+          args.erase(args.begin());
+          if (result.is_null()) {
+            continue;
+          } else {
+            output.push_back(result);
+          }
         }
+      } else {
+        // // Create the FunctionNode to pass to the callback
+        // FunctionNode found_function_node {found_function.operation, node.pos};
+        // found_function_node.number_args = number_of_args - 1;
+        // for (const auto& arg : args) {
+        //   found_function_node.arguments.push_back(arg);
+        //   if (arg == nullptr) {
+        //     throw_renderer_error("NULL argument to map() function", node);
+        //   }
+        // }
+        // found_function_node.arguments = args;
+
+        // // Iterate through the data and call the function for each item
+        // for (const auto& i: data->items()) {
+        //   found_function_node.arguments.emplace(found_function_node.arguments.begin(), &i.value());
+        //   visit(found_function_node);
+        //   found_function_node.arguments.erase(found_function_node.arguments.begin());
+        //   if (result.is_null()) {
+        //     continue;
+        //   } else {
+        //     output.push_back(result);
+        //   }
+        // }
       }
+
+      
     } break;
     
     case Op::None:
