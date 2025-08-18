@@ -32,14 +32,14 @@ class schema_validator {
           description: Collection of features
           uniqueItems: true
           items:
-            type: string
+            type: [string, object]
         components:
           type: [array, null]
           merge: concatenate
           description: Collection of components
           uniqueItems: true
           items:
-            type: string
+            type: [string, object]
 
     supports:
       type: object

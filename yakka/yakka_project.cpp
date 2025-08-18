@@ -120,18 +120,25 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
 
   // Process required features
   if (child_node.contains("/requires/features"_json_pointer)) {
+    const auto node = child_node["requires"]["features"];
     // Add the item/s to the new_features list
-    if (child_node["requires"]["features"].is_string()) {
-      const auto feature = child_node["requires"]["features"].get<std::string>();
+    if (node.is_string()) {
+      const auto feature = node.is_string() ? node.get<std::string>() : node["name"].get<std::string>();
       if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
         slc_required.insert(feature);
       unprocessed_features.insert(feature);
-    } else if (child_node["requires"]["features"].is_array())
-      for (const auto &i: child_node["requires"]["features"]) {
-        const auto feature = i.get<std::string>();
+      // If the feature has recommendations, add them to the feature_recommendations map
+      if (node.is_object() && node.contains("recommends"))
+        feature_recommendations.insert({ feature, node["recommends"] });
+    } else if (node.is_array()) 
+      for (const auto &i: node) {
+        const auto feature = i.is_string() ? i.get<std::string>() : i["name"].get<std::string>();
         if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
           slc_required.insert(feature);
         unprocessed_features.insert(feature);
+        // If the feature has recommendations, add them to the feature_recommendations map
+        if (i.is_object() && i.contains("recommends"))
+          feature_recommendations.insert({ feature, i["recommends"] });
       }
     else
       spdlog::error("Node '{}' has invalid 'requires'", child_node["requires"].get<std::string>());
@@ -145,12 +152,14 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
       if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
         slc_provided.insert(feature);
       unprocessed_features.insert(feature);
+      provided_features.insert(feature);
     } else if (child_node_provides.is_array())
       for (const auto &i: child_node_provides) {
         const auto feature = i.get<std::string>();
         if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
           slc_provided.insert(feature);
         unprocessed_features.insert(feature);
+        provided_features.insert(feature);
       }
   }
 
@@ -236,9 +245,9 @@ bool project::add_component(const std::string &component_name, component_databas
 
   auto [component_path, package_path]             = component_location.value();
   std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
-  if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS)
+  if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
     components.push_back(new_component);
-  else {
+  } else {
     current_state = project::state::PROJECT_HAS_INVALID_COMPONENT;
     return false;
   }
@@ -301,13 +310,23 @@ bool project::add_component(const std::string &component_name, component_databas
 
   // Add all the required features into the unprocessed list
   if (new_component->json.contains("/requires/features"_json_pointer))
-    for (const auto &f: new_component->json["requires"]["features"])
-      unprocessed_features.insert(f.get<std::string>());
+    for (const auto &f: new_component->json["requires"]["features"]) {
+      if (f.is_string())
+        unprocessed_features.insert(f.get<std::string>());
+      else {
+        unprocessed_features.insert(f["name"].get<std::string>());
+        if (f.contains("recommends")) {
+          feature_recommendations.insert({ f["name"].get<std::string>(), f["recommends"] });
+        }
+      }
+    }
 
   // Add all the provided features into the unprocessed list
   if (new_component->json.contains("/provides/features"_json_pointer))
-    for (const auto &f: new_component->json["provides"]["features"])
+    for (const auto &f: new_component->json["provides"]["features"]) {
       unprocessed_features.insert(f.get<std::string>());
+      provided_features.insert(f.get<std::string>());
+    }
 
   // Add all the component choices to the global choice list
   if (new_component->json.contains("choices"))
@@ -367,6 +386,10 @@ bool project::add_feature(const std::string &feature_name)
   // Insert feature and continue if this is not new
   if (required_features.insert(feature_name).second == false)
     return false;
+
+  if (!provided_features.contains(feature_name)) {
+    unprovided_features.insert(feature_name);
+  }
 
   // Process the feature "supports" for each existing component
   for (auto &c: components)
@@ -470,6 +493,30 @@ project::state project::evaluate_dependencies()
       spdlog::info("Start project processing again...");
     }
 
+    // Check if we have finished but we have unprovided features
+    if (unprocessed_components.empty() && unprocessed_features.empty() && unprovided_features.size() != 0) {
+      std::unordered_set<std::string> temp_list = std::move(unprovided_features);
+
+      // Look for any recommendations
+      for (const auto &f: temp_list) {
+        if (feature_recommendations.contains(f)) {
+          const auto &recommendation = feature_recommendations[f];
+          if (recommendation.contains("component")) {
+            const auto &component_name = recommendation["component"].get<std::string>();
+            spdlog::info("Adding component '{}' for '{}'", component_name, f);
+            unprocessed_components.insert(component_name);
+          } else if (recommendation.contains("feature")) {
+            const auto &feature_name = recommendation["feature"].get<std::string>();
+            spdlog::info("Adding feature '{}' for '{}'", feature_name, f);
+            unprocessed_features.insert(feature_name);
+          }
+        } else {
+          spdlog::error("Feature '{}' is not provided by any component", f);
+          unprovided_features.insert(f);
+        }
+      }
+    }
+
     // Check if we have finished but our project is using SLCC files
     if (unprocessed_components.empty() && unprocessed_features.empty() && component_flags != component_database::flag::IGNORE_ALL_SLC) {
       // Find any features that aren't provided
@@ -569,7 +616,7 @@ project::state project::evaluate_dependencies()
   if (unknown_components.size() != 0)
     return project::state::PROJECT_HAS_UNKNOWN_COMPONENTS;
 
-  if (slc_required.size() != 0)
+  if (slc_required.size() != 0 || unprovided_features.size() != 0)
     return project::state::PROJECT_HAS_UNRESOLVED_REQUIREMENTS;
 
   return project::state::PROJECT_VALID;
@@ -708,9 +755,9 @@ void project::generate_target_database()
 }
 
 /**
-     * @brief Save to disk the content of the @ref project_summary to yakka_summary.yaml and yakka_summary.json
-     *
-     */
+ * @brief Save to disk the content of the @ref project_summary to yakka_summary.yaml and yakka_summary.json
+ *
+ */
 void project::save_summary()
 {
   if (!fs::exists(project_summary["project_output"].get<std::string>()))
@@ -755,7 +802,7 @@ void project::validate_schema()
   for (const auto &c: components) {
     if (c->json.contains("schema")) {
       const auto schema_json_pointer = "/properties"_json_pointer;
-      json_node_merge(schema_json_pointer,schema["properties"], c->json["schema"]);
+      json_node_merge(schema_json_pointer, schema["properties"], c->json["schema"]);
     }
   }
 
@@ -777,6 +824,39 @@ void project::validate_schema()
       validator.validate(c->json, err);
     }
   }
+}
+
+/**
+ * @brief Updates the project data by merging all the component data into the project summary.
+ */
+void project::update_project_data()
+{
+  std::unordered_set<std::string> required_data;
+
+  // Gather all the required data
+  for (const auto &c: components)
+    if (c->json.contains("/requires/data"_json_pointer))
+      for (const auto &d: c->json["requires"]["data"]) {
+        required_data.insert(d.get<std::string>());
+      }
+
+  // Merge all the component data into the project summary
+  for (const auto &c: components) {
+    for (const auto &r: required_data) {
+      const auto pointer = nlohmann::json::json_pointer(r);
+      if (!c->json.contains(pointer)) {
+        continue;
+      }
+
+      if (!project_summary["data"].contains(pointer)) {
+        project_summary["data"][pointer] = nlohmann::json::object();
+      }
+
+      json_node_merge(""_json_pointer, project_summary["data"][pointer], c->json[pointer]);
+    }
+  }
+
+  // Apply schema with default values
 }
 
 bool project::is_disqualified_by_unless(const nlohmann::json &node)

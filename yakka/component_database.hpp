@@ -50,8 +50,8 @@ public:
   [[nodiscard]] std::expected<std::string, std::error_code> get_component_id(const path &path) const;
 
   // Return optional for queries that might not find a result
-  [[nodiscard]] std::optional<json> get_feature_provider(std::string_view feature) const;
-  [[nodiscard]] std::optional<json> get_blueprint_provider(std::string_view blueprint) const;
+  [[nodiscard]] std::optional<const json> get_feature_provider(std::string_view feature) const;
+  [[nodiscard]] std::optional<const json> get_blueprint_provider(std::string_view blueprint) const;
 
   // Process external data
   std::expected<void, std::error_code> process_slc_sdk(const path &slcs_path);

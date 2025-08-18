@@ -72,6 +72,7 @@ public:
   void save_blueprints();
 
   void validate_schema();
+  void update_project_data();
 
   // void add_required_component(std::shared_ptr<yakka::component> component);
   // void add_required_feature(const std::string feature, std::shared_ptr<yakka::component> component);
@@ -93,6 +94,9 @@ public:
   std::unordered_map<std::string, std::string> replacements;
   std::unordered_set<std::string> required_components;
   std::unordered_set<std::string> required_features;
+  std::unordered_set<std::string> provided_features;
+  std::unordered_set<std::string> unprovided_features;
+  std::map<std::string, const nlohmann::json> feature_recommendations;
   std::unordered_set<std::string> additional_tools;
   std::unordered_set<std::string> commands;
   std::unordered_set<std::string> unknown_components;

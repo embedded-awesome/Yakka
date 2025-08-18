@@ -267,9 +267,8 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
         // Check if the key is already in merge_target
         auto it2 = merge_target.find(it.key());
         if (it2 != merge_target.end()) {
-          auto merge_path = path / it.key();
-          json_node_merge(merge_path, it2.value(), it.value());
-          continue;
+          // auto merge_path = path / it.key();
+          json_node_merge(""_json_pointer, it2.value(), it.value());
         } else {
           merge_target[it.key()] = it.value();
         }
@@ -414,7 +413,11 @@ void add_common_template_commands(inja::Environment &inja_env)
     const auto file_path = args[0]->get<std::string>();
     if (std::filesystem::exists(file_path)) {
       std::ifstream file_stream(file_path);
-      return nlohmann::json::parse(file_stream);
+      return nlohmann::json::parse(file_stream,
+                                   /* callback */ nullptr,
+                                   /* allow exceptions */ false,
+                                   /* ignore_comments */ true,
+                                   /* ignore_trailing_commas */ true);
     } else {
       return nlohmann::json();
     }
@@ -489,13 +492,32 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     const auto separator = args[1]->get<std::string>();
     // Add the first element (input already checked to be not empty)
-    auto it = input->begin();
+    auto it            = input->begin();
     std::string output = it->template get<std::string>();
     // Iterate through the rest of the elements and append them with the separator
     for (++it; it != input->end(); ++it) {
       output += separator + it->template get<std::string>();
     }
     return output;
+  });
+  inja_env.add_callback("find_json", 2, [](const inja::Arguments &args) {
+    const auto input      = args[0];
+    const auto search_key = args[1]->get<std::string>();
+    json output;
+    find_json_keys(input->get<nlohmann::json>(), search_key, "", output);
+    return output;
+  });
+  inja_env.add_callback("merge", 2, [](const inja::Arguments &args) {
+    auto target     = args[0]->get<nlohmann::json>();
+    const auto data = args[1]->get<nlohmann::json>();
+    target.update(data);
+    return target;
+  });
+  inja_env.add_callback("concatenate", [](const inja::Arguments &args) {
+    std::string aggregate;
+    for (const auto &i: args)
+      aggregate.append(i->get<std::string>());
+    return aggregate;
   });
 }
 
@@ -602,6 +624,26 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string_view da
     return false;
   } catch (const std::exception &e) {
     return std::unexpected{ std::string{ "Failed to determine data dependency: " } + e.what() };
+  }
+}
+
+void find_json_keys(const nlohmann::json &j, const std::string &target_key, const std::string &current_path, nlohmann::json &paths)
+{
+  if (j.is_object()) {
+    for (auto it = j.begin(); it != j.end(); ++it) {
+      std::string new_path = current_path.empty() ? it.key() : current_path + "." + it.key();
+
+      if (it.key() == target_key) {
+        paths.push_back(new_path); // Store full path to the key
+      }
+
+      find_json_keys(it.value(), target_key, new_path, paths);
+    }
+  } else if (j.is_array()) {
+    for (size_t i = 0; i < j.size(); ++i) {
+      std::string new_path = current_path + "[" + std::to_string(i) + "]";
+      find_json_keys(j[i], target_key, new_path, paths);
+    }
   }
 }
 

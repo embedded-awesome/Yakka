@@ -208,11 +208,11 @@ std::expected<std::string, error> component_database::get_component_id(const pat
   return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
 }
 
-std::optional<json> component_database::get_blueprint_provider(std::string_view blueprint) const
+std::optional<const json> component_database::get_blueprint_provider(std::string_view blueprint) const
 {
   const auto blueprint_str = std::string{ blueprint };
   if (database["blueprints"].contains(blueprint_str)) {
-    return database["blueprints"][blueprint_str];
+    return std::optional<const json>(std::in_place, database["blueprints"][blueprint_str]);
   }
 
   return std::nullopt;
@@ -248,11 +248,11 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
   return {};
 }
 
-std::optional<json> component_database::get_feature_provider(std::string_view feature) const
+std::optional<const json> component_database::get_feature_provider(std::string_view feature) const
 {
   const auto feature_str = std::string{ feature };
   if (database["features"].contains(feature_str)) {
-    return database["features"][feature_str];
+    return std::optional<const json>(std::in_place, database["features"][feature_str]);
   }
   return std::nullopt;
 }

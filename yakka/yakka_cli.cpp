@@ -375,6 +375,17 @@ int main(int argc, char **argv)
     project.process_slc_rules();
 
   // Project evaluation is complete
+  project.generate_project_summary();
+  
+  // Merge project data
+  project.update_project_data();
+
+  // Evaluate the project schema including defaults
+  auto t1 = std::chrono::high_resolution_clock::now();
+  project.validate_schema();
+  auto t2       = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  spdlog::info("{}ms to validate schemas", duration);
 
   // Print a list of required features
   spdlog::info("Required features:");
@@ -382,14 +393,7 @@ int main(int argc, char **argv)
     spdlog::info("- {}", f);
 
   // Generate and save the summary
-  project.generate_project_summary();
   project.save_summary();
-
-  auto t1 = std::chrono::high_resolution_clock::now();
-  project.validate_schema();
-  auto t2       = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-  spdlog::info("{}ms to validate schemas", duration);
 
   if (project.current_state != yakka::project::state::PROJECT_VALID && !result["ignore-eval"].as<bool>())
     exit(-1);
