@@ -499,6 +499,9 @@ project::state project::evaluate_dependencies()
 
       // Look for any recommendations
       for (const auto &f: temp_list) {
+        // Verify it hasn't been provided
+        if (provided_features.contains(f))
+          continue;
         if (feature_recommendations.contains(f)) {
           const auto &recommendation = feature_recommendations[f];
           if (recommendation.contains("component")) {
