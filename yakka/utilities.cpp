@@ -510,7 +510,7 @@ void add_common_template_commands(inja::Environment &inja_env)
   inja_env.add_callback("merge", 2, [](const inja::Arguments &args) {
     auto target     = args[0]->get<nlohmann::json>();
     const auto data = args[1]->get<nlohmann::json>();
-    target.update(data);
+    target.update(data, true);
     return target;
   });
   inja_env.add_callback("concatenate", [](const inja::Arguments &args) {
