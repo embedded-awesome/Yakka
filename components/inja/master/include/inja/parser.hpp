@@ -123,6 +123,7 @@ class Parser {
     if (config.include_callback) {
       auto include_template = config.include_callback(path, original_name);
       template_storage.emplace(template_name, include_template);
+      parse_into_template(template_storage[template_name], template_name);
     }
   }
 
