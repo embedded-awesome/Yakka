@@ -202,7 +202,12 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     if (args[0] && args[1]) {
       nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
       auto key             = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
-      data_store[ptr][key] = *args[2];
+      if (key.front() == '/') {
+        ptr = ptr / nlohmann::json::json_pointer{key};
+        data_store[ptr] = *args[2];
+      }
+      else
+        data_store[ptr][key] = *args[2];
     }
     return nlohmann::json{};
   });
@@ -310,6 +315,19 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       return nlohmann::json{};
     }
   });
+  inja_env.set_include_callback([&](const std::filesystem::path& path, const std::string& template_name) {
+    const auto template_path = try_render(inja_env, template_name, project.project_summary);
+    std::ifstream file;
+    file.open(template_path);
+    if (!file.fail()) {
+      const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+      return inja::Template(text);
+    }
+    else {
+      spdlog::error("Failed to open template file: {}", template_name);
+      return inja::Template();
+    }
+});
 
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
@@ -389,8 +407,16 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
   for (auto &i: project.commands)
     create_tasks(i, finish, project);
 
-  // taskflow.dump(std::cout);
-  
+#ifdef DEBUG_TASK_ENGINE
+  std::ofstream graph_file("task_engine_graph.txt");
+  if (graph_file.is_open()) {
+    taskflow.dump(graph_file);
+    graph_file.close();
+  } else {
+    spdlog::error("Failed to open task_engine_graph.txt for writing");
+  }
+#endif
+
   auto t2 = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to create tasks", duration);
