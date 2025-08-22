@@ -151,14 +151,14 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
       const auto feature = child_node_provides.get<std::string>();
       if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
         slc_provided.insert(feature);
-      unprocessed_features.insert(feature);
+      // unprocessed_features.insert(feature);
       provided_features.insert(feature);
     } else if (child_node_provides.is_array())
       for (const auto &i: child_node_provides) {
         const auto feature = i.get<std::string>();
         if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
           slc_provided.insert(feature);
-        unprocessed_features.insert(feature);
+        // unprocessed_features.insert(feature);
         provided_features.insert(feature);
       }
   }
@@ -324,7 +324,7 @@ bool project::add_component(const std::string &component_name, component_databas
   // Add all the provided features into the unprocessed list
   if (new_component->json.contains("/provides/features"_json_pointer))
     for (const auto &f: new_component->json["provides"]["features"]) {
-      unprocessed_features.insert(f.get<std::string>());
+      // unprocessed_features.insert(f.get<std::string>());
       provided_features.insert(f.get<std::string>());
     }
 
