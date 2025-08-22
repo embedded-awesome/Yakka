@@ -368,7 +368,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Default: {
       const auto test_arg = get_arguments<1, 0, false>(node)[0];
-      data_eval_stack.push(test_arg ? test_arg : get_arguments<1, 1>(node)[0]);
+      data_eval_stack.push(test_arg && !test_arg->is_null() ? test_arg : get_arguments<1, 1>(node)[0]);
     } break;
     case Op::DivisibleBy: {
       const auto args = get_arguments<2>(node);
