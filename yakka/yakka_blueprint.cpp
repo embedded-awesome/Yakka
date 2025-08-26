@@ -17,7 +17,7 @@ blueprint::blueprint(const std::string &target, const nlohmann::json &blueprint,
   if (blueprint.contains("depends"))
     for (auto &d: blueprint["depends"]) {
       if (d.is_primitive())
-        this->dependencies.push_back({ dependency::DEFAULT_DEPENDENCY, d.get<std::string>() });
+        this->dependencies.push_back({ d.front() == ':' ? dependency::DATA_DEPENDENCY : dependency::DEFAULT_DEPENDENCY, d.get<std::string>() });
       else if (d.is_object()) {
         if (d.contains("data")) {
           if (d["data"].is_array())
