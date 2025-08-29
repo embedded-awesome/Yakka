@@ -62,8 +62,7 @@ void start_config_server(yakka::workspace& workspace, bool& server_running) {
     spdlog::debug(dump_request_response(req, res));
   });
 
-  spdlog::set_level(spdlog::level::info);
-  spdlog::info("Server is running on http://localhost:8080");
+  spdlog::get("console")->info("Server is running on http://localhost:8080");
   server_running = true;
   server.listen("127.0.0.1", 8080);
   server_running = false;

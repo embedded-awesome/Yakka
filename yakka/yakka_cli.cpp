@@ -245,7 +245,7 @@ int main(int argc, char **argv)
     download_unknown_components(workspace, project);
     return 0;
   } else if (action == "serve") {
-    spdlog::info("Starting configuration server...");
+    console->info("Starting configuration server...");
     bool server_running = false;
     yakka::start_config_server(workspace, server_running);
     return 0;

@@ -202,12 +202,12 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     if (args[0] && args[1]) {
       nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
       auto key             = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
-      if (key.front() == '/') {
+      if (key.front() == '/')
         ptr = ptr / nlohmann::json::json_pointer{key};
-        data_store[ptr] = *args[2];
-      }
       else
-        data_store[ptr][key] = *args[2];
+        ptr = ptr / key;
+
+      data_store[ptr] = *args[2];
     }
     return nlohmann::json{};
   });
@@ -222,6 +222,22 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       data_store[ptr] = nlohmann::json::array();
     }
     data_store[ptr].push_back(*args[1]);
+    return nlohmann::json{};
+  });
+  inja_env.add_callback("push_back", 3, [&](const inja::Arguments &args) {
+    if (args[0] && args[1]) {
+      nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+      auto key             = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
+      if (key.front() == '/')
+        ptr = ptr / nlohmann::json::json_pointer{key};
+      else
+        ptr = ptr / key;
+      
+      if (!data_store.contains(ptr)) {
+        data_store[ptr] = nlohmann::json::array();
+      }
+      data_store[ptr].push_back(*args[2]);
+    }
     return nlohmann::json{};
   });
   inja_env.add_callback("unique", 1, [&](const inja::Arguments &args) {

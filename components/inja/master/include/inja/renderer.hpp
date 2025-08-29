@@ -597,8 +597,6 @@ class Renderer : public NodeVisitor {
         //   }
         // }
       }
-
-      
     } break;
     
     case Op::None:

@@ -454,6 +454,7 @@ std::expected<fs::path, std::error_code> workspace::do_fetch_component(std::stri
     spdlog::info("{}: checkout in {}ms", name, *checkout_result);
 
     // Signal completion
+    spdlog::drop(std::format("fetchlog-{}", name));
     progress_handler("Complete"sv, 100);
     return checkout_location;
 
