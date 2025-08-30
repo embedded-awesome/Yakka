@@ -15,7 +15,6 @@ public:
   void save(const fs::path file_path);
 
   void add_target(const std::string target, blueprint_database &blueprint_database, nlohmann::json project_summary);
-  void generate_target_database(std::vector<std::string> commands, blueprint_database &blueprint_database, nlohmann::json project_summary);
 
   std::multimap<std::string, std::shared_ptr<blueprint_match>> targets;
 };
