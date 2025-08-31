@@ -18,7 +18,7 @@ blueprint::blueprint(const std::string &target, const nlohmann::json &blueprint,
     for (auto &d: blueprint["depends"]) {
       if (d.is_primitive()) {
         if (d.front() == ':')
-          this->dependencies.push_back({ dependency::DATA_DEPENDENCY, d.get<std::string>().substr(1) });
+          this->dependencies.push_back({ dependency::DATA_DEPENDENCY, d.get<std::string>() });
         else
           this->dependencies.push_back({ dependency::DEFAULT_DEPENDENCY, d.get<std::string>() });
       }

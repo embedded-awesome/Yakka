@@ -721,8 +721,8 @@ void project::generate_target_database()
         continue;
 
       // Do not add to task database if it's a data dependency. There is special processing of these.
-      if (t.front() == data_dependency_identifier)
-        continue;
+      // if (t.front() == data_dependency_identifier)
+      //   continue;
 
       // Check if target is not in the database. Note task_database is a multimap
       if (target_database.targets.find(t) == target_database.targets.end()) {
@@ -1176,6 +1176,10 @@ void project::process_blueprints(const std::shared_ptr<component> c)
   if (c->json.contains("blueprints")) {
     for (const auto &[b_key, b_value]: c->json["blueprints"].items()) {
       std::string blueprint_string = try_render(inja_environment, b_value.contains("regex") ? b_value["regex"].get<std::string>() : b_key, project_summary);
+      if (blueprint_string[0] == data_dependency_identifier && !blueprint_string.starts_with(":/data/") ) {
+        spdlog::error("Invalid data blueprint: {}", blueprint_string);
+        continue;
+      }
       spdlog::info("Additional blueprint: {}", blueprint_string);
       blueprint_database.blueprints.insert({ blueprint_string, std::make_shared<blueprint>(blueprint_string, b_value, c->json["directory"].get<std::string>()) });
     }

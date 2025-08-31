@@ -58,7 +58,7 @@ public:
 
   void init(task_complete_type task_complete_handler);
   void create_tasks(const std::string target_name, tf::Task &parent, yakka::project &project);
-  std::pair<std::string, int> run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project);
+  std::pair<std::string, int> run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, nlohmann::json &project_data);
   void run_taskflow(yakka::project &project, task_engine_ui *ui);
 
   std::atomic<bool> abort_build;

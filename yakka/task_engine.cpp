@@ -120,7 +120,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
           // If it doesn't exist as a file, run the command
           if (!fs::exists(target_name)) {
             try {
-              auto result      = run_command(target_name, construct_task->match, project);
+              auto result      = run_command(target_name, construct_task->match, project, project.project_summary["data"]);
               construct_task->last_modified = fs::file_time_type::clock::now();
               if (result.second != 0) {
                 spdlog::info("Aborting: {} returned {}", target_name, result.second);
@@ -149,7 +149,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
           if (!fs::exists(target_name) || max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch()) {
             spdlog::info("{}: Updating because of {}", target_name, max_element->first);
             try {
-              auto [output, retcode] = run_command(i->first, construct_task->match, project);
+              auto [output, retcode] = run_command(i->first, construct_task->match, project, project.project_summary["data"]);
               construct_task->last_modified       = fs::file_time_type::clock::now();
               if (retcode < 0) {
                 spdlog::info("Aborting: {} returned {}", target_name, retcode);
@@ -189,7 +189,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
   }
 }
 
-std::pair<std::string, int> task_engine::run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project)
+std::pair<std::string, int> task_engine::run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, nlohmann::json &project_data)
 {
   std::string captured_output = "";
   inja::Environment inja_env  = inja::Environment();
@@ -388,7 +388,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       }
       // Else check if it is a built-in command
       else if (blueprint_commands.contains(command_name)) {
-        yakka::process_return test_result = blueprint_commands.at(command_name)(target, command.value(), captured_output, project.project_summary, inja_env);
+        yakka::process_return test_result = blueprint_commands.at(command_name)(target, command.value(), captured_output, project.project_summary, project_data, inja_env);
         captured_output                   = test_result.result;
         retcode                           = test_result.retcode;
       } else {
