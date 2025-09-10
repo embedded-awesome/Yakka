@@ -376,7 +376,7 @@ int main(int argc, char **argv)
 
   // Project evaluation is complete
   project.generate_project_summary();
-  
+
   // Merge project data
   project.update_project_data();
 
@@ -476,9 +476,10 @@ static void download_unknown_components(yakka::workspace &workspace, yakka::proj
 
     show_console_cursor(false);
     DynamicProgress<ProgressBar> fetch_progress_ui;
-    std::vector<std::shared_ptr<ProgressBar>> fetch_progress_bars;
+    std::map<std::string, std::shared_ptr<ProgressBar>> fetch_progress_bars;
 
     std::map<std::string, std::future<fs::path>> fetch_list;
+    int largest_name_length = 16;
     do {
       // Ask the workspace to fetch them
       for (const auto &i: project.unknown_components) {
@@ -488,12 +489,24 @@ static void download_unknown_components(yakka::workspace &workspace, yakka::proj
         // Check if component is in the registry
         auto node = workspace.find_registry_component(i);
         if (node) {
-          std::shared_ptr<ProgressBar> new_progress_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ "Fetching " + i + " " }, option::SavedStartTime{ true });
-          fetch_progress_bars.push_back(new_progress_bar);
+          auto prefix_test = "Fetching " + i + " ";
+          if (prefix_test.size() > largest_name_length) {
+            largest_name_length = prefix_test.size();
+          }
+          if (prefix_test.size() < largest_name_length)
+            prefix_test.append(largest_name_length - prefix_test.size(), ' ');
+          else if (prefix_test.size() > largest_name_length)
+            prefix_test = prefix_test.substr(0, largest_name_length);
+          std::shared_ptr<ProgressBar> new_progress_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ prefix_test }, option::SavedStartTime{ true });
+          fetch_progress_bars.insert({i, new_progress_bar});
           size_t id = fetch_progress_ui.push_back(*new_progress_bar);
-          fetch_progress_ui.print_progress();
-          auto result = workspace.fetch_component(i, *node, [&fetch_progress_ui, id](std::string_view prefix, size_t number) {
-            fetch_progress_ui[id].set_option(option::PrefixText{ prefix });
+          auto result = workspace.fetch_component(i, *node, [&fetch_progress_ui, &largest_name_length, id, i](std::string_view postfix, size_t number) {
+            fetch_progress_ui[id].set_option(option::PostfixText{ postfix });
+            auto prefix_test = "Fetching " + i + " ";
+            if (prefix_test.size() < largest_name_length) {
+              prefix_test.append(largest_name_length - prefix_test.size(), ' ');
+              fetch_progress_ui[id].set_option(option::PrefixText{ prefix_test });
+            }
             if (number >= 100) {
               fetch_progress_ui[id].set_progress(100);
               fetch_progress_ui[id].mark_as_completed();
