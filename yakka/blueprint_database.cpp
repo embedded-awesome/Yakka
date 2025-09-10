@@ -66,7 +66,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
     });
     local_inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
       nlohmann::json aggregate;
-      auto path = json_pointer(args[0]->get<std::string>());
+      auto path = nlohmann::json::json_pointer{args[0]->get<std::string>()};
       // Loop through components, check if object path exists, if so add it to the aggregate
       for (const auto &[c_key, c_value]: project_summary["components"].items()) {
         // auto v = json_path(c.value(), path);
@@ -149,7 +149,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
   }
 
   if (!blueprint_match_found) {
-    if (!fs::exists(target))
+    if (!fs::exists(target) && target[0] != yakka::data_dependency_identifier)
       spdlog::info("No blueprint for '{}'", target);
   }
   return result;

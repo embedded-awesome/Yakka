@@ -281,7 +281,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 
   inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
     nlohmann::json aggregate;
-    auto path = json_pointer(args[0]->get<std::string>());
+    auto path = nlohmann::json::json_pointer{args[0]->get<std::string>()};
     // Loop through components, check if object path exists, if so add it to the aggregate
     for (const auto &[c_key, c_value]: project.project_summary["components"].items()) {
       // auto v = json_path(c.value(), path);

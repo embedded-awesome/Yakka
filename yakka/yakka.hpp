@@ -20,6 +20,7 @@ const std::string slsdk_extensions_directory    = "extension";
 const char data_dependency_identifier           = ':';
 const char data_wildcard_identifier             = '*';
 const std::string database_filename             = "yakka-components.json";
+const std::string project_filename              = "yakka-projects.json";
 
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
 const std::string host_os_string         = "windows";

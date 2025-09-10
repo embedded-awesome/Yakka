@@ -154,14 +154,14 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path)
   return temp;
 }
 
-nlohmann::json::json_pointer json_pointer(std::string path)
-{
-  if (path.front() != '/') {
-    path = "/" + path;
-    std::replace(path.begin(), path.end(), '.', '/');
-  }
-  return nlohmann::json::json_pointer{ path };
-}
+// nlohmann::json::json_pointer json_pointer(std::string path)
+// {
+//   if (path.front() != '/') {
+//     path = "/" + path;
+//     std::replace(path.begin(), path.end(), '.', '/');
+//   }
+//   return nlohmann::json::json_pointer{ path };
+// }
 
 nlohmann::json json_path(const nlohmann::json &node, std::string path)
 {
@@ -550,7 +550,7 @@ struct ComparisonResult {
 };
 
 [[nodiscard]]
-std::expected<bool, std::string> has_data_dependency_changed(std::string_view data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept
+std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept
 {
   if (data_path.empty() || data_path[0] != data_dependency_identifier) {
     return false;
@@ -563,6 +563,17 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string_view da
   // Early return if left data is missing
   if (left.is_null() || left["components"].is_null()) {
     return true;
+  }
+
+  auto data_paths = std::ranges::views::split(data_path, '/') | std::views::drop(1);
+  nlohmann::json::json_pointer data_pointer{ data_path.substr(1) };
+  
+  auto iter = data_paths.begin();
+  const std::string first_part { std::string_view(*iter) };
+  const std::string second_part { std::string_view(*(++iter)) };
+  nlohmann::json::json_pointer remaining_pointer;
+  for (const auto &part: data_paths | std::views::drop(2)) {
+    remaining_pointer /= std::string(std::string_view{ part });
   }
 
   // Define a lambda to process a component name using the captured 'left' and 'right' json objects
@@ -585,40 +596,41 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string_view da
   };
 
   try {
-    if (data_path[2] == data_wildcard_identifier) {
-      if (data_path[3] != '/') {
-        return std::unexpected{ "Data dependency malformed: " + std::string{ data_path } };
-      }
+    if (first_part == "components") {
+      if (second_part == std::string{data_wildcard_identifier}) {
 
-      auto path_view = data_path.substr(3);
-      nlohmann::json::json_pointer pointer{ std::string{ path_view } };
+        // Using C++20 ranges to process components
+        for (const auto &[component_name, _]: right["components"].items()) {
+          auto result = process_component(component_name, data_pointer);
+          if (!result.error_message.empty()) {
+            return std::unexpected{ std::move(result.error_message) };
+          }
 
-      // Using C++20 ranges to process components
-      for (const auto &[component_name, _]: right["components"].items()) {
-        auto result = process_component(component_name, pointer);
+          if (result.changed == true) {
+            spdlog::error("Data dependency changed for component: {}", component_name);
+          }
+          return result.changed;
+        }
+      } else {
+        auto component_name = second_part;
+        auto result = process_component(component_name, remaining_pointer);
         if (!result.error_message.empty()) {
           return std::unexpected{ std::move(result.error_message) };
         }
-        if (result.changed) {
-          return true;
+        if (result.changed == true) {
+          spdlog::error("Data dependency changed for component: {}", component_name);
         }
+        return result.changed;
       }
     } else {
-      auto path_view     = std::string_view{ data_path }.substr(2);
-      auto separator_pos = path_view.find_first_of('/');
-      if (separator_pos == std::string_view::npos) {
-        return std::unexpected{ "Invalid path format: missing component separator" };
+      if (!left.contains(data_pointer) || !right.contains(data_pointer)) {
+        return true;
       }
-
-      auto component_name = path_view.substr(0, separator_pos);
-      auto remaining_path = path_view.substr(separator_pos);
-      nlohmann::json::json_pointer pointer{ std::string{ remaining_path } };
-
-      auto result = process_component(component_name, pointer);
-      if (!result.error_message.empty()) {
-        return std::unexpected{ std::move(result.error_message) };
-      }
-      return result.changed;
+      // auto diff = json::diff(left[data_pointer], right[data_pointer]);
+      // if (!diff.empty()) {
+      //   spdlog::error("Data dependency changed at path: {}", data_pointer.to_string());
+      // }
+      return { left[data_pointer] != right[data_pointer] };
     }
 
     return false;

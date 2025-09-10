@@ -21,7 +21,7 @@ bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2);
 void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node);
 YAML::Node yaml_path(const YAML::Node &node, std::string path);
 nlohmann::json json_path(const nlohmann::json &node, std::string path);
-nlohmann::json::json_pointer json_pointer(std::string path);
+// nlohmann::json::json_pointer json_pointer(std::string path);
 std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(const std::vector<std::string> &argument_string);
 std::string generate_project_name(const component_list_t &components, const feature_list_t &features);
 std::vector<std::string> parse_gcc_dependency_file(const std::string &filename);
@@ -33,7 +33,7 @@ std::pair<std::string, int> download_resource(const std::string url, fs::path de
 nlohmann::json::json_pointer create_condition_pointer(const nlohmann::json condition);
 void find_json_keys(const nlohmann::json &j, const std::string &target_key, const std::string &current_path, nlohmann::json& paths);
 
-std::expected<bool, std::string> has_data_dependency_changed(std::string_view data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept;
+std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept;
 
 void add_common_template_commands(inja::Environment &inja_env);
 

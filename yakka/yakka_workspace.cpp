@@ -74,8 +74,8 @@ std::expected<void, std::error_code> workspace::init(const fs::path &workspace_p
   }
 
   // Check for project file
-  if (fs::exists(workspace_path / "projects.json")) {
-    projects = nlohmann::json::parse(std::ifstream(workspace_path / "projects.json"));
+  if (fs::exists(workspace_path / yakka::project_filename)) {
+    projects = nlohmann::json::parse(std::ifstream(workspace_path / yakka::project_filename));
   }
 
   summary["configuration"]["host_os"]              = host_os_string;
@@ -323,16 +323,7 @@ std::expected<void, std::error_code> workspace::update_component(std::string_vie
     return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
 
-  // Execute git commands in sequence
-  if (auto result = execute_git_command("stash", git_directory_string); !result) {
-    return result;
-  }
-
-  if (auto result = execute_git_command("pull --progress", git_directory_string); !result) {
-    return result;
-  }
-
-  return execute_git_command("stash pop", git_directory_string);
+  return execute_git_command("pull --progress --autostash", git_directory_string);
 }
 
 // Modern implementation using C++23 features

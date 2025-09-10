@@ -205,7 +205,6 @@ void project::update_summary()
     }
 
     auto yakka_file = value["yakka_file"].get<std::string>();
-
     if (!std::filesystem::exists(yakka_file) || std::filesystem::last_write_time(yakka_file) > project_summary_last_modified) {
       // If so, move existing data to previous summary
       previous_summary["components"][name] = value; // TODO: Verify this is correct way to do this efficiently
@@ -216,6 +215,7 @@ void project::update_summary()
       previous_summary["components"][name] = value;
     }
   }
+  previous_summary["data"] = project_summary["data"];
 }
 
 bool project::add_component(const std::string &component_name, component_database::flag flags)
@@ -514,7 +514,6 @@ project::state project::evaluate_dependencies()
             unprocessed_features.insert(feature_name);
           }
         } else {
-          spdlog::error("Feature '{}' is not provided by any component", f);
           unprovided_features.insert(f);
         }
       }
