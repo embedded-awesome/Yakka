@@ -35,8 +35,16 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
 
   void init(yakka::task_engine &task_engine)
   {
+    // Find the longest name of the task groups
+    size_t largest_name_length = 0;
+    for (const auto &i: task_engine.todo_task_groups) {
+      if (i.second->name.size() > largest_name_length)
+        largest_name_length = i.second->name.size() + 1; // +1 for the space
+    }
+
     for (auto &i: task_engine.todo_task_groups) {
-      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ i.second->name }, option::MaxProgress{ i.second->total_count });
+      std::string spaces(largest_name_length - i.second->name.size(), ' ');
+      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ i.second->name + spaces }, option::MaxProgress{ i.second->total_count });
       task_progress_bars.push_back(new_task_bar);
       i.second->ui_id = task_progress_ui.push_back(*new_task_bar);
       task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
