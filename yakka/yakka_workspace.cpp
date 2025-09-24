@@ -74,8 +74,26 @@ std::expected<void, std::error_code> workspace::init(const fs::path &workspace_p
   }
 
   // Check for project file
-  if (fs::exists(workspace_path / yakka::project_filename)) {
-    projects = nlohmann::json::parse(std::ifstream(workspace_path / yakka::project_filename));
+  if (fs::exists(workspace_path / yakka::projects_filename)) {
+    projects = nlohmann::json::parse(std::ifstream(workspace_path / yakka::projects_filename));
+  } else {
+    // Iterate through project folders in output directory and create a projects entry for each
+    const auto output_path = workspace_path / yakka::default_output_directory;
+    if (fs::exists(output_path)) {
+      for (const auto &d: fs::directory_iterator(output_path)) {
+        if (fs::is_directory(d.path()) && fs::exists(d.path() / project_summary_filename)) {
+          projects[d.path().filename().string()] = { { "path", d.path().string() } };
+        }
+      }
+    }
+    // Create the projects file
+    std::ofstream project_file(workspace_path / yakka::projects_filename);
+    if (!project_file.is_open()) {
+      spdlog::error("Failed to create projects file at {}\n", (workspace_path / yakka::projects_filename).string());
+      return std::unexpected(std::make_error_code(std::errc::io_error));
+    }
+    project_file << projects;
+    project_file.close();
   }
 
   summary["configuration"]["host_os"]              = host_os_string;

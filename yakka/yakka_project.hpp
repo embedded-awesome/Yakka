@@ -22,7 +22,6 @@
 namespace fs = std::filesystem;
 
 namespace yakka {
-const std::string default_output_directory = "output/";
 
 class project {
 public:
@@ -45,6 +44,7 @@ public:
   void set_project_directory(const std::string path);
   void init_project(std::vector<std::string> components, std::vector<std::string> features);
   void init_project(const std::string build_string);
+  void init_project();
   void process_build_string(const std::string build_string);
   void parse_project_string(const std::vector<std::string> &project_string);
   void process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node);
@@ -66,7 +66,7 @@ public:
   // Target database management
   void generate_target_database();
 
-  void set_project_file(const std::string filepath);
+  void create_project_file();
   void process_construction(indicators::ProgressBar &bar);
   void save_summary();
   void save_blueprints();
@@ -108,6 +108,7 @@ public:
   YAML::Node project_summary_yaml;
   std::string project_directory;
   std::string project_summary_file;
+  fs::path project_file;
   fs::file_time_type project_summary_last_modified;
   std::vector<std::shared_ptr<yakka::component>> components;
   //yakka::component_database component_database;
@@ -142,9 +143,6 @@ public:
   bool condition_is_fulfilled(const nlohmann::json &node);
   void process_slc_rules();
   void create_config_file(const std::shared_ptr<yakka::component> component, const nlohmann::json &config, const std::string &prefix, std::string instance_name);
-
-private:
-  void init_project();
 };
 
 } /* namespace yakka */

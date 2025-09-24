@@ -23,6 +23,10 @@ project::project(const std::string project_name, yakka::workspace &workspace) : 
   current_state    = yakka::project::state::PROJECT_VALID;
   component_flags  = component_database::flag::ALL_COMPONENTS;
 
+  output_path          = yakka::default_output_directory + project_name;
+  project_summary_file = output_path + yakka::project_summary_filename;
+  project_file         = project_name + ".yakka";
+
   add_common_template_commands(inja_environment);
 }
 
@@ -81,10 +85,6 @@ void project::init_project(std::vector<std::string> components, std::vector<std:
 
 void project::init_project()
 {
-  output_path          = yakka::default_output_directory + project_name;
-  project_summary_file = output_path + "/yakka_summary.json";
-  // previous_summary["components"] = YAML::Node();
-
   if (fs::exists(project_summary_file)) {
     project_summary_last_modified = fs::last_write_time(project_summary_file);
     std::ifstream i(project_summary_file);
@@ -130,7 +130,7 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
       // If the feature has recommendations, add them to the feature_recommendations map
       if (node.is_object() && node.contains("recommends"))
         feature_recommendations.insert({ feature, node["recommends"] });
-    } else if (node.is_array()) 
+    } else if (node.is_array())
       for (const auto &i: node) {
         const auto feature = i.is_string() ? i.get<std::string>() : i["name"].get<std::string>();
         if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
@@ -649,10 +649,30 @@ void project::evaluate_choices()
   }
 }
 
+void project::create_project_file()
+{
+  this->project_file = project_name + ".yakka";
+  std::ofstream file(project_file);
+  file << "name: " << project_name << "\n";
+  if (initial_components.size() != 0) {
+    file << "components:\n";
+    for (const auto &c: initial_components)
+      file << "  - " << c << "\n";
+  }
+  if (initial_features.size() != 0) {
+    file << "features:\n";
+    for (const auto &f: initial_features)
+      file << "  - " << f << "\n";
+  }
+  file << "data: ~\n";
+  file.close();
+}
+
 void project::generate_project_summary()
 {
   // Add standard information into the project summary
   project_summary["project_name"]   = project_name;
+  project_summary["project_file"]   = project_file;
   project_summary["project_output"] = default_output_directory + project_name;
   project_summary["configuration"]  = workspace.summary["configuration"];
 
@@ -757,7 +777,7 @@ void project::generate_target_database()
 }
 
 /**
- * @brief Save to disk the content of the @ref project_summary to yakka_summary.yaml and yakka_summary.json
+ * @brief Save to disk the content of the @ref project_summary to project_summary_filename in the project output directory.
  *
  */
 void project::save_summary()
@@ -765,7 +785,7 @@ void project::save_summary()
   if (!fs::exists(project_summary["project_output"].get<std::string>()))
     fs::create_directories(project_summary["project_output"].get<std::string>());
 
-  std::ofstream json_file(project_summary["project_output"].get<std::string>() + "/yakka_summary.json");
+  std::ofstream json_file(project_summary["project_output"].get<std::string>() + "/" + yakka::project_summary_filename);
   json_file << project_summary.dump(3);
   json_file.close();
 
@@ -799,23 +819,29 @@ public:
 void project::validate_schema()
 {
   // Collect all the schema data
-  nlohmann::json schema = "{ \"properties\": {} }"_json;
+  nlohmann::json schema      = "{ \"properties\": {} }"_json;
+  nlohmann::json data_schema = "{ \"properties\": {} }"_json;
 
   for (const auto &c: components) {
     if (c->json.contains("schema")) {
       const auto schema_json_pointer = "/properties"_json_pointer;
       json_node_merge(schema_json_pointer, schema["properties"], c->json["schema"]);
     }
+    if (c->json.contains("data_schema")) {
+      const auto schema_json_pointer = "/properties"_json_pointer;
+      json_node_merge(schema_json_pointer, data_schema["properties"], c->json["data_schema"]);
+    }
   }
 
-  if (!schema.empty()) {
+  // Verify schema for each component
+  {
     //spdlog::error("Schema: {}", schema.dump(2));
     // Create validator
     nlohmann::json_schema::json_validator validator(nullptr, nlohmann::json_schema::default_string_format_check);
     try {
       validator.set_root_schema(schema);
     } catch (const std::exception &e) {
-      spdlog::error("Setting root schema failed\n{}", e.what());
+      spdlog::error("Setting root schema for components failed\n{}", e.what());
       return;
     }
 
@@ -825,6 +851,21 @@ void project::validate_schema()
       err.component_name = c->id;
       validator.validate(c->json, err);
     }
+  }
+
+  // Verify data schema for the project
+  {
+    // Create validator
+    nlohmann::json_schema::json_validator validator(nullptr, nlohmann::json_schema::default_string_format_check);
+    try {
+      validator.set_root_schema(data_schema);
+    } catch (const std::exception &e) {
+      spdlog::error("Setting root schema for data failed\n{}", e.what());
+      return;
+    }
+
+    custom_error_handler err;
+    validator.validate(project_summary["data"], err);
   }
 }
 
@@ -1175,7 +1216,7 @@ void project::process_blueprints(const std::shared_ptr<component> c)
   if (c->json.contains("blueprints")) {
     for (const auto &[b_key, b_value]: c->json["blueprints"].items()) {
       std::string blueprint_string = try_render(inja_environment, b_value.contains("regex") ? b_value["regex"].get<std::string>() : b_key, project_summary);
-      if (blueprint_string[0] == data_dependency_identifier && !blueprint_string.starts_with(":/data/") ) {
+      if (blueprint_string[0] == data_dependency_identifier && !blueprint_string.starts_with(":/data/")) {
         spdlog::error("Invalid data blueprint: {}", blueprint_string);
         continue;
       }
