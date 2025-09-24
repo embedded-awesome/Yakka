@@ -79,7 +79,7 @@ public:
 
   // Basic project data
   std::string project_name;
-  std::string output_path;
+  std::filesystem::path output_path;
   std::string yakka_home_directory;
   std::vector<std::string> initial_components;
   std::vector<std::string> initial_features;

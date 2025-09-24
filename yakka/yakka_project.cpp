@@ -24,7 +24,7 @@ project::project(const std::string project_name, yakka::workspace &workspace) : 
   component_flags  = component_database::flag::ALL_COMPONENTS;
 
   output_path          = yakka::default_output_directory + project_name;
-  project_summary_file = output_path + yakka::project_summary_filename;
+  project_summary_file = output_path / yakka::project_summary_filename;
   project_file         = project_name + ".yakka";
 
   add_common_template_commands(inja_environment);
@@ -1242,7 +1242,7 @@ void project::process_tools(const std::shared_ptr<component> c)
 
 void project::save_blueprints()
 {
-  blueprint_database.save(this->output_path + "/blueprints.json");
+  blueprint_database.save(this->output_path / "blueprints.json");
 }
 
 void project::add_additional_tool(const fs::path component_path)
