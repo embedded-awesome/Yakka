@@ -42,7 +42,7 @@ public:
   virtual ~project();
 
   void set_project_directory(const std::string path);
-  void init_project(std::vector<std::string> components, std::vector<std::string> features);
+  void init_project(std::vector<std::string> components, std::vector<std::string> features, std::unordered_set<std::string> commands = {});
   void init_project(const std::string build_string);
   void init_project();
   void process_build_string(const std::string build_string);

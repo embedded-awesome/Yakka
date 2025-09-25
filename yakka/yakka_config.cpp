@@ -20,6 +20,9 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     return;
   }
 
+  // Load the component registries
+  workspace.load_component_registries();
+
   // Find components in the workspace that provide server data and mount points
 
   server.Options("/(.*)", [&](const httplib::Request & /*req*/, httplib::Response &res) {
@@ -51,6 +54,12 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     spdlog::info("GET /api/projects\n");
     res.set_header("Access-Control-Allow-Origin", "*");
     res.set_content(workspace.projects.dump(), "application/json");
+  });
+
+  server.Get("/api/registries", [&](const httplib::Request &req, httplib::Response &res) {
+    spdlog::info("GET /api/registries\n");
+    res.set_header("Access-Control-Allow-Origin", "*");
+    res.set_content(workspace.registries.as<nlohmann::json>().dump(), "application/json");
   });
 
   server.Get("/api/project/:id", [&](const httplib::Request &req, httplib::Response &res) {

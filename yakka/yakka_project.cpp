@@ -68,7 +68,7 @@ void project::init_project(const std::string build_string)
   init_project();
 }
 
-void project::init_project(std::vector<std::string> components, std::vector<std::string> features)
+void project::init_project(std::vector<std::string> components, std::vector<std::string> features, std::unordered_set<std::string> commands)
 {
   initial_features = features;
 
@@ -80,6 +80,8 @@ void project::init_project(std::vector<std::string> components, std::vector<std:
     unprocessed_features.insert(f);
     initial_features.push_back(f);
   }
+  this->commands = commands;
+  
   init_project();
 }
 
