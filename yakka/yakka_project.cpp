@@ -101,6 +101,13 @@ void project::init_project()
     update_summary();
   } else
     fs::create_directories(output_path);
+
+  // Check if there is a project file
+  if (fs::exists(project_file)) {
+    YAML::Node node = YAML::LoadFile(project_file);
+    // Merge data from the project file
+    json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>());
+  }
 }
 
 void project::process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node)
@@ -656,6 +663,7 @@ void project::create_project_file()
   this->project_file = project_name + ".yakka";
   std::ofstream file(project_file);
   file << "name: " << project_name << "\n";
+  file << "type: project\n";
   if (initial_components.size() != 0) {
     file << "components:\n";
     for (const auto &c: initial_components)

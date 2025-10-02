@@ -71,11 +71,19 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       return;
     }
     auto project_summary_file = std::filesystem::path{ workspace.projects[project]["path"].get<std::string>() } / project_summary_filename;
-    std::ifstream file(project_summary_file, std::ios::binary);
-    if (file) {
-      // Read the entire file content into a string
-      std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-      res.set_content(file_content, "application/json"); // Set appropriate Content-Type
+    if (fs::exists(project_summary_file)) {
+      // Read the entire file content into json object
+      std::ifstream project_summary_stream(project_summary_file);
+      nlohmann::json project_summary = nlohmann::json::parse(project_summary_stream);
+      const auto project_file = project_summary["project_name"].get<std::string>() + ".yakka";
+      if (fs::exists(project_file)) {
+        YAML::Node node = YAML::LoadFile(project_file);
+        // Merge data from the project file
+        json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>());
+      }
+
+      // std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+      res.set_content(project_summary.dump(), "application/json"); // Set appropriate Content-Type
     } else {
       res.status = 404;
       return;
