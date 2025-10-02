@@ -31,9 +31,28 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   workspace.load_component_registries();
   for (auto registry: workspace.registries) {
-    std::cout << registry.second["name"] << "\n";
+    // Group components by type
+    std::multimap<std::string, std::string> components_by_type;
     for (auto c: registry.second["provides"]["components"])
-      std::cout << "  - " << c.first << "\n";
+      components_by_type.insert({c.second["type"] ? c.second["type"].as<std::string>() : "component", c.first.as<std::string>()});
+
+    // Print registry name
+    std::cout << registry.second["name"] << "\n";
+
+    // Print components grouped by type
+    for (auto it = components_by_type.begin(); it != components_by_type.end(); ) {
+        const std::string& type = it->first;
+        std::cout << "type: " << type << "\n";
+
+        // Get the range of elements with this key
+        auto range = components_by_type.equal_range(type);
+        for (auto c = range.first; c != range.second; ++c) {
+            std::cout << "  - " << c->second << "\n";
+        }
+
+        // Advance iterator to the next key group
+        it = range.second;
+    }
   }
   return 0;
 }
