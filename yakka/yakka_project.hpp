@@ -107,7 +107,7 @@ public:
 
   YAML::Node project_summary_yaml;
   std::string project_directory;
-  std::string project_summary_file;
+  fs::path project_summary_file;
   fs::path project_file;
   fs::file_time_type project_summary_last_modified;
   std::vector<std::shared_ptr<yakka::component>> components;

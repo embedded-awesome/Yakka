@@ -81,7 +81,7 @@ void project::init_project(std::vector<std::string> components, std::vector<std:
     initial_features.push_back(f);
   }
   this->commands = commands;
-  
+
   init_project();
 }
 
@@ -104,7 +104,7 @@ void project::init_project()
 
   // Check if there is a project file
   if (fs::exists(project_file)) {
-    YAML::Node node = YAML::LoadFile(project_file);
+    YAML::Node node = YAML::LoadFile(project_file.generic_string());
     // Merge data from the project file
     json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>());
   }
