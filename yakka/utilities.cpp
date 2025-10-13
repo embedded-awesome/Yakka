@@ -293,6 +293,8 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
       break;
 
     case nlohmann::detail::value_t::null:
+      break;
+    
     default:
       switch (merge_target.type()) {
         case nlohmann::detail::value_t::object:
