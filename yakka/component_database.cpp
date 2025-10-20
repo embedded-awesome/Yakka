@@ -218,6 +218,15 @@ std::optional<const json> component_database::get_blueprint_provider(std::string
   return std::nullopt;
 }
 
+std::optional<const json> component_database::get_serve_endpoint_provider(std::string_view endpoint) const
+{
+  const auto endpoint_str = std::string{ endpoint };
+  if (database["serve"].contains(endpoint_str)) {
+    return std::optional<const json>(std::in_place, database["serve"][endpoint_str]);
+  }
+  return std::nullopt;
+}
+
 std::expected<void, std::error_code> component_database::parse_yakka_file(const path &path, std::string_view id)
 {
   auto result = yakka::get_file_contents<std::vector<char>>(path.string());
@@ -227,9 +236,18 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
   ryml::Tree tree = ryml::parse_in_place(ryml::to_substr(*result));
   auto root       = tree.crootref();
 
+  // Check for blueprints and process them
   if (root.has_child("blueprints")) {
     for (const auto &b: root["blueprints"].children()) {
       process_blueprint(database, id, b);
+    }
+  }
+
+  // Check for Yakka serve endpoints
+  if (root.has_child("yakka") && root["yakka"].has_child("serve")) {
+    for (const auto &f: root["yakka"]["serve"].children()) {
+      std::string endpoint = std::string{ f.val().str, f.val().len };
+      database["serve"][endpoint].push_back(std::string{ id });
     }
   }
 

@@ -52,6 +52,7 @@ public:
   // Return optional for queries that might not find a result
   [[nodiscard]] std::optional<const json> get_feature_provider(std::string_view feature) const;
   [[nodiscard]] std::optional<const json> get_blueprint_provider(std::string_view blueprint) const;
+  [[nodiscard]] std::optional<const json> get_serve_endpoint_provider(std::string_view endpoint) const;
 
   // Process external data
   std::expected<void, std::error_code> process_slc_sdk(const path &slcs_path);
@@ -70,8 +71,8 @@ public:
     return this->database.dump(2);
   }
 
-private:
   json database;
+private:
   path workspace_path;
   path database_filename;
   bool database_is_dirty{ false }; // Initialize member in-class
