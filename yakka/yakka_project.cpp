@@ -876,7 +876,7 @@ void project::validate_schema()
 
     custom_error_handler err;
     auto validation_result = validator.validate(project_summary["data"], err);
-    if (!validation_result.is_null())
+    if (!validation_result.is_null() && validation_result.size() != 0)
       current_state = state::PROJECT_HAS_FAILED_SCHEMA_CHECK;
   }
 }
