@@ -89,7 +89,26 @@ int git_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   auto iter                 = result.unmatched().begin();
   const auto component_name = *iter;
-  std::string git_command   = "--git-dir=.yakka/repos/" + component_name + "/.git --work-tree=components/" + component_name;
+  auto component_path = workspace.find_component(component_name);
+  if (!component_path) {
+    spdlog::error("Component '{}' not found in workspace", component_name);
+    return -1;
+  }
+
+  // Check if repo exists, if not, create it
+  if (!std::filesystem::exists(".yakka/repos/" + component_name + "/.git")) {
+    const std::string repo_folder = ".yakka/repos/" + component_name;
+    std::filesystem::create_directory(repo_folder);
+    yakka::exec("git", "-C " + repo_folder + " init");
+
+    // Check if git init succeeded
+    if (!std::filesystem::exists(repo_folder + "/.git")) {
+      spdlog::error("Failed to create git repository for component '{}'", component_name);
+      return -1;
+    }
+  }
+  
+  std::string git_command   = "--git-dir=.yakka/repos/" + component_name + "/.git --work-tree=" + (component_path->first.parent_path()).string();
   for (iter++; iter != result.unmatched().end(); ++iter)
     if (iter->find(' ') == std::string::npos)
       git_command.append(" " + *iter);
