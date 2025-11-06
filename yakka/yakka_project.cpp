@@ -81,7 +81,7 @@ void project::init_project(std::vector<std::string> components, std::vector<std:
     initial_features.push_back(f);
   }
   this->commands = commands;
-  
+
   init_project();
 }
 
@@ -752,33 +752,23 @@ void project::generate_target_database()
       // Do not add to task database if it's a data dependency. There is special processing of these.
       // if (t.front() == data_dependency_identifier)
       //   continue;
+      auto matches = target_database.add_target(t, blueprint_database, project_summary);
 
-      // Check if target is not in the database. Note task_database is a multimap
-      if (target_database.targets.find(t) == target_database.targets.end()) {
-        const auto match = blueprint_database.find_match(t, this->project_summary);
-        for (const auto &m: match) {
-          // Add an entry to the database
-          target_database.targets.insert({ t, m });
-
-          // Check if the blueprint has additional requirements
-          if (m->blueprint->requirements.size() != 0)
-            for (const auto &t: m->blueprint->requirements) {
-              if (additional_tools.contains(t))
-                continue;
-              const auto p = workspace.find_component(t);
-              if (p.has_value()) {
-                auto [component_path, db_path] = p.value();
-                this->add_additional_tool(component_path);
-              }
-            }
+      for (const auto &m: matches) {
+        // Check if the blueprint has additional requirements
+        for (const auto &t: m->blueprint->requirements) {
+          if (additional_tools.contains(t))
+            continue;
+          const auto p = workspace.find_component(t);
+          if (p.has_value()) {
+            auto [component_path, db_path] = p.value();
+            this->add_additional_tool(component_path);
+          }
         }
-      }
-      auto tasks = target_database.targets.equal_range(t);
 
-      std::for_each(tasks.first, tasks.second, [&new_targets](auto &i) {
-        if (i.second)
-          new_targets.insert(new_targets.end(), i.second->dependencies.begin(), i.second->dependencies.end());
-      });
+        // Add any new targets to the unprocessed list
+        new_targets.insert(new_targets.end(), m->dependencies.begin(), m->dependencies.end());
+      }
     }
 
     unprocessed_targets.clear();
