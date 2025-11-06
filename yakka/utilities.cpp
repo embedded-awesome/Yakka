@@ -4,6 +4,7 @@
 #include "spdlog/spdlog.h"
 #include "glob/glob.h"
 #include "yakka_schema.hpp"
+#include "blake3.h"
 #include <concepts>
 #include <string_view>
 #include <expected>
@@ -11,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <ranges>
+#include <chrono>
 #include <algorithm>
 #include <iomanip>
 #include <filesystem>
@@ -294,7 +296,7 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
 
     case nlohmann::detail::value_t::null:
       break;
-    
+
     default:
       switch (merge_target.type()) {
         case nlohmann::detail::value_t::object:
@@ -569,10 +571,10 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
 
   auto data_paths = std::ranges::views::split(data_path, '/') | std::views::drop(1);
   nlohmann::json::json_pointer data_pointer{ data_path.substr(1) };
-  
+
   auto iter = data_paths.begin();
-  const std::string first_part { std::string_view(*iter) };
-  const std::string second_part { std::string_view(*(++iter)) };
+  const std::string first_part{ std::string_view(*iter) };
+  const std::string second_part{ std::string_view(*(++iter)) };
   nlohmann::json::json_pointer remaining_pointer;
   for (const auto &part: data_paths | std::views::drop(2)) {
     remaining_pointer /= std::string(std::string_view{ part });
@@ -599,7 +601,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
 
   try {
     if (first_part == "components") {
-      if (second_part == std::string{data_wildcard_identifier}) {
+      if (second_part == std::string{ data_wildcard_identifier }) {
 
         // Using C++20 ranges to process components
         for (const auto &[component_name, _]: right["components"].items()) {
@@ -615,7 +617,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
         }
       } else {
         auto component_name = second_part;
-        auto result = process_component(component_name, remaining_pointer);
+        auto result         = process_component(component_name, remaining_pointer);
         if (!result.error_message.empty()) {
           return std::unexpected{ std::move(result.error_message) };
         }
@@ -661,4 +663,29 @@ void find_json_keys(const nlohmann::json &j, const std::string &target_key, cons
   }
 }
 
+void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept
+{
+  try {
+    auto start = std::chrono::steady_clock::now();
+
+    std::ifstream file(filename, std::ios::binary);
+    blake3_hasher hasher;
+    blake3_hasher_init(&hasher);
+    char buffer[4096];
+    while (file.read(buffer, sizeof(buffer))) {
+      blake3_hasher_update(&hasher, buffer, file.gcount());
+    }
+    if (file.gcount() > 0) {
+      blake3_hasher_update(&hasher, buffer, file.gcount());
+    }
+    blake3_hasher_finalize(&hasher, out_hash, BLAKE3_OUT_LEN);
+
+    auto end = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    spdlog::info("Hashed {} in {} ms", filename.generic_string(), ms);
+  } catch (std::exception &e) {
+    spdlog::error("Failed to hash file {}: {}", filename.generic_string(), e.what());
+    std::fill(out_hash, out_hash + 32, 0);
+  }
+}
 } // namespace yakka
