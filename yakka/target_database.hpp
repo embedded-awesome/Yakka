@@ -14,9 +14,12 @@ public:
   void load(const fs::path file_path);
   void save(const fs::path file_path);
 
-  void add_target(const std::string target, blueprint_database &blueprint_database, nlohmann::json project_summary);
-
-  std::multimap<std::string, std::shared_ptr<blueprint_match>> targets;
+  const std::vector<std::shared_ptr<blueprint_match>>& add_target(const std::string target, blueprint_database &blueprint_database, nlohmann::json project_summary);
+  const std::vector<std::shared_ptr<blueprint_match>>& get_target(const std::string target) const {
+    return targets.at(target);
+  }
+private:
+  std::map<std::string, std::vector<std::shared_ptr<blueprint_match>>> targets;
 };
 
 } // namespace yakka

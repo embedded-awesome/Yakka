@@ -36,14 +36,15 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
   }
 
   // Get targets that match the name
-  const auto &targets = project.target_database.targets.equal_range(target_name);
+  const auto &targets = project.target_database.get_target(target_name);
+  // const auto &targets = project.target_database.targets.equal_range(target_name);
 
   // If there is no targets then it must be a leaf node (source file, data dependency, etc)
-  if (targets.first == targets.second) {
+  if (targets.empty()) {
     //spdlog::info("{}: leaf node", target_name);
     auto construct_task = std::make_shared<construction_task>();
     todo_list.insert(std::make_pair(target_name, construct_task));
-    construct_task->task     = taskflow.placeholder().name(target_name);
+    construct_task->task = taskflow.placeholder().name(target_name);
 
     // Check if target is a data dependency
     if (target_name.front() == data_dependency_identifier) {
@@ -66,7 +67,8 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
     else if (fs::exists(target_name)) {
       // Create a new task to retrieve the file timestamp
       construct_task->task.work([construct_task, target_name]() {
-        // auto d     = static_cast<std::shared_ptr<construction_task>>(task.data());
+        // uint8_t hash[32];
+        // hash_file(target_name, hash);
         construct_task->last_modified = fs::last_write_time(target_name);
         //spdlog::info("{}: timestamp {}", target_name, (uint)d->last_modified.time_since_epoch().count());
         return;
@@ -79,32 +81,31 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
     return;
   }
 
-  for (auto i = targets.first; i != targets.second; ++i) {
+  for (const auto &i: targets) {
     // spdlog::info("{}: Not a leaf node", target_name);
     // ++work_task_count;
     auto construct_task = std::make_shared<construction_task>();
     todo_list.insert(std::make_pair(target_name, construct_task));
-    construct_task->match = i->second;
-    
-    if (i->second->blueprint->task_group.empty()) {
+    construct_task->match = i;
+
+    if (i->blueprint->task_group.empty()) {
       construct_task->group = todo_task_groups["Processing"];
     } else {
-      if (todo_task_groups.contains(i->second->blueprint->task_group))
-        construct_task->group = todo_task_groups[i->second->blueprint->task_group];
+      if (todo_task_groups.contains(i->blueprint->task_group))
+        construct_task->group = todo_task_groups[i->blueprint->task_group];
       else {
-        construct_task->group                             = std::make_shared<yakka::task_group>(i->second->blueprint->task_group);
-        todo_task_groups[i->second->blueprint->task_group] = construct_task->group;
+        construct_task->group                      = std::make_shared<yakka::task_group>(i->blueprint->task_group);
+        todo_task_groups[i->blueprint->task_group] = construct_task->group;
       }
     }
     ++construct_task->group->total_count;
 
     construct_task->task = taskflow.placeholder().name(target_name);
-    
+
     construct_task->task.work([construct_task, target_name, this, i, &project]() {
       if (abort_build)
         return;
       // spdlog::info("{}: process --- {}", target_name, task.hash_value());
-      // auto d     = static_cast<std::shared_ptr<construction_task>>(task.data());
       if (construct_task->last_modified != fs::file_time_type::min()) {
         // I don't think this event happens. This check can probably be removed
         spdlog::info("{} already done", target_name);
@@ -120,7 +121,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
           // If it doesn't exist as a file, run the command
           if (!fs::exists(target_name)) {
             try {
-              auto result      = run_command(target_name, construct_task->match, project, project.project_summary["data"]);
+              auto result                   = run_command(target_name, construct_task->match, project, project.project_summary["data"]);
               construct_task->last_modified = fs::file_time_type::clock::now();
               if (result.second != 0) {
                 spdlog::info("Aborting: {} returned {}", target_name, result.second);
@@ -149,8 +150,8 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
           if (!fs::exists(target_name) || max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch()) {
             spdlog::info("{}: Updating because of {}", target_name, max_element->first);
             try {
-              auto [output, retcode] = run_command(i->first, construct_task->match, project, project.project_summary["data"]);
-              construct_task->last_modified       = fs::file_time_type::clock::now();
+              auto [output, retcode]        = run_command(target_name, construct_task->match, project, project.project_summary["data"]);
+              construct_task->last_modified = fs::file_time_type::clock::now();
               if (retcode < 0) {
                 spdlog::info("Aborting: {} returned {}", target_name, retcode);
                 abort_build = true;
@@ -181,8 +182,8 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
     // new_todo->second.task = task;
 
     // For each dependency described in blueprint, retrieve or create task, add relationship, and add item to todo list
-    if (i->second)
-      for (auto &dep_target: i->second->dependencies)
+    if (i)
+      for (auto &dep_target: i->dependencies)
         create_tasks(dep_target.starts_with("./") ? dep_target.substr(dep_target.find_first_not_of("/", 2)) : dep_target, construct_task->task, project);
     // else
     //     spdlog::info("{} does not have blueprint match", i->first);
@@ -201,9 +202,9 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   inja_env.add_callback("store", 3, [&](const inja::Arguments &args) {
     if (args[0] && args[1]) {
       nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
-      auto key             = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
+      auto key = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
       if (key.front() == '/')
-        ptr = ptr / nlohmann::json::json_pointer{key};
+        ptr = ptr / nlohmann::json::json_pointer{ key };
       else
         ptr = ptr / key;
 
@@ -227,12 +228,12 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   inja_env.add_callback("push_back", 3, [&](const inja::Arguments &args) {
     if (args[0] && args[1]) {
       nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
-      auto key             = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
+      auto key = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
       if (key.front() == '/')
-        ptr = ptr / nlohmann::json::json_pointer{key};
+        ptr = ptr / nlohmann::json::json_pointer{ key };
       else
         ptr = ptr / key;
-      
+
       if (!data_store.contains(ptr)) {
         data_store[ptr] = nlohmann::json::array();
       }
@@ -281,7 +282,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 
   inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
     nlohmann::json aggregate;
-    auto path = nlohmann::json::json_pointer{args[0]->get<std::string>()};
+    auto path = nlohmann::json::json_pointer{ args[0]->get<std::string>() };
     // Loop through components, check if object path exists, if so add it to the aggregate
     for (const auto &[c_key, c_value]: project.project_summary["components"].items()) {
       // auto v = json_path(c.value(), path);
@@ -331,19 +332,18 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       return nlohmann::json{};
     }
   });
-  inja_env.set_include_callback([&](const std::filesystem::path& path, const std::string& template_name) {
+  inja_env.set_include_callback([&](const std::filesystem::path &path, const std::string &template_name) {
     const auto template_path = try_render(inja_env, template_name, project.project_summary);
     std::ifstream file;
     file.open(template_path);
     if (!file.fail()) {
       const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
       return inja::Template(text);
-    }
-    else {
+    } else {
       spdlog::error("Failed to open template file: {}", template_name);
       return inja::Template();
     }
-});
+  });
 
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
@@ -433,7 +433,7 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
   }
 #endif
 
-  auto t2 = std::chrono::high_resolution_clock::now();
+  auto t2       = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to create tasks", duration);
 
