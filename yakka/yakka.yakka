@@ -31,6 +31,7 @@ requires:
     - glob
     - json-schema-validator
     - rapidyaml
+    - blake3
 
 supports:
   components:
