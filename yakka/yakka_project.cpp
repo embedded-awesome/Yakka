@@ -460,6 +460,10 @@ project::state project::evaluate_dependencies()
           spdlog::error("Invalid choice {}", c);
           return project::state::PROJECT_HAS_INVALID_COMPONENT;
         }
+        if (option_count == 1 && choice.contains("default")) {
+          spdlog::error("Invalid choice {}: has default choice for single option", c);
+          return project::state::PROJECT_HAS_INVALID_COMPONENT;
+        }
         if (matches == 0 && choice.contains("default") && option_count > 1) {
           spdlog::info("Selecting default choice for {}", c);
           if (choice["default"].contains("feature")) {
@@ -649,7 +653,7 @@ void project::evaluate_choices()
           return required_features.contains(j.template get<std::string>());
         });
       }
-      if (value.contains("components")) {
+      else if (value.contains("components")) {
         option_count = value["components"].size();
         matches      = std::count_if(value["components"].begin(), value["components"].end(), [&](const auto &j) {
           return required_components.contains(j.template get<std::string>());
