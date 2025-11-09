@@ -651,7 +651,7 @@ void project::evaluate_choices()
       }
       if (matches == 0) {
         incomplete_choices.push_back({ c->id, choice_name });
-      } else if (matches > 1) {
+      } else if (matches > 1 && (!value.contains("exclusive") || value["exclusive"].get<bool>() == true)) {
         multiple_answer_choices.push_back(choice_name);
       }
     }
