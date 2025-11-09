@@ -445,19 +445,22 @@ project::state project::evaluate_dependencies()
       for (const auto &c: unprocessed_choices) {
         const auto &choice = project_summary["choices"][c];
         int matches        = 0;
-        if (choice.contains("features"))
-          matches = std::count_if(choice["features"].begin(), choice["features"].end(), [&](const nlohmann::json &j) {
+        int option_count   = 0;
+        if (choice.contains("features")) {
+          matches      = std::count_if(choice["features"].begin(), choice["features"].end(), [&](const nlohmann::json &j) {
             return required_features.contains(j.get<std::string>());
           });
-        else if (choice.contains("components"))
-          matches = std::count_if(choice["components"].begin(), choice["components"].end(), [&](const nlohmann::json &j) {
+          option_count = choice["features"].size();
+        } else if (choice.contains("components")) {
+          matches      = std::count_if(choice["components"].begin(), choice["components"].end(), [&](const nlohmann::json &j) {
             return required_components.contains(j.get<std::string>());
           });
-        else {
+          option_count = choice["components"].size();
+        } else {
           spdlog::error("Invalid choice {}", c);
           return project::state::PROJECT_HAS_INVALID_COMPONENT;
         }
-        if (matches == 0 && choice.contains("default")) {
+        if (matches == 0 && choice.contains("default") && option_count > 1) {
           spdlog::info("Selecting default choice for {}", c);
           if (choice["default"].contains("feature")) {
             unprocessed_features.insert(choice["default"]["feature"].get<std::string>());
@@ -638,18 +641,21 @@ void project::evaluate_choices()
   // For each component, check each choice has exactly one match in required features
   for (const auto &c: components) {
     for (const auto &[choice_name, value]: c->json["choices"].items()) {
-      int matches = 0;
+      int matches      = 0;
+      int option_count = 0;
       if (value.contains("features")) {
-        matches = std::count_if(value["features"].begin(), value["features"].end(), [&](const auto &j) {
+        option_count = value["features"].size();
+        matches      = std::count_if(value["features"].begin(), value["features"].end(), [&](const auto &j) {
           return required_features.contains(j.template get<std::string>());
         });
       }
       if (value.contains("components")) {
-        matches = std::count_if(value["components"].begin(), value["components"].end(), [&](const auto &j) {
+        option_count = value["components"].size();
+        matches      = std::count_if(value["components"].begin(), value["components"].end(), [&](const auto &j) {
           return required_components.contains(j.template get<std::string>());
         });
       }
-      if (matches == 0) {
+      if (matches == 0 && option_count > 1) {
         incomplete_choices.push_back({ c->id, choice_name });
       } else if (matches > 1 && (!value.contains("exclusive") || value["exclusive"].get<bool>() == true)) {
         multiple_answer_choices.push_back(choice_name);
