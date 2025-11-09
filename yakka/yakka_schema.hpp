@@ -94,6 +94,8 @@ class schema_validator {
           properties:
             description:
               type: string
+            exclusive:
+              type: boolean
             features:
               type: array
               items:
