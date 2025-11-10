@@ -33,7 +33,9 @@ flags:
       - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/shared" 
       - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/ucrt"
       - -DEBUG:FULL
-
+  asm:
+    global:
+      - /c
   ld:
     global:
       - -SUBSYSTEM:CONSOLE
@@ -48,6 +50,7 @@ flags:
 
 tools:
   cl: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/cl.exe"
+  ml: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/ml64.exe"
   link: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/link.exe"
   lib: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/lib.exe"
 
@@ -102,6 +105,15 @@ blueprints:
       - create_directory: '{{$(0)}}'
       - cl: "@{{project_output}}/{{project_name}}.global_cpp_options @{{project_output}}/components/{{$(1)}}/{{$(1)}}.cpp_options -sourceDependencies {{$(0)}}.d.json -Fo:{{$(0)}} {{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}"
   
+  asm_object_files:
+    regex: .+/components/([^/]*)/(.*)\.(asm)\.o
+    depends:
+      - '{{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}'
+    process:
+      - create_directory: '{{$(0)}}'
+      - ml: "{% for name, component in components %}{% for f in component.flags.asm.global %}{{f}} {% endfor %}{% endfor %} -Fo {{$(0)}} {{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}"
+  
+
   '{{project_output}}/{{project_name}}.global_ld_options':
     depends:
       - data:
