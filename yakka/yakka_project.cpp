@@ -113,7 +113,7 @@ void project::init_project()
 void project::process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node)
 {
   // Merge the feature values into the parent component
-  json_node_merge(""_json_pointer, component->json, child_node);
+  json_node_merge("/"_json_pointer, component->json, child_node);
 
   // Process required components
   if (child_node.contains("/requires/components"_json_pointer)) {

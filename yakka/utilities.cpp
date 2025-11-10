@@ -269,8 +269,8 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
         // Check if the key is already in merge_target
         auto it2 = merge_target.find(it.key());
         if (it2 != merge_target.end()) {
-          // auto merge_path = path / it.key();
-          json_node_merge(""_json_pointer, it2.value(), it.value());
+          auto merge_path = path / nlohmann::json::json_pointer(it.key());
+          json_node_merge(merge_path, it2.value(), it.value());
         } else {
           merge_target[it.key()] = it.value();
         }
@@ -681,7 +681,7 @@ void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept
     blake3_hasher_finalize(&hasher, out_hash, BLAKE3_OUT_LEN);
 
     auto end = std::chrono::steady_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     spdlog::info("Hashed {} in {} ms", filename.generic_string(), ms);
   } catch (std::exception &e) {
     spdlog::error("Failed to hash file {}: {}", filename.generic_string(), e.what());
