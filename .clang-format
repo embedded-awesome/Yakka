@@ -68,7 +68,7 @@ SpacesInConditionalStatement: false
 SpacesInContainerLiterals: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-TabWidth: 3
+TabWidth: 2
 UseCRLF: true
 UseTab: Never
 CommentPragmas:  '^\\.+'

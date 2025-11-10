@@ -1,7 +1,7 @@
 name: Microsoft Visual C compiler
 
 tooling:
-  build_tool_path: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.42.34433"
+  build_tool_path: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207"
   kit:
     path: "C:/Program Files (x86)/Windows Kits/10"
     version: "10.0.22621.0"
@@ -47,9 +47,9 @@ flags:
       - -LIBPATH:"{{components.msvc.tooling.kit.path}}/Lib/{{components.msvc.tooling.kit.version}}/ucrt/x64"
 
 tools:
-  cl: "cl.exe"
-  link: "link.exe"
-  lib: "lib.exe"
+  cl: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/cl.exe"
+  link: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/link.exe"
+  lib: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/lib.exe"
 
 blueprints:
   compile:
