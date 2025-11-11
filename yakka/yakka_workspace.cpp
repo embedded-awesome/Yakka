@@ -473,6 +473,60 @@ std::expected<fs::path, std::error_code> workspace::do_fetch_component(std::stri
   }
 }
 
+void workspace::update_versions()
+{
+  // Scan registries
+  const auto registry_path = workspace_path / ".yakka/registries";
+  if (!fs::exists(registry_path))
+    return;
+
+  // Using ranges and views for directory traversal
+  auto registry_files = std::views::filter(fs::recursive_directory_iterator(registry_path), [](const auto &entry) {
+    return entry.path().extension() == ".yaml";
+  });
+
+  for (const auto &file_path: registry_files) {
+    std::string registry_name = file_path.path().filename().string();
+
+    versions[registry_name] = {};
+
+    // Extract remote URL
+    versions[registry_name]["url"] = exec("git", "-C " + file_path.path().parent_path().string() + " config --get remote.origin.url").first;
+
+    // Extract last commit hash
+    versions[registry_name]["rev"] = exec("git", "-C " + file_path.path().parent_path().string() + " rev-parse HEAD").first;
+
+    // Extract version
+
+    // Hash the registry file
+    uint8_t hash[32];
+    hash_file(file_path.path(), hash);
+
+    std::stringstream hashstr;
+    hashstr << std::hex << std::setfill('0');
+    for (int i = 0; i < 32; i++) {
+      hashstr << std::setw(2) << static_cast<int>(hash[i]);
+    }
+    versions[registry_name]["hash"] = hashstr.str();
+  }
+
+  // Scan local components
+  // For component in local database
+  {
+    // Extract version
+
+    // Hash the component files
+  }
+
+  // Scan shared components
+  // For component in shared database
+  {
+    // Extract version
+
+    // Hash the component files
+  }
+}
+
 /**
  * @brief Returns the path corresponding to the home directory of BOB
  *        Typically this would be ~/.yakka or /Users/<username>/.yakka or $HOME/.yakka

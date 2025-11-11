@@ -21,7 +21,7 @@ namespace yakka {
 class workspace {
 public:
   /** @brief Default constructor */
-  workspace()  = default;
+  workspace() = default;
   /** @brief Default destructor */
   ~workspace() = default;
 
@@ -156,6 +156,16 @@ public:
                                                                      const fs::path &checkout_location,
                                                                      std::function<void(std::string_view, size_t)> progress_handler);
 
+  /**
+   * @brief Updates the workspace version information
+   */
+  void update_versions();
+
+  /**
+   * @brief Finds all component registry files in the workspace
+   */
+  std::vector<std::filesystem::path> find_component_registries() const;
+
 public:
   /** @brief Logger instance for workspace operations */
   std::shared_ptr<spdlog::logger> log;
@@ -168,6 +178,9 @@ public:
 
   /** @brief Projects configuration and information */
   nlohmann::json projects;
+
+  /** @brief Workspace version information */
+  nlohmann::json versions;
 
   /** @brief List of ongoing component fetch operations */
   std::map<std::string, std::future<void>> fetching_list;
