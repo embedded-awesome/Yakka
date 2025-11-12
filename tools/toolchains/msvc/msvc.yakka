@@ -1,15 +1,15 @@
 name: Microsoft Visual C compiler
 
-tooling:
-  build_tool_path: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207"
+requires:
+  data:
+    - '/msvc'
+
+msvc:
+  path: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/"
+  version: '14.42.34433'
   kit:
     path: "C:/Program Files (x86)/Windows Kits/10"
     version: "10.0.22621.0"
-
-windows_sdk:
-  directory: 
-    find_directory: "C:/Program Files (x86)/Windows Kits/10"
-  version: '{{ first( windows_sdk/directory/* ) }}'
 
 flags:
   c:
@@ -17,10 +17,10 @@ flags:
       - /Fm /c /EHsc /Ox /FS -MT /utf-8
       - /Zi
 #      - /GL
-      - -I"{{components.msvc.tooling.build_tool_path}}/include"
-      - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/um"
-      - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/shared"
-      - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/ucrt"
+      - -I"{{data.msvc.path}}/{{data.msvc.version}}/include"
+      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/um"
+      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/shared"
+      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/ucrt"
       - -DEBUG:FULL
 
   cpp:
@@ -28,10 +28,10 @@ flags:
       - /Fm /c /EHsc /Ox /FS -MT /utf-8 /std:c++latest
       - /Zi
 #      - /GL
-      - -I"{{components.msvc.tooling.build_tool_path}}/include" 
-      - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/um"
-      - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/shared" 
-      - -I"{{components.msvc.tooling.kit.path}}/Include/{{components.msvc.tooling.kit.version}}/ucrt"
+      - -I"{{data.msvc.path}}/{{data.msvc.version}}/include" 
+      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/um"
+      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/shared" 
+      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/ucrt"
       - -DEBUG:FULL
   asm:
     global:
@@ -44,17 +44,28 @@ flags:
       - -DEBUG:FULL
       - -OPT:NOICF
       -  /LTCG
-      - -LIBPATH:"{{components.msvc.tooling.kit.path}}/Lib/{{components.msvc.tooling.kit.version}}/um/x64"
-      - -LIBPATH:"{{components.msvc.tooling.build_tool_path}}/lib/onecore/x64"
-      - -LIBPATH:"{{components.msvc.tooling.kit.path}}/Lib/{{components.msvc.tooling.kit.version}}/ucrt/x64"
+      - -LIBPATH:"{{data.msvc.kit.path}}/Lib/{{data.msvc.kit.version}}/um/x64"
+      - -LIBPATH:"{{data.msvc.path}}/{{data.msvc.version}}/lib/onecore/x64"
+      - -LIBPATH:"{{data.msvc.kit.path}}/Lib/{{data.msvc.kit.version}}/ucrt/x64"
 
 tools:
-  cl: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/cl.exe"
-  ml: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/ml64.exe"
-  link: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/link.exe"
-  lib: "{{components.msvc.tooling.build_tool_path}}/bin/Hostx64/x64/lib.exe"
+  cl: "{{components.msvc.msvc.path}}/{{components.msvc.msvc.version}}/bin/Hostx64/x64/cl.exe"
+  ml: "{{components.msvc.msvc.path}}/{{components.msvc.msvc.version}}/bin/Hostx64/x64/ml64.exe"
+  link: "{{components.msvc.msvc.path}}/{{components.msvc.msvc.version}}/bin/Hostx64/x64/link.exe"
+  lib: "{{components.msvc.msvc.path}}/{{components.msvc.msvc.version}}/bin/Hostx64/x64/lib.exe"
 
 blueprints:
+  test:
+    depends:
+      - ':/data/msvc/version'
+    process:
+      - echo: '{{ data.msvc }}'
+  
+  ':/data/msvc/version':
+    process:
+      - echo: '{{ glob( concatenate(data.msvc.path, "/*") ) | first() | not_dir() }}'
+      - save:
+  
   compile:
     depends:
       - '{{project_output}}/{{project_name}}.lib'
@@ -75,6 +86,7 @@ blueprints:
     depends:
       - '[{% for name, component in components %}{%if existsIn(component,"sources") %}{% for source in component.sources %}{{project_output}}/components/{{name}}/{{source}}.o, {% endfor %}{% endif %}{% endfor %}]'
       - '{{project_output}}/{{project_name}}.global_lib_options'
+      - ':/data/msvc/version'
     process:
       - lib: "@{{project_output}}/{{project_name}}.global_lib_options -OUT:{{project_output}}/{{project_name}}.lib"
 
@@ -82,6 +94,7 @@ blueprints:
     depends:
       - '[{% for name, component in components %}{%if existsIn(component,"sources") %}{% for source in component.sources %}{{project_output}}/components/{{name}}/{{source}}.o, {% endfor %}{% endif %}{% endfor %}]'
       - '{{project_output}}/{{project_name}}.global_ld_options'
+      - ':/data/msvc/version'
     process:
       - link: "@{{project_output}}/{{project_name}}.global_ld_options -OUT:{{project_output}}/{{project_name}}.exe"
 
@@ -91,6 +104,7 @@ blueprints:
       - '{{project_output}}/components/{{$(1)}}/{{$(1)}}.c_options'
       - '{{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}'
       - '{{project_output}}/{{project_name}}.global_c_options'
+      - ':/data/msvc/version'
     process:
       - create_directory: '{{$(0)}}'
       - cl: "@{{project_output}}/{{project_name}}.global_c_options @{{project_output}}/components/{{$(1)}}/{{$(1)}}.c_options -sourceDependencies {{$(0)}}.d.json -Fo:{{$(0)}} {{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}"
@@ -101,6 +115,7 @@ blueprints:
       - '{{project_output}}/components/{{$(1)}}/{{$(1)}}.cpp_options'
       - '{{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}'
       - '{{project_output}}/{{project_name}}.global_cpp_options'
+      - ':/data/msvc/version'
     process:
       - create_directory: '{{$(0)}}'
       - cl: "@{{project_output}}/{{project_name}}.global_cpp_options @{{project_output}}/components/{{$(1)}}/{{$(1)}}.cpp_options -sourceDependencies {{$(0)}}.d.json -Fo:{{$(0)}} {{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}"
@@ -109,6 +124,7 @@ blueprints:
     regex: .+/components/([^/]*)/(.*)\.(asm)\.o
     depends:
       - '{{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}'
+      - ':/data/msvc/version'
     process:
       - create_directory: '{{$(0)}}'
       - ml: "{% for name, component in components %}{% for f in component.flags.asm.global %}{{f}} {% endfor %}{% endfor %} -Fo {{$(0)}} {{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}"
@@ -116,9 +132,8 @@ blueprints:
 
   '{{project_output}}/{{project_name}}.global_ld_options':
     depends:
-      - data:
-          - '/*/sources'
-          - '/*/flags/ld/global'
+      - ':/*/sources'
+      - ':/*/flags/ld/global'
     process:
       - inja: "-MAP:\"{{project_output}}/{{project_name}}.map\" {% for name,component in components %}{% for flag in component.flags.ld.global %}{{render(flag)}} {% endfor %}{%endfor%} -PDB:\"{{project_output}}/{{project_name}}.pdb\" {% for name, component in components %}{%if existsIn(component,\"sources\") %}{% for source in component/sources %}{{project_output}}/components/{{name}}/{{source}}.o {% endfor %}{% endif %}{% endfor %} Shlwapi.lib"
       - save:
@@ -126,10 +141,9 @@ blueprints:
   global_compiler_options:
     regex: '{{project_output}}/{{project_name}}.global_(cpp|c)_options'
     depends:
-      - data:
-          - '/*/flags/{{$(1)}}/global'
-          - '/*/includes/global'
-          - '/*/defines/global'
+      - ':/*/flags/{{$(1)}}/global'
+      - ':/*/includes/global'
+      - ':/*/defines/global'
     process:
       - inja: "{% for name,component in components %}
           {% if existsIn(component, \"flags\") and existsIn(component.flags, $(1)) %}{% for flag in at(component.flags, $(1)).global %}{{render(flag)}} {% endfor %}{%endif%}
@@ -143,10 +157,9 @@ blueprints:
   compiler_option_files:
     regex: '.+/components/([^/]*)/\1\.(cpp|c)_options'
     depends:
-      - data:
-          - '/{{$(1)}}/flags/{{$(2)}}/local'
-          - '/{{$(1)}}/includes/local'
-          - '/{{$(1)}}/defines/local'
+      - ':/{{$(1)}}/flags/{{$(2)}}/local'
+      - ':/{{$(1)}}/includes/local'
+      - ':/{{$(1)}}/defines/local'
     process:
       - create_directory: '{{$(0)}}'
       - inja: "{% set component=at(components,$(1)) %}
