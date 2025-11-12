@@ -30,6 +30,7 @@ int register_action(workspace &workspace, const cxxopts::ParseResult &result)
 int list_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   workspace.load_component_registries();
+  // Print components found in registries
   for (auto registry: workspace.registries) {
     // Group components by type
     std::multimap<std::string, std::string> components_by_type;
@@ -53,6 +54,12 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
         // Advance iterator to the next key group
         it = range.second;
     }
+  }
+
+  // Print components found locally
+  std::cout << "Local components:\n";
+  for (const auto &c: workspace.local_database.database["components"].items()) {
+    std::cout << "  - " << c.key() << "\n";
   }
   return 0;
 }
