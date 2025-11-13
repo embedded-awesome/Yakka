@@ -31,9 +31,9 @@ jobs:
         with:
           arch: amd64
       - run: "dir env:"
-      - run: 'dir "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"'
+      - run: 'dir "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"'
         if: always()
-      - run: 'dir "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"'
+      - run: 'dir "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC"'
         if: always()
       - run: ./yakka-windows link! yakka_cli msvc
       - run: mv ${{github.workspace}}/output/yakka_cli-msvc/yakka_cli-msvc.exe ${{github.workspace}}/output/yakka_cli-msvc/yakka-windows.exe
