@@ -182,14 +182,13 @@ int main(int argc, char **argv)
       // Call the corresponding handler function
       return action_it->second(workspace, result);
     }
-    
+
     std::cout << "Must provide an action or a command (commands end with !)\n";
     return 0;
   } else {
     // Action must be a command. Drop the !
     action.pop_back();
   }
-
 
   // Process the command line options
   std::string project_name;
@@ -373,14 +372,19 @@ int main(int argc, char **argv)
     }
   }
 
-  project.generate_target_database();
-  yakka::task_engine task_engine;
-  t2 = std::chrono::high_resolution_clock::now();
-
+  try {
+    spdlog::debug("Generating target database");
+    project.generate_target_database();
+  } catch (const std::exception &e) {
+    spdlog::error("Failed to generate target database: {}", e.what());
+    return -1;
+  }
+  t2       = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to process blueprints", duration);
 
   progress_bar_task_ui progress_bar_ui;
+  yakka::task_engine task_engine;
   task_engine.run_taskflow(project, &progress_bar_ui);
 
   auto yakka_end_time = fs::file_time_type::clock::now();
@@ -415,7 +419,6 @@ static void evaluate_project_dependencies(yakka::workspace &workspace, yakka::pr
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to process components", duration);
 }
-
 
 static void print_project_choice_errors(yakka::project &project)
 {
