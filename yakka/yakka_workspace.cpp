@@ -179,21 +179,21 @@ std::optional<std::pair<fs::path, fs::path>> workspace::find_component(std::stri
 std::optional<nlohmann::json> workspace::find_feature(std::string_view feature) const
 {
   // Using structured bindings and if-init statement
-  if (auto node = local_database.get_feature_provider(std::string(feature)); node.has_value()) {
+  if (auto node = local_database.get_feature_provider(feature); node.has_value()) {
     return std::optional<nlohmann::json>(*node);
   }
 
-  if (auto node = shared_database.get_feature_provider(std::string(feature)); node.has_value()) {
+  if (auto node = shared_database.get_feature_provider(feature); node.has_value()) {
     return std::optional<nlohmann::json>(*node);
   }
 
   // Using ranges to search package databases
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
-    return db.get_feature_provider(std::string(feature)).has_value();
+    return db.get_feature_provider(feature).has_value();
   });
 
   if (found != package_databases.end()) {
-    return found->get_feature_provider(std::string(feature));
+    return found->get_feature_provider(feature);
   }
 
   return std::nullopt;
@@ -202,20 +202,20 @@ std::optional<nlohmann::json> workspace::find_feature(std::string_view feature) 
 // Blueprint finding with modern features
 std::optional<nlohmann::json> workspace::find_blueprint(std::string_view blueprint) const
 {
-  if (auto node = local_database.get_blueprint_provider(std::string(blueprint)); node.has_value()) {
+  if (auto node = local_database.get_blueprint_provider(blueprint); node.has_value()) {
     return std::optional<nlohmann::json>(*node);
   }
 
-  if (auto node = shared_database.get_blueprint_provider(std::string(blueprint)); node.has_value()) {
+  if (auto node = shared_database.get_blueprint_provider(blueprint); node.has_value()) {
     return std::optional<nlohmann::json>(*node);
   }
 
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
-    return db.get_blueprint_provider(std::string(blueprint)).has_value();
+    return db.get_blueprint_provider(blueprint).has_value();
   });
 
   if (found != package_databases.end()) {
-    return found->get_blueprint_provider(std::string(blueprint));
+    return found->get_blueprint_provider(blueprint);
   }
 
   return std::nullopt;
