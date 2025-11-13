@@ -1,0 +1,48 @@
+name: Yakka
+
+sources:
+  - yakka_project.cpp
+  - yakka_component.cpp
+  - yakka_workspace.cpp
+  - component_database.cpp
+  - target_database.cpp
+  - yakka_blueprint.cpp
+  - blueprint_database.cpp
+  - blueprint_commands.cpp
+  - utilities.cpp
+  - task_engine.cpp
+  - yakka_schema.cpp
+
+includes:
+  global:
+    - '.'
+
+requires:
+  components:
+    - yaml-cpp
+    - cpp-subprocess
+    - inja
+    - json
+    - cpp-semver
+    - indicators
+    - cxxopts
+    - spdlog
+    - taskflow
+    - glob
+    - json-schema-validator
+    - rapidyaml
+    - blake3
+
+supports:
+  components:
+    gcc:
+      flags:
+        cpp:
+          global:
+          - -Wno-error=sign-compare
+    xcode:
+      flags:
+        cpp:
+          global:
+            - -Wno-deprecated-declarations
+

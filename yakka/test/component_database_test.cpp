@@ -36,7 +36,7 @@ TEST_F(ComponentDatabaseTest, LoadEmptyDatabase)
   auto result = db.load(test_path);
   EXPECT_TRUE(result.has_value());
   EXPECT_EQ(db.get_path(), test_path);
-  EXPECT_TRUE(fs::exists(test_path / "yakka-components.json"));
+  EXPECT_TRUE(fs::exists(test_path / yakka::database_filename));
 }
 
 TEST_F(ComponentDatabaseTest, InsertComponent)
@@ -110,7 +110,7 @@ TEST_F(ComponentDatabaseTest, DatabaseModification)
   // Test erase
   db.insert("test2", test_path / "test2.yakka");
   db.erase();
-  EXPECT_FALSE(fs::exists(test_path / "yakka-components.json"));
+  EXPECT_FALSE(fs::exists(test_path / yakka::database_filename));
 }
 
 } // namespace yakka::test

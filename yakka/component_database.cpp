@@ -1,3 +1,4 @@
+#include "yakka.hpp"
 #include "component_database.hpp"
 #include "spdlog/spdlog.h"
 #include "ryml.hpp"
@@ -39,11 +40,11 @@ void component_database::insert(std::string_view id, const path &config_file)
 std::expected<void, error> component_database::load(const path &workspace_path)
 {
   this->workspace_path = workspace_path;
-  database_filename    = this->workspace_path / "yakka-components.json";
+  database_filename    = this->workspace_path / yakka::database_filename;
 
   try {
     if (!fs::exists(database_filename)) {
-      database = { { "components", nullptr }, { "features", nullptr } };
+      database = { { "blueprints", nullptr }, { "components", nullptr }, { "features", nullptr }, { "types", nullptr } };
       scan_for_components(this->workspace_path);
       return save();
     }
@@ -52,7 +53,7 @@ std::expected<void, error> component_database::load(const path &workspace_path)
     database = json::parse(ifs);
 
     if (!database.contains("components")) {
-      database = { { "components", nullptr }, { "features", nullptr } };
+      database = { { "blueprints", nullptr }, { "components", nullptr }, { "features", nullptr }, { "types", nullptr } };
       scan_for_components(this->workspace_path);
       return save();
     }
@@ -140,12 +141,20 @@ void component_database::scan_for_components(std::optional<path> search_start_pa
   };
 
   auto entries = fs::recursive_directory_iterator(scan_path) | std::views::filter([](const auto &e) {
-                   return !e.is_directory() && e.path().filename().string().front() != '.'
+                   std::error_code ec;
+                   fs::perms permissions = fs::status(e.path()).permissions();
+                   if ((permissions & fs::perms::owner_read) == fs::perms::none) {
+                     return false;
+                   }
+                   return e.exists(ec) && !e.is_directory() && e.path().filename().string().front() != '.'
                           && (e.path().extension() == yakka::yakka_component_extension || e.path().extension() == yakka::yakka_component_old_extension || e.path().extension() == yakka::slcc_component_extension
                               || e.path().extension() == yakka::slcp_component_extension);
                  });
-
-  std::ranges::for_each(entries, process_entry);
+  try {
+    std::ranges::for_each(entries, process_entry);
+  } catch (const std::filesystem::filesystem_error &e) {
+    spdlog::error("Error scanning for components: {}. See '{}'", e.what(), e.path1().string());
+  }
   has_scanned = true;
 }
 
@@ -199,36 +208,69 @@ std::expected<std::string, error> component_database::get_component_id(const pat
   return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
 }
 
-std::optional<json> component_database::get_blueprint_provider(std::string_view blueprint) const
+std::optional<const json> component_database::get_blueprint_provider(std::string_view blueprint) const
 {
   const auto blueprint_str = std::string{ blueprint };
   if (database["blueprints"].contains(blueprint_str)) {
-    return database["blueprints"][blueprint_str];
+    return std::optional<const json>(std::in_place, database["blueprints"][blueprint_str]);
   }
 
   return std::nullopt;
 }
 
+std::optional<const json> component_database::get_serve_endpoint_provider(std::string_view endpoint) const
+{
+  const auto endpoint_str = std::string{ endpoint };
+  if (database["serve"].contains(endpoint_str)) {
+    return std::optional<const json>(std::in_place, database["serve"][endpoint_str]);
+  }
+  return std::nullopt;
+}
+
 std::expected<void, std::error_code> component_database::parse_yakka_file(const path &path, std::string_view id)
 {
-  std::vector<char> contents = yakka::get_file_contents<std::vector<char>>(path.string());
-  ryml::Tree tree            = ryml::parse_in_place(ryml::to_substr(contents));
-  auto root                  = tree.crootref();
+  auto result = yakka::get_file_contents<std::vector<char>>(path.string());
+  if (!result) {
+    return std::unexpected(result.error());
+  }
+  ryml::Tree tree = ryml::parse_in_place(ryml::to_substr(*result));
+  auto root       = tree.crootref();
 
+  // Check for blueprints and process them
   if (root.has_child("blueprints")) {
     for (const auto &b: root["blueprints"].children()) {
       process_blueprint(database, id, b);
     }
   }
 
+  // Check for Yakka serve endpoints
+  if (root.has_child("yakka") && root["yakka"].has_child("serve")) {
+    for (const auto &f: root["yakka"]["serve"].children()) {
+      std::string endpoint = std::string{ f.val().str, f.val().len };
+      database["serve"][endpoint].push_back(std::string{ id });
+    }
+  }
+
+  if (root.has_child("type")) {
+    if (root["type"].is_seq()) {
+      for (const auto &t: root["type"].children()) {
+        std::string type_name = std::string{ t.val().str, t.val().len };
+        database["types"][type_name].push_back(std::string{ id });
+      }
+    } else {
+      std::string type_name = std::string{ root["type"].val().str, root["type"].val().len };
+      database["types"][type_name].push_back(std::string{ id });
+    }
+  }
+
   return {};
 }
 
-std::optional<json> component_database::get_feature_provider(std::string_view feature) const
+std::optional<const json> component_database::get_feature_provider(std::string_view feature) const
 {
   const auto feature_str = std::string{ feature };
   if (database["features"].contains(feature_str)) {
-    return database["features"][feature_str];
+    return std::optional<const json>(std::in_place, database["features"][feature_str]);
   }
   return std::nullopt;
 }
@@ -236,9 +278,12 @@ std::optional<json> component_database::get_feature_provider(std::string_view fe
 std::expected<void, std::error_code> component_database::parse_slcc_file(const path &path)
 {
   try {
-    std::vector<char> contents = yakka::get_file_contents<std::vector<char>>(path.string());
-    ryml::Tree tree            = ryml::parse_in_place(ryml::to_substr(contents));
-    auto root                  = tree.crootref();
+    auto file_content = yakka::get_file_contents<std::vector<char>>(path.string());
+    if (!file_content) {
+      return std::unexpected(file_content.error());
+    }
+    ryml::Tree tree = ryml::parse_in_place(ryml::to_substr(*file_content));
+    auto root       = tree.crootref();
 
     c4::yml::ConstNodeRef id_node;
     c4::yml::ConstNodeRef provides_node;

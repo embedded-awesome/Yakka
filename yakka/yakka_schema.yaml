@@ -1,0 +1,103 @@
+title: Yakka file
+  type: object
+  properties:
+    name:
+      description: Name
+      type: string
+
+    requires:
+      type: object
+      description: Requires relationships
+      properties:
+        features:
+          type: [array, null]
+          description: Collection of features
+          uniqueItems: true
+          items:
+            type: string
+        components:
+          type: [array, null]
+          description: Collection of components
+          uniqueItems: true
+          items:
+            type: string
+
+    supports:
+      type: object
+      description: Supporting relationships
+      properties:
+        features:
+          type: object
+          description: Collection of features
+          patternProperties:
+            '.*':
+              type: object
+        components:
+          type: object
+          description: Collection of components
+          patternProperties:
+            '.*':
+              type: object
+
+    blueprints:
+      type: object
+      description: Blueprints
+      propertyNames:
+        pattern: "^[A-Za-z_.{][A-Za-z0-9.{}/\\\\_]*$"
+      patternProperties:
+        '.*':
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            regex:
+              type: string
+            group:
+              type: string
+            depends:
+              type: array
+            process:
+              type: array
+              items:
+                type: object
+    choices:
+      type: object
+      description: Choices
+      propertyNames:
+        pattern: "^[A-Za-z0-9_.]*$"
+      patternProperties:
+        '.*':
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          required:
+            - description
+          properties:
+            description:
+              type: string
+            features:
+              type: array
+              items:
+                type: string
+            components:
+              type: array
+              items:
+                type: string
+            data:
+              type: object
+            default:
+              type: object
+              oneOf:
+                - properties:
+                    feature:
+                      type: string
+                  required:
+                    - feature
+                - properties:
+                    component:
+                      type: string
+                  required:
+                    - component
+
+  required: 
+    - name

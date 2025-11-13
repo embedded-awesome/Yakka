@@ -1,18 +1,22 @@
 #include "yakka.hpp"
 #include "yakka_workspace.hpp"
+#include "task_engine.hpp"
 #include "yakka_project.hpp"
+#include "target_database.hpp"
 #include "utilities.hpp"
+#include "yakka_config.hpp"
+#include "yakka_cli_actions.hpp"
 #include "cxxopts.hpp"
 #include "subprocess.hpp"
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/sinks/basic_file_sink.h"
 #include "semver/semver.hpp"
+#include "taskflow.hpp"
 #include <indicators/dynamic_progress.hpp>
 #include <indicators/progress_bar.hpp>
 #include <indicators/cursor_control.hpp>
 #include <indicators/termcolor.hpp>
-#include "taskflow.hpp"
 #include <iostream>
 #include <fstream>
 #include <chrono>
@@ -23,11 +27,60 @@ using namespace indicators;
 using namespace std::chrono_literals;
 
 static void evaluate_project_dependencies(yakka::workspace &workspace, yakka::project &project);
-static void download_unknown_components(yakka::workspace &workspace, yakka::project &project);
 static void print_project_choice_errors(yakka::project &project);
-static void run_taskflow(yakka::project &project);
 
-tf::Task &create_tasks(yakka::project &project, const std::string &name, std::map<std::string, tf::Task> &tasks, tf::Taskflow &taskflow);
+struct progress_bar_task_ui : yakka::task_engine_ui {
+  DynamicProgress<ProgressBar> task_progress_ui;
+  std::vector<std::shared_ptr<ProgressBar>> task_progress_bars;
+
+  void init(yakka::task_engine &task_engine)
+  {
+    // Find the longest name of the task groups
+    size_t largest_name_length = 0;
+    for (const auto &i: task_engine.todo_task_groups) {
+      if (i.second->name.size() > largest_name_length)
+        largest_name_length = i.second->name.size() + 1; // +1 for the space
+    }
+
+    for (auto &i: task_engine.todo_task_groups) {
+      std::string spaces(largest_name_length - i.second->name.size(), ' ');
+      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ i.second->name + spaces }, option::MaxProgress{ i.second->total_count });
+      task_progress_bars.push_back(new_task_bar);
+      i.second->ui_id = task_progress_ui.push_back(*new_task_bar);
+      task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
+    }
+    task_progress_ui.print_progress();
+
+    //    project.task_complete_handler = [&](std::shared_ptr<yakka::task_group> group) {
+    //      ++group->current_count;
+    //    };
+  };
+
+  void update(yakka::task_engine &task_engine)
+  {
+    for (const auto &i: task_engine.todo_task_groups) {
+      if (i.second->current_count != i.second->last_progress_update) {
+        task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
+        //size_t new_progress = (100 * i.second->current_count) / i.second->total_count;
+        task_progress_ui[i.second->ui_id].set_progress(i.second->current_count);
+        i.second->last_progress_update = i.second->current_count;
+        if (i.second->current_count == i.second->total_count) {
+          task_progress_ui[i.second->ui_id].mark_as_completed();
+        }
+      }
+    }
+  };
+
+  void finish(yakka::task_engine &task_engine)
+  {
+    for (const auto &i: task_engine.todo_task_groups) {
+      task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
+      task_progress_ui[i.second->ui_id].set_progress(i.second->current_count);
+    }
+    task_progress_ui.print_progress();
+  };
+};
+
 static const semver::version yakka_version{
 #include "yakka_version.h"
 };
@@ -64,7 +117,7 @@ int main(int argc, char **argv)
 
   // Create a workspace
   yakka::workspace workspace;
-  workspace.init(".");
+  workspace.init(fs::current_path());
 
   cxxopts::Options options("yakka", "Yakka the embedded builder. Ver " + yakka_version.str());
   options.allow_unrecognised_options();
@@ -80,7 +133,7 @@ int main(int argc, char **argv)
                        ("d,data", "Additional data", cxxopts::value<std::string>())
                        ("no-slcc", "Ignore SLC files", cxxopts::value<bool>()->default_value("false"))
                        ("no-yakka", "Ignore Yakka files", cxxopts::value<bool>()->default_value("false"))
-                       ("action", "Select from 'register', 'list', 'update', 'git', 'remove', 'fetch' or a command", cxxopts::value<std::string>());
+                       ("action", "Select from 'register', 'list', 'update', 'git', 'remove', 'fetch', 'serve' or a command", cxxopts::value<std::string>());
   // clang-format on
 
   options.parse_positional({ "action" });
@@ -122,90 +175,20 @@ int main(int argc, char **argv)
   }
 
   auto action = result["action"].as<std::string>();
-  if (action == "register") {
-    if (result.unmatched().size() == 0) {
-      spdlog::error("Must provide URL of component registry");
-      return -1;
-    }
-    // Ensure the BOB registries directory exists
-    fs::create_directories(".yakka/registries");
-    spdlog::info("Adding component registry...");
-    auto status = workspace.add_component_registry(result.unmatched()[0]);
-    if (!status.has_value()) {
-      spdlog::error("Failed to add component registry. See yakka.log for details: {}", status.error().message());
-      return -1;
-    }
-    spdlog::info("Complete");
-    return 0;
-  } else if (action == "list") {
-    workspace.load_component_registries();
-    for (auto registry: workspace.registries) {
-      std::cout << registry.second["name"] << "\n";
-      for (auto c: registry.second["provides"]["components"])
-        std::cout << "  - " << c.first << "\n";
-    }
-    return 0;
-  } else if (action == "update") {
-    // Find all the component repos in .yakka
-    //for (auto d: fs::directory_iterator(".yakka/repos"))
-    for (auto &i: result.unmatched()) {
-      // const auto name = d.path().filename().generic_string();
-      std::cout << "Updating: " << i << "\n";
-      auto result = workspace.update_component(i);
-      if (!result.has_value()) {
-        spdlog::error("Failed to update component '{}'. See yakka.log for details: {}", i, result.error().message());
-        return -1;
-      }
+  if (action.back() != '!') {
+    // Check if the action exists in our map
+    auto action_it = yakka::cli_actions.find(action);
+    if (action_it != yakka::cli_actions.end()) {
+      // Call the corresponding handler function
+      return action_it->second(workspace, result);
     }
 
-    std::cout << "Complete\n";
-    return 0;
-  } else if (action == "remove") {
-    // Find all the component repos in .yakka
-    for (auto &i: result.unmatched()) {
-      auto optional_location = workspace.find_component(i);
-      if (optional_location) {
-        auto [path, package] = optional_location.value();
-        spdlog::info("Removing {}", path.string());
-        fs::remove_all(path);
-      }
-    }
-
-    std::cout << "Complete\n";
-    return 0;
-  } else if (action == "git") {
-    auto iter                 = result.unmatched().begin();
-    const auto component_name = *iter;
-    std::string git_command   = "--git-dir=.yakka/repos/" + component_name + "/.git --work-tree=components/" + component_name;
-    for (iter++; iter != result.unmatched().end(); ++iter)
-      if (iter->find(' ') == std::string::npos)
-        git_command.append(" " + *iter);
-      else
-        git_command.append(" \"" + *iter + "\"");
-
-    auto [output, result] = yakka::exec("git", git_command);
-    std::cout << output;
-    return 0;
-  } else if (action == "fetch") {
-    yakka::project project("", workspace);
-    // Identify components named on command line and add to unknown components
-    for (auto s: result.unmatched()) {
-      if (s.front() == '+' || s.back() == '!')
-        continue;
-      else
-        project.unknown_components.insert(s);
-    }
-
-    // Fetch the components
-    download_unknown_components(workspace, project);
-    return 0;
-  } else if (action.back() != '!') {
     std::cout << "Must provide an action or a command (commands end with !)\n";
     return 0;
+  } else {
+    // Action must be a command. Drop the !
+    action.pop_back();
   }
-
-  // Action must be a command. Drop the !
-  action.pop_back();
 
   // Process the command line options
   std::string project_name;
@@ -245,16 +228,11 @@ int main(int argc, char **argv)
   // Create a project and output
   yakka::project project(project_name, workspace);
 
-  // Move the CLI parsed data to the project
-  // project.unprocessed_components = std::move(components);
-  // project.unprocessed_features = std::move(features);
-  project.commands = std::move(commands);
-
   // Add the action as a command
-  project.commands.insert(action);
+  commands.insert(action);
 
   // Init the project
-  project.init_project(components, features);
+  project.init_project(components, features, commands);
 
   // Check if we don't want Yakka files
   if (result["no-yakka"].count() != 0) {
@@ -325,6 +303,17 @@ int main(int argc, char **argv)
     project.process_slc_rules();
 
   // Project evaluation is complete
+  project.generate_project_summary();
+
+  // Merge project data
+  project.update_project_data();
+
+  // Evaluate the project schema including defaults
+  auto t1 = std::chrono::high_resolution_clock::now();
+  project.validate_schema();
+  auto t2       = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  spdlog::info("{}ms to validate schemas", duration);
 
   // Print a list of required features
   spdlog::info("Required features:");
@@ -332,16 +321,9 @@ int main(int argc, char **argv)
     spdlog::info("- {}", f);
 
   // Generate and save the summary
-  project.generate_project_summary();
   project.save_summary();
 
-  auto t1 = std::chrono::high_resolution_clock::now();
-  project.validate_schema();
-  auto t2       = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-  spdlog::info("{}ms to validate schemas", duration);
-
-  if (project.current_state != yakka::project::state::PROJECT_VALID)
+  if (project.current_state != yakka::project::state::PROJECT_VALID && !result["ignore-eval"].as<bool>())
     exit(-1);
 
   // Insert additional command line data before processing blueprints
@@ -351,11 +333,13 @@ int main(int argc, char **argv)
     YAML::Node yaml_data       = YAML::Load(additional_data);
     nlohmann::json json_data   = yaml_data.as<nlohmann::json>();
     spdlog::info("Additional data: {}", json_data.dump());
-    yakka::json_node_merge(project.project_summary["data"], json_data);
+    yakka::json_node_merge("/data"_json_pointer, project.project_summary["data"], json_data);
   }
 
   t1 = std::chrono::high_resolution_clock::now();
   project.process_blueprints();
+
+  project.save_blueprints();
 
   // Ensure all the commands have a blueprint
   spdlog::info("Checking for missing blueprints");
@@ -388,14 +372,25 @@ int main(int argc, char **argv)
     }
   }
 
-  project.generate_target_database();
-  t2 = std::chrono::high_resolution_clock::now();
-
+  try {
+    spdlog::debug("Generating target database");
+    project.generate_target_database();
+  } catch (const std::exception &e) {
+    spdlog::error("Failed to generate target database: {}", e.what());
+    return -1;
+  }
+  t2       = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to process blueprints", duration);
-  project.load_common_commands();
 
-  run_taskflow(project);
+  yakka::task_engine task_engine;
+  progress_bar_task_ui progress_bar_ui;
+  try {
+    task_engine.run_taskflow(project, &progress_bar_ui);
+  } catch (const std::exception &e) {
+    spdlog::error("Running task engine failed: {}", e.what());
+    return -1;
+  }
 
   auto yakka_end_time = fs::file_time_type::clock::now();
   std::cout << "Complete in " << std::chrono::duration_cast<std::chrono::milliseconds>(yakka_end_time - yakka_start_time).count() << " milliseconds" << std::endl;
@@ -403,165 +398,10 @@ int main(int argc, char **argv)
   spdlog::shutdown();
   show_console_cursor(true);
 
-  if (project.abort_build)
+  if (task_engine.abort_build)
     return -1;
   else
     return 0;
-}
-
-void run_taskflow(yakka::project &project)
-{
-  tf::Executor executor(std::min(32U, std::thread::hardware_concurrency()));
-  project.todo_task_groups["Processing"] = std::make_shared<yakka::task_group>("Processing");
-  auto finish                            = project.taskflow.emplace([&]() {
-    // execution_progress = 100;
-  });
-  for (auto &i: project.commands)
-    project.create_tasks(i, finish);
-
-  DynamicProgress<ProgressBar> task_progress_ui;
-  std::vector<std::shared_ptr<ProgressBar>> task_progress_bars;
-  for (auto &i: project.todo_task_groups) {
-    std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ i.second->name }, option::MaxProgress{ i.second->total_count });
-    task_progress_bars.push_back(new_task_bar);
-    i.second->ui_id = task_progress_ui.push_back(*new_task_bar);
-    task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
-  }
-  task_progress_ui.print_progress();
-
-  project.task_complete_handler = [&](std::shared_ptr<yakka::task_group> group) {
-    ++group->current_count;
-    // ++execution_progress;
-  };
-
-  auto execution_future = executor.run(project.taskflow);
-
-  do {
-    for (const auto &i: project.todo_task_groups) {
-      if (i.second->current_count != i.second->last_progress_update) {
-        task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
-        //size_t new_progress = (100 * i.second->current_count) / i.second->total_count;
-        task_progress_ui[i.second->ui_id].set_progress(i.second->current_count);
-        i.second->last_progress_update = i.second->current_count;
-        if (i.second->current_count == i.second->total_count) {
-          task_progress_ui[i.second->ui_id].mark_as_completed();
-        }
-      }
-    }
-  } while (execution_future.wait_for(500ms) != std::future_status::ready);
-
-  for (const auto &i: project.todo_task_groups) {
-    task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
-    task_progress_ui[i.second->ui_id].set_progress(i.second->current_count);
-  }
-  task_progress_ui.print_progress();
-}
-
-static void download_unknown_components(yakka::workspace &workspace, yakka::project &project)
-{
-  auto t1 = std::chrono::high_resolution_clock::now();
-
-  // If there are still missing components, try and download them
-  if (!project.unknown_components.empty()) {
-    workspace.load_component_registries();
-
-    show_console_cursor(false);
-    DynamicProgress<ProgressBar> fetch_progress_ui;
-    std::vector<std::shared_ptr<ProgressBar>> fetch_progress_bars;
-
-    std::map<std::string, std::future<fs::path>> fetch_list;
-    do {
-      // Ask the workspace to fetch them
-      for (const auto &i: project.unknown_components) {
-        if (fetch_list.find(i) != fetch_list.end())
-          continue;
-
-        // Check if component is in the registry
-        auto node = workspace.find_registry_component(i);
-        if (node) {
-          std::shared_ptr<ProgressBar> new_progress_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ "Fetching " + i + " " }, option::SavedStartTime{ true });
-          fetch_progress_bars.push_back(new_progress_bar);
-          size_t id = fetch_progress_ui.push_back(*new_progress_bar);
-          fetch_progress_ui.print_progress();
-          auto result = workspace.fetch_component(i, *node, [&fetch_progress_ui, id](std::string_view prefix, size_t number) {
-            fetch_progress_ui[id].set_option(option::PrefixText{ prefix });
-            if (number >= 100) {
-              fetch_progress_ui[id].set_progress(100);
-              fetch_progress_ui[id].mark_as_completed();
-            } else
-              fetch_progress_ui[id].set_progress(number);
-          });
-          if (result.valid())
-            fetch_list.insert({ i, std::move(result) });
-        }
-      }
-
-      // Check if we haven't been able to fetch any of the unknown components
-      if (fetch_list.empty()) {
-        for (const auto &i: project.unknown_components)
-          spdlog::error("Cannot fetch {}", i);
-        spdlog::shutdown();
-        exit(0);
-      }
-
-      // Wait for one of the components to be complete
-      decltype(fetch_list)::iterator completed_fetch;
-      do {
-        completed_fetch = std::find_if(fetch_list.begin(), fetch_list.end(), [](auto &fetch_item) {
-          return fetch_item.second.wait_for(100ms) == std::future_status::ready;
-        });
-      } while (completed_fetch == fetch_list.end());
-
-      auto new_component_path = completed_fetch->second.get();
-
-      // Check if the fetch worked
-      if (new_component_path.empty()) {
-        spdlog::error("Failed to fetch {}", completed_fetch->first);
-        project.unknown_components.erase(completed_fetch->first);
-        fetch_list.erase(completed_fetch);
-        continue;
-      }
-
-      // Update the component database
-      if (new_component_path.string().starts_with(workspace.shared_components_path.string())) {
-        spdlog::info("Scanning for new component in shared database");
-        workspace.shared_database.scan_for_components(new_component_path);
-        auto result = workspace.shared_database.save();
-        if (!result.has_value()) {
-          spdlog::error("Failed to save shared database: {}", result.error().message());
-          exit(1);
-        }
-      } else {
-        spdlog::info("Scanning for new component in local database");
-        workspace.local_database.scan_for_components(new_component_path);
-        auto result = workspace.shared_database.save();
-        if (!result.has_value()) {
-          spdlog::error("Failed to save shared database: {}", result.error().message());
-          exit(1);
-        }
-      }
-
-      // Check if any of our unknown components have been found
-      for (auto i = project.unknown_components.cbegin(); i != project.unknown_components.cend();) {
-        if (!workspace.local_database.get_component(*i, project.component_flags).has_value() || !workspace.shared_database.get_component(*i, project.component_flags).has_value()) {
-          // Remove component from the unknown list and add it to the unprocessed list
-          project.unprocessed_components.insert(*i);
-          i = project.unknown_components.erase(i);
-        } else
-          ++i;
-      }
-
-      // Remove the item from the fetch list
-      fetch_list.erase(completed_fetch);
-
-      // Re-evaluate the project dependencies
-      project.evaluate_dependencies();
-    } while (!project.unprocessed_components.empty() || !project.unknown_components.empty() || !fetch_list.empty());
-  }
-
-  auto t2       = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-  spdlog::info("{}ms to download missing components", duration);
 }
 
 static void evaluate_project_dependencies(yakka::workspace &workspace, yakka::project &project)

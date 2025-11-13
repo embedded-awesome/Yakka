@@ -2,4 +2,4 @@ name: CPP Semver
 
 includes:
   global:
-    - main/include
+    - include

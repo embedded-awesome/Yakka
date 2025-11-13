@@ -1,7 +1,9 @@
 #include "yaml-cpp/yaml.h"
+#include "yakka_component.hpp"
 #include <nlohmann/json-schema.hpp>
 #include "spdlog.h"
 #include "slcc_schema.hpp"
+#include <ranges>
 
 namespace yakka {
 
@@ -26,16 +28,18 @@ class schema_validator {
       properties:
         features:
           type: [array, null]
+          merge: concatenate
           description: Collection of features
           uniqueItems: true
           items:
-            type: string
+            type: [string, object]
         components:
           type: [array, null]
+          merge: concatenate
           description: Collection of components
           uniqueItems: true
           items:
-            type: string
+            type: [string, object]
 
     supports:
       type: object
@@ -58,7 +62,7 @@ class schema_validator {
       type: object
       description: Blueprints
       propertyNames:
-        pattern: "^[A-Za-z_.{][A-Za-z0-9.{}/\\\\_]*$"
+        pattern: "^[A-Za-z_.:{][A-Za-z0-9.{}/\\\\_-]*$"
       patternProperties:
         '.*':
           type: object
@@ -90,6 +94,8 @@ class schema_validator {
           properties:
             description:
               type: string
+            exclusive:
+              type: boolean
             features:
               type: array
               items:
@@ -134,6 +140,14 @@ public:
     return the_validator;
   }
 
+  enum merge_strategy {
+    DEFAULT,
+    MAX,
+    MIN,
+    SORT,
+    UNIQUE
+  };
+
 private:
   schema_validator() : yakka_validator(nullptr, nlohmann::json_schema::default_string_format_check), slcc_validator(nullptr, nlohmann::json_schema::default_string_format_check)
   {
@@ -148,21 +162,9 @@ public:
   schema_validator(schema_validator const &) = delete;
   void operator=(schema_validator const &)   = delete;
 
-  bool validate(yakka::component *component)
-  {
-    custom_error_handler err;
-    err.component = component;
-    if (component->type == component::YAKKA_FILE)
-      auto patch = yakka_validator.validate(component->json, err);
-    else if (component->type == component::SLCC_FILE)
-      auto patch = slcc_validator.validate(component->json, err);
-    if (err) {
-      return false;
-    } else {
-      return true;
-    }
-  }
+  bool validate(yakka::component *component);
+  static std::optional<schema_validator::merge_strategy> get_schema(const nlohmann::json::json_pointer &path);
 };
 
-schema_validator yakka_validator();
+// schema_validator yakka_validator();
 } // namespace yakka

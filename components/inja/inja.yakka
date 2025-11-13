@@ -1,0 +1,9 @@
+name: Inja
+
+includes:
+  global:
+    - master/include/inja
+
+defines:
+  global:
+    - INJA_NOEXCEPTION

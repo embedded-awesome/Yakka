@@ -11,15 +11,21 @@
 #include <string>
 #include <charconv>
 
+using namespace std;
+
 namespace yakka {
 using namespace std::chrono_literals;
 
 project::project(const std::string project_name, yakka::workspace &workspace) : project_name(project_name), yakka_home_directory("/.yakka"), project_directory("."), workspace(workspace)
 {
-  abort_build      = false;
+  // abort_build      = false;
   project_has_slcc = false;
   current_state    = yakka::project::state::PROJECT_VALID;
   component_flags  = component_database::flag::ALL_COMPONENTS;
+
+  output_path          = yakka::default_output_directory + project_name;
+  project_summary_file = output_path / yakka::project_summary_filename;
+  project_file         = project_name + ".yakka";
 
   add_common_template_commands(inja_environment);
 }
@@ -62,7 +68,7 @@ void project::init_project(const std::string build_string)
   init_project();
 }
 
-void project::init_project(std::vector<std::string> components, std::vector<std::string> features)
+void project::init_project(std::vector<std::string> components, std::vector<std::string> features, std::unordered_set<std::string> commands)
 {
   initial_features = features;
 
@@ -74,15 +80,13 @@ void project::init_project(std::vector<std::string> components, std::vector<std:
     unprocessed_features.insert(f);
     initial_features.push_back(f);
   }
+  this->commands = commands;
+
   init_project();
 }
 
 void project::init_project()
 {
-  output_path          = yakka::default_output_directory + project_name;
-  project_summary_file = output_path + "/yakka_summary.json";
-  // previous_summary["components"] = YAML::Node();
-
   if (fs::exists(project_summary_file)) {
     project_summary_last_modified = fs::last_write_time(project_summary_file);
     std::ifstream i(project_summary_file);
@@ -97,12 +101,19 @@ void project::init_project()
     update_summary();
   } else
     fs::create_directories(output_path);
+
+  // Check if there is a project file
+  if (fs::exists(project_file)) {
+    YAML::Node node = YAML::LoadFile(project_file.generic_string());
+    // Merge data from the project file
+    json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>());
+  }
 }
 
 void project::process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node)
 {
   // Merge the feature values into the parent component
-  json_node_merge(component->json, child_node);
+  json_node_merge(""_json_pointer, component->json, child_node);
 
   // Process required components
   if (child_node.contains("/requires/components"_json_pointer)) {
@@ -118,18 +129,25 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
 
   // Process required features
   if (child_node.contains("/requires/features"_json_pointer)) {
+    const auto node = child_node["requires"]["features"];
     // Add the item/s to the new_features list
-    if (child_node["requires"]["features"].is_string()) {
-      const auto feature = child_node["requires"]["features"].get<std::string>();
+    if (node.is_string()) {
+      const auto feature = node.is_string() ? node.get<std::string>() : node["name"].get<std::string>();
       if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
         slc_required.insert(feature);
       unprocessed_features.insert(feature);
-    } else if (child_node["requires"]["features"].is_array())
-      for (const auto &i: child_node["requires"]["features"]) {
-        const auto feature = i.get<std::string>();
+      // If the feature has recommendations, add them to the feature_recommendations map
+      if (node.is_object() && node.contains("recommends"))
+        feature_recommendations.insert({ feature, node["recommends"] });
+    } else if (node.is_array())
+      for (const auto &i: node) {
+        const auto feature = i.is_string() ? i.get<std::string>() : i["name"].get<std::string>();
         if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
           slc_required.insert(feature);
         unprocessed_features.insert(feature);
+        // If the feature has recommendations, add them to the feature_recommendations map
+        if (i.is_object() && i.contains("recommends"))
+          feature_recommendations.insert({ feature, i["recommends"] });
       }
     else
       spdlog::error("Node '{}' has invalid 'requires'", child_node["requires"].get<std::string>());
@@ -142,13 +160,15 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
       const auto feature = child_node_provides.get<std::string>();
       if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
         slc_provided.insert(feature);
-      unprocessed_features.insert(feature);
+      // unprocessed_features.insert(feature);
+      provided_features.insert(feature);
     } else if (child_node_provides.is_array())
       for (const auto &i: child_node_provides) {
         const auto feature = i.get<std::string>();
         if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
           slc_provided.insert(feature);
-        unprocessed_features.insert(feature);
+        // unprocessed_features.insert(feature);
+        provided_features.insert(feature);
       }
   }
 
@@ -184,6 +204,8 @@ void project::update_summary()
 {
   // Check if any component files have been modified
   for (const auto &[name, value]: project_summary["components"].items()) {
+    if (value.is_null())
+      continue;
     if (!value.contains("yakka_file")) {
       spdlog::error("Project summary for component '{}' is missing 'yakka_file' entry", name);
       project_summary["components"].erase(name);
@@ -192,7 +214,6 @@ void project::update_summary()
     }
 
     auto yakka_file = value["yakka_file"].get<std::string>();
-
     if (!std::filesystem::exists(yakka_file) || std::filesystem::last_write_time(yakka_file) > project_summary_last_modified) {
       // If so, move existing data to previous summary
       previous_summary["components"][name] = value; // TODO: Verify this is correct way to do this efficiently
@@ -203,6 +224,7 @@ void project::update_summary()
       previous_summary["components"][name] = value;
     }
   }
+  previous_summary["data"] = project_summary["data"];
 }
 
 bool project::add_component(const std::string &component_name, component_database::flag flags)
@@ -232,9 +254,9 @@ bool project::add_component(const std::string &component_name, component_databas
 
   auto [component_path, package_path]             = component_location.value();
   std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
-  if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS)
+  if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
     components.push_back(new_component);
-  else {
+  } else {
     current_state = project::state::PROJECT_HAS_INVALID_COMPONENT;
     return false;
   }
@@ -297,13 +319,23 @@ bool project::add_component(const std::string &component_name, component_databas
 
   // Add all the required features into the unprocessed list
   if (new_component->json.contains("/requires/features"_json_pointer))
-    for (const auto &f: new_component->json["requires"]["features"])
-      unprocessed_features.insert(f.get<std::string>());
+    for (const auto &f: new_component->json["requires"]["features"]) {
+      if (f.is_string())
+        unprocessed_features.insert(f.get<std::string>());
+      else {
+        unprocessed_features.insert(f["name"].get<std::string>());
+        if (f.contains("recommends")) {
+          feature_recommendations.insert({ f["name"].get<std::string>(), f["recommends"] });
+        }
+      }
+    }
 
   // Add all the provided features into the unprocessed list
   if (new_component->json.contains("/provides/features"_json_pointer))
-    for (const auto &f: new_component->json["provides"]["features"])
-      unprocessed_features.insert(f.get<std::string>());
+    for (const auto &f: new_component->json["provides"]["features"]) {
+      // unprocessed_features.insert(f.get<std::string>());
+      provided_features.insert(f.get<std::string>());
+    }
 
   // Add all the component choices to the global choice list
   if (new_component->json.contains("choices"))
@@ -364,6 +396,10 @@ bool project::add_feature(const std::string &feature_name)
   if (required_features.insert(feature_name).second == false)
     return false;
 
+  if (!provided_features.contains(feature_name)) {
+    unprovided_features.insert(feature_name);
+  }
+
   // Process the feature "supports" for each existing component
   for (auto &c: components)
     if (c->json.contains("/supports/features"_json_pointer / feature_name)) {
@@ -409,19 +445,26 @@ project::state project::evaluate_dependencies()
       for (const auto &c: unprocessed_choices) {
         const auto &choice = project_summary["choices"][c];
         int matches        = 0;
-        if (choice.contains("features"))
-          matches = std::count_if(choice["features"].begin(), choice["features"].end(), [&](const nlohmann::json &j) {
+        int option_count   = 0;
+        if (choice.contains("features")) {
+          matches      = std::count_if(choice["features"].begin(), choice["features"].end(), [&](const nlohmann::json &j) {
             return required_features.contains(j.get<std::string>());
           });
-        else if (choice.contains("components"))
-          matches = std::count_if(choice["components"].begin(), choice["components"].end(), [&](const nlohmann::json &j) {
+          option_count = choice["features"].size();
+        } else if (choice.contains("components")) {
+          matches      = std::count_if(choice["components"].begin(), choice["components"].end(), [&](const nlohmann::json &j) {
             return required_components.contains(j.get<std::string>());
           });
-        else {
+          option_count = choice["components"].size();
+        } else {
           spdlog::error("Invalid choice {}", c);
           return project::state::PROJECT_HAS_INVALID_COMPONENT;
         }
-        if (matches == 0 && choice.contains("default")) {
+        if (option_count == 1 && choice.contains("default")) {
+          spdlog::error("Invalid choice {}: has default choice for single option", c);
+          return project::state::PROJECT_HAS_INVALID_COMPONENT;
+        }
+        if (matches == 0 && choice.contains("default") && option_count > 1) {
           spdlog::info("Selecting default choice for {}", c);
           if (choice["default"].contains("feature")) {
             unprocessed_features.insert(choice["default"]["feature"].get<std::string>());
@@ -464,6 +507,32 @@ project::state project::evaluate_dependencies()
         unprocessed_features.insert(f);
 
       spdlog::info("Start project processing again...");
+    }
+
+    // Check if we have finished but we have unprovided features
+    if (unprocessed_components.empty() && unprocessed_features.empty() && unprovided_features.size() != 0) {
+      std::unordered_set<std::string> temp_list = std::move(unprovided_features);
+
+      // Look for any recommendations
+      for (const auto &f: temp_list) {
+        // Verify it hasn't been provided
+        if (provided_features.contains(f))
+          continue;
+        if (feature_recommendations.contains(f)) {
+          const auto &recommendation = feature_recommendations[f];
+          if (recommendation.contains("component")) {
+            const auto &component_name = recommendation["component"].get<std::string>();
+            spdlog::info("Adding component '{}' for '{}'", component_name, f);
+            unprocessed_components.insert(component_name);
+          } else if (recommendation.contains("feature")) {
+            const auto &feature_name = recommendation["feature"].get<std::string>();
+            spdlog::info("Adding feature '{}' for '{}'", feature_name, f);
+            unprocessed_features.insert(feature_name);
+          }
+        } else {
+          unprovided_features.insert(f);
+        }
+      }
     }
 
     // Check if we have finished but our project is using SLCC files
@@ -565,7 +634,7 @@ project::state project::evaluate_dependencies()
   if (unknown_components.size() != 0)
     return project::state::PROJECT_HAS_UNKNOWN_COMPONENTS;
 
-  if (slc_required.size() != 0)
+  if (slc_required.size() != 0 || unprovided_features.size() != 0)
     return project::state::PROJECT_HAS_UNRESOLVED_REQUIREMENTS;
 
   return project::state::PROJECT_VALID;
@@ -576,34 +645,55 @@ void project::evaluate_choices()
   // For each component, check each choice has exactly one match in required features
   for (const auto &c: components) {
     for (const auto &[choice_name, value]: c->json["choices"].items()) {
-      int matches = 0;
+      int matches      = 0;
+      int option_count = 0;
       if (value.contains("features")) {
-        matches = std::count_if(value["features"].begin(), value["features"].end(), [&](const auto &j) {
+        option_count = value["features"].size();
+        matches      = std::count_if(value["features"].begin(), value["features"].end(), [&](const auto &j) {
           return required_features.contains(j.template get<std::string>());
         });
-      }
-      if (value.contains("components")) {
-        matches = std::count_if(value["components"].begin(), value["components"].end(), [&](const auto &j) {
+      } else if (value.contains("components")) {
+        option_count = value["components"].size();
+        matches      = std::count_if(value["components"].begin(), value["components"].end(), [&](const auto &j) {
           return required_components.contains(j.template get<std::string>());
         });
       }
-      if (matches == 0) {
+      if (matches == 0 && option_count > 1) {
         incomplete_choices.push_back({ c->id, choice_name });
-      } else if (matches > 1) {
+      } else if (matches > 1 && (!value.contains("exclusive") || value["exclusive"].get<bool>() == true)) {
         multiple_answer_choices.push_back(choice_name);
       }
     }
   }
 }
 
+void project::create_project_file()
+{
+  this->project_file = project_name + ".yakka";
+  std::ofstream file(project_file);
+  file << "name: " << project_name << "\n";
+  file << "type: project\n";
+  if (initial_components.size() != 0) {
+    file << "components:\n";
+    for (const auto &c: initial_components)
+      file << "  - " << c << "\n";
+  }
+  if (initial_features.size() != 0) {
+    file << "features:\n";
+    for (const auto &f: initial_features)
+      file << "  - " << f << "\n";
+  }
+  file << "data: ~\n";
+  file.close();
+}
+
 void project::generate_project_summary()
 {
   // Add standard information into the project summary
-  project_summary["project_name"]                          = project_name;
-  project_summary["project_output"]                        = default_output_directory + project_name;
-  project_summary["configuration"]["host_os"]              = host_os_string;
-  project_summary["configuration"]["executable_extension"] = executable_extension;
-  project_summary["configuration"]["path"]                 = workspace.configuration_json["path"];
+  project_summary["project_name"]   = project_name;
+  project_summary["project_file"]   = project_file;
+  project_summary["project_output"] = default_output_directory + project_name;
+  project_summary["configuration"]  = workspace.summary["configuration"];
 
   if (!project_summary.contains("tools"))
     project_summary["tools"] = nlohmann::json::object();
@@ -669,35 +759,25 @@ void project::generate_target_database()
         continue;
 
       // Do not add to task database if it's a data dependency. There is special processing of these.
-      if (t.front() == data_dependency_identifier)
-        continue;
+      // if (t.front() == data_dependency_identifier)
+      //   continue;
+      auto matches = target_database.add_target(t, blueprint_database, project_summary);
 
-      // Check if target is not in the database. Note task_database is a multimap
-      if (target_database.targets.find(t) == target_database.targets.end()) {
-        const auto match = blueprint_database.find_match(t, this->project_summary);
-        for (const auto &m: match) {
-          // Add an entry to the database
-          target_database.targets.insert({ t, m });
-
-          // Check if the blueprint has additional requirements
-          if (m->blueprint->requirements.size() != 0)
-            for (const auto &t: m->blueprint->requirements) {
-              if (additional_tools.contains(t))
-                continue;
-              const auto p = workspace.find_component(t);
-              if (p.has_value()) {
-                auto [component_path, db_path] = p.value();
-                this->add_additional_tool(component_path);
-              }
-            }
+      for (const auto &m: matches) {
+        // Check if the blueprint has additional requirements
+        for (const auto &t: m->blueprint->requirements) {
+          if (additional_tools.contains(t))
+            continue;
+          const auto p = workspace.find_component(t);
+          if (p.has_value()) {
+            auto [component_path, db_path] = p.value();
+            this->add_additional_tool(component_path);
+          }
         }
-      }
-      auto tasks = target_database.targets.equal_range(t);
 
-      std::for_each(tasks.first, tasks.second, [&new_targets](auto &i) {
-        if (i.second)
-          new_targets.insert(new_targets.end(), i.second->dependencies.begin(), i.second->dependencies.end());
-      });
+        // Add any new targets to the unprocessed list
+        new_targets.insert(new_targets.end(), m->dependencies.begin(), m->dependencies.end());
+      }
     }
 
     unprocessed_targets.clear();
@@ -705,647 +785,16 @@ void project::generate_target_database()
   }
 }
 
-void project::load_common_commands()
-{
-  blueprint_commands["echo"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    if (!command.is_null())
-      captured_output = try_render(inja_env, command.get<std::string>(), generated_json);
-
-    spdlog::get("console")->info("{}", captured_output);
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["execute"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    if (command.is_null())
-      return { "", -1 };
-    std::string temp = command.get<std::string>();
-    try {
-      captured_output = inja_env.render(temp, generated_json);
-      //std::replace( captured_output.begin( ), captured_output.end( ), '/', '\\' );
-      spdlog::debug("Executing '{}'", captured_output);
-      auto [temp_output, retcode] = exec(captured_output, std::string(""));
-
-      if (retcode != 0 && temp_output.length() != 0) {
-        spdlog::error("\n{} returned {}\n{}", captured_output, retcode, temp_output);
-      } else if (temp_output.length() != 0)
-        spdlog::info("{}", temp_output);
-      return { temp_output, retcode };
-    } catch (std::exception &e) {
-      spdlog::error("Failed to execute: {}\n{}", temp, e.what());
-      captured_output = "";
-      return { "", -1 };
-    }
-  };
-
-  blueprint_commands["shell"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    if (command.is_null())
-      return { "", -1 };
-    std::string temp = command.get<std::string>();
-    try {
-#if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
-      captured_output = "cmd /k \"" + inja_env.render(temp, generated_json) + "\"";
-#else
-      captured_output = inja_env.render(temp, generated_json);
-#endif
-      spdlog::debug("Executing '{}' in a shell", captured_output);
-      auto [temp_output, retcode] = exec(captured_output, std::string(""));
-
-      if (retcode != 0 && temp_output.length() != 0) {
-        spdlog::error("\n{} returned {}\n{}", captured_output, retcode, temp_output);
-      } else if (temp_output.length() != 0)
-        spdlog::info("{}", temp_output);
-      return { temp_output, retcode };
-    } catch (std::exception &e) {
-      spdlog::error("Failed to execute: {}\n{}", temp, e.what());
-      captured_output = "";
-      return { "", -1 };
-    }
-  };
-
-  blueprint_commands["fix_slashes"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    std::replace(captured_output.begin(), captured_output.end(), '\\', '/');
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["regex"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    assert(command.contains("search"));
-    std::regex regex_search(command["search"].get<std::string>());
-    if (command.contains("split")) {
-      std::istringstream ss(captured_output);
-      std::string line;
-      captured_output = "";
-
-      while (std::getline(ss, line)) {
-        if (command.contains("replace")) {
-          std::string r = std::regex_replace(line, regex_search, command["replace"].get<std::string>(), std::regex_constants::format_no_copy);
-          captured_output.append(r);
-        } else if (command.contains("match")) {
-          std::smatch sm;
-          std::string new_output      = command.contains("prefix") ? command["prefix"].get<std::string>() : "";
-          inja::Environment local_env = inja_env; // Create copy and override `$()` function
-          const auto match_string     = command["match"].get<std::string>();
-          local_env.add_callback("reg", 1, [&](const inja::Arguments &args) {
-            return sm[args[0]->get<int>()].str();
-          });
-          for (; std::regex_search(captured_output, sm, regex_search);) {
-            // Render the match template
-            new_output += try_render(local_env, match_string, generated_json);
-            captured_output = sm.suffix();
-          }
-          if (command.contains("suffix"))
-            new_output += command["suffix"].get<std::string>();
-          captured_output = new_output;
-        } else if (command.contains("to_yaml")) {
-          std::smatch s;
-          if (!std::regex_match(line, s, regex_search))
-            continue;
-          YAML::Node node;
-          node[0] = YAML::Node();
-          int i   = 1;
-          for (auto &v: command["to_yaml"])
-            node[0][v.get<std::string>()] = s[i++].str();
-
-          if (command.contains("prefix"))
-            captured_output.append(try_render(inja_env, command["prefix"].get<std::string>(), generated_json));
-          captured_output.append(YAML::Dump(node));
-          captured_output.append("\n");
-          if (command.contains("suffix"))
-            captured_output.append(try_render(inja_env, command["suffix"].get<std::string>(), generated_json));
-        }
-      }
-    } else if (command.contains("to_yaml")) {
-      YAML::Node yaml;
-      for (std::smatch sm; std::regex_search(captured_output, sm, regex_search);) {
-        YAML::Node new_node;
-        int i = 1;
-        for (auto &v: command["to_yaml"])
-          new_node[v.get<std::string>()] = sm[i++].str();
-        yaml.push_back(new_node);
-        captured_output = sm.suffix();
-      }
-
-      captured_output.erase();
-
-      if (command.contains("prefix"))
-        captured_output.append(try_render(inja_env, command["prefix"].get<std::string>(), generated_json));
-      captured_output.append(YAML::Dump(yaml));
-      captured_output.append("\n");
-      if (command.contains("suffix"))
-        captured_output.append(try_render(inja_env, command["suffix"].get<std::string>(), generated_json));
-    } else if (command.contains("replace")) {
-      captured_output = std::regex_replace(captured_output, regex_search, command["replace"].get<std::string>());
-    } else if (command.contains("match")) {
-      std::smatch sm;
-      std::string new_output      = command.contains("prefix") ? command["prefix"].get<std::string>() : "";
-      inja::Environment local_env = inja_env; // Create copy and override `$()` function
-      const auto match_string     = command["match"].get<std::string>();
-      local_env.add_callback("reg", 1, [&](const inja::Arguments &args) {
-        return sm[args[0]->get<int>()].str();
-      });
-      for (; std::regex_search(captured_output, sm, regex_search);) {
-        // Render the match template
-        new_output += try_render(local_env, match_string, generated_json);
-        captured_output = sm.suffix();
-      }
-      if (command.contains("suffix"))
-        new_output += command["suffix"].get<std::string>();
-      captured_output = new_output;
-      //captured_output = std::regex_replace(captured_output, regex_search, command["match"].get<std::string>(), std::regex_constants::format_no_copy);
-    } else {
-      spdlog::error("'regex' command does not have enough information");
-      return { "", -1 };
-    }
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["template"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    try {
-      std::string template_string;
-      std::string template_filename;
-      nlohmann::json data;
-      if (command.is_string()) {
-        captured_output = try_render(inja_env, command.get<std::string>(), data.is_null() ? generated_json : data);
-        return { captured_output, 0 };
-      }
-      if (command.is_object()) {
-        if (command.contains("data_file")) {
-          std::string data_filename = try_render(inja_env, command["data_file"].get<std::string>(), generated_json);
-          YAML::Node data_yaml      = YAML::LoadFile(data_filename);
-          if (!data_yaml.IsNull())
-            data = data_yaml.as<nlohmann::json>();
-        } else if (command.contains("data")) {
-          std::string data_string = try_render(inja_env, command["data"].get<std::string>(), generated_json);
-          YAML::Node data_yaml    = YAML::Load(data_string);
-          if (!data_yaml.IsNull())
-            data = data_yaml.as<nlohmann::json>();
-        }
-
-        if (command.contains("template_file")) {
-          template_filename = try_render(inja_env, command["template_file"].get<std::string>(), generated_json);
-          captured_output   = try_render_file(inja_env, template_filename, data.is_null() ? generated_json : data);
-          return { captured_output, 0 };
-        }
-
-        if (command.contains("template")) {
-          template_string = command["template"].get<std::string>();
-          captured_output = try_render(inja_env, template_string, data.is_null() ? generated_json : data);
-          return { captured_output, 0 };
-        }
-      }
-
-      spdlog::error("Inja template is invalid:\n'{}'", command.dump());
-      return { "", -1 };
-    } catch (std::exception &e) {
-      spdlog::error("Failed to apply template: {}\n{}", command.dump(), e.what());
-      return { "", -1 };
-    }
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["save"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    std::string save_filename;
-
-    if (command.is_null())
-      save_filename = target;
-    else
-      save_filename = try_render(inja_env, command.get<std::string>(), generated_json);
-
-    try {
-      std::ofstream save_file;
-      fs::path p(save_filename);
-      if (!p.parent_path().empty())
-        fs::create_directories(p.parent_path());
-      save_file.open(save_filename, std::ios_base::binary);
-      if (!save_file.is_open()) {
-        spdlog::error("Failed to save file: '{}'", save_filename);
-        return { "", -1 };
-      }
-      save_file << captured_output;
-      save_file.flush();
-      save_file.close();
-    } catch (std::exception &e) {
-      spdlog::error("Failed to save file: '{}'", save_filename);
-      return { "", -1 };
-    }
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["create_directory"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    if (!command.is_null()) {
-      std::string filename = "";
-      try {
-        filename = command.get<std::string>();
-        filename = try_render(inja_env, filename, generated_json);
-        if (!filename.empty()) {
-          fs::path p(filename);
-          fs::create_directories(p.parent_path());
-        }
-      } catch (std::exception &e) {
-        spdlog::error("Couldn't create directory for '{}'", filename);
-        return { "", -1 };
-      }
-    }
-    return { "", 0 };
-  };
-
-  blueprint_commands["verify"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    std::string filename = command.get<std::string>();
-    filename             = try_render(inja_env, filename, generated_json);
-    if (fs::exists(filename)) {
-      spdlog::info("{} exists", filename);
-      return { captured_output, 0 };
-    }
-
-    spdlog::info("BAD!! {} doesn't exist", filename);
-    return { "", -1 };
-  };
-
-  blueprint_commands["rm"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    std::string filename = command.get<std::string>();
-    filename             = try_render(inja_env, filename, generated_json);
-    // Check if the input was a YAML array construct
-    if (filename.front() == '[' && filename.back() == ']') {
-      // Load the generated dependency string as YAML and push each item individually
-      try {
-        auto file_list = YAML::Load(filename);
-        for (auto i: file_list) {
-          const auto file = i.Scalar();
-          fs::remove(file);
-        }
-      } catch (std::exception &e) {
-        spdlog::error("Failed to parse file list: {}", filename);
-      }
-    } else {
-      fs::remove(filename);
-    }
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["rmdir"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    std::string path = command.get<std::string>();
-    path             = try_render(inja_env, path, generated_json);
-    // Put some checks here
-    std::error_code ec;
-    fs::remove_all(path, ec);
-    if (!ec) {
-      spdlog::error("'rmdir' command failed {}\n", ec.message());
-    }
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["pack"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    std::vector<std::byte> data_output;
-
-    if (!command.contains("data")) {
-      spdlog::error("'pack' command requires 'data'\n");
-      return { "", -1 };
-    }
-
-    if (!command.contains("format")) {
-      spdlog::error("'pack' command requires 'format'\n");
-      return { "", -1 };
-    }
-
-    std::string format = command["format"].get<std::string>();
-    format             = try_render(inja_env, format, generated_json);
-
-    auto i = format.begin();
-    for (auto d: command["data"]) {
-      auto v       = try_render(inja_env, d.get<std::string>(), generated_json);
-      const char c = *i++;
-      union {
-        int8_t s8;
-        uint8_t u8;
-        int16_t s16;
-        uint16_t u16;
-        int32_t s32;
-        uint32_t u32;
-        unsigned long value;
-        std::byte bytes[8];
-      } temp;
-      const auto result = (v.size() > 1 && v[1] == 'x') ? std::from_chars(v.data() + 2, v.data() + v.size(), temp.u32, 16)
-                          : (v[0] == '-')               ? std::from_chars(v.data(), v.data() + v.size(), temp.s32)
-                                                        : std::from_chars(v.data(), v.data() + v.size(), temp.u32);
-      if (result.ec != std::errc()) {
-        spdlog::error("Error converting number: {}\n", v);
-      }
-
-      switch (c) {
-        case 'L':
-          data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[4]);
-          break;
-        case 'l':
-          data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[4]);
-          break;
-        case 'S':
-          data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[2]);
-          break;
-        case 's':
-          data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[2]);
-          break;
-        case 'C':
-          data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[1]);
-          break;
-        case 'c':
-          data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[1]);
-          break;
-        case 'x':
-          data_output.push_back(std::byte{ 0 });
-          break;
-        default:
-          spdlog::error("Unknown pack type\n");
-          break;
-      }
-    }
-    auto *chars = reinterpret_cast<char const *>(data_output.data());
-    captured_output.insert(captured_output.end(), chars, chars + data_output.size());
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["copy"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    std::string destination;
-    nlohmann::json source;
-    try {
-
-      destination = try_render(inja_env, command["destination"].get<std::string>(), generated_json);
-
-      if (command.contains("source")) {
-        source = command["source"];
-      } else {
-        if (command.contains("yaml_list")) {
-          if (!command["yaml_list"].is_string()) {
-            spdlog::error("'copy' command 'yaml_list' is not a string");
-            return { "", -1 };
-          }
-          std::string list_yaml_string = try_render(inja_env, command["yaml_list"].get<std::string>(), generated_json);
-          source                       = YAML::Load(list_yaml_string).as<nlohmann::json>();
-        } else {
-          spdlog::error("'copy' command does not have 'source' or 'yaml_list'");
-          return { "", -1 };
-        }
-      }
-      if (source.is_string()) {
-        auto source_string = try_render(inja_env, source.get<std::string>(), generated_json);
-        std::filesystem::copy(source_string, destination, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
-      } else if (source.is_array()) {
-        for (const auto &f: source) {
-          auto source_string = try_render(inja_env, f.get<std::string>(), generated_json);
-          std::filesystem::copy(source_string, destination, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
-        }
-      } else if (source.is_object()) {
-        if (source.contains("folder_paths"))
-          for (const auto &f: source["folder_paths"]) {
-            auto source_string = try_render(inja_env, f.get<std::string>(), generated_json);
-            auto dest          = destination + "/" + source_string;
-            std::filesystem::create_directories(dest);
-            std::filesystem::copy(source_string, dest, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
-          }
-        if (source.contains("folders"))
-          for (const auto &f: source["folders"]) {
-            auto source_string = try_render(inja_env, f.get<std::string>(), generated_json);
-            std::filesystem::copy(source_string, destination, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
-          }
-        if (source.contains("file_paths"))
-          for (const auto &f: source["file_paths"]) {
-            auto source_string         = try_render(inja_env, f.get<std::string>(), generated_json);
-            std::filesystem::path dest = destination + "/" + source_string;
-            std::filesystem::create_directories(dest.parent_path());
-            std::filesystem::copy(source_string, dest, std::filesystem::copy_options::update_existing);
-          }
-        if (source.contains("files"))
-          for (const auto &f: source["files"]) {
-            auto source_string = try_render(inja_env, f.get<std::string>(), generated_json);
-            std::filesystem::copy(source_string, destination, std::filesystem::copy_options::update_existing);
-          }
-      } else {
-        spdlog::error("'copy' command missing 'source' or 'list' while processing {}", target);
-        return { "", -1 };
-      }
-    } catch (std::exception &e) {
-      spdlog::error("'copy' command failed while processing {}: '{}' -> '{}'\r\n{}", target, source.dump(), destination, e.what());
-      return { "", -1 };
-    }
-    return { "", 0 };
-  };
-
-  blueprint_commands["cat"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    std::string filename = try_render(inja_env, command.get<std::string>(), generated_json);
-    std::ifstream datafile;
-    datafile.open(filename, std::ios_base::in | std::ios_base::binary);
-    std::stringstream string_stream;
-    string_stream << datafile.rdbuf();
-    captured_output = string_stream.str();
-    datafile.close();
-    return { captured_output, 0 };
-  };
-
-  blueprint_commands["new_project"] = [this](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    const auto project_string = command.get<std::string>();
-    yakka::project new_project(project_string, workspace);
-    new_project.init_project(project_string);
-    return { "", 0 };
-  };
-
-  blueprint_commands["as_json"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    const auto temp_json = nlohmann::json::parse(captured_output);
-    return { temp_json.dump(2), 0 };
-  };
-
-  blueprint_commands["as_yaml"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    const auto temp_yaml = YAML::Load(captured_output);
-    return { YAML::Dump(temp_yaml), 0 };
-  };
-  blueprint_commands["diff"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &generated_json, inja::Environment &inja_env) -> yakka::process_return {
-    if (!command.is_object()) {
-      spdlog::error("'diff' command invalid");
-      return { "", -1 };
-    }
-    nlohmann::json left;
-    nlohmann::json right;
-    if (command.contains("left_file")) {
-      const fs::path left_file = try_render(inja_env, command["left_file"].get<std::string>(), generated_json);
-      std::ifstream ifs(left_file);
-      left = nlohmann::json::parse(ifs);
-    } else if (command.contains("left")) {
-      left = try_render(inja_env, command["left"].get<std::string>(), generated_json);
-    }
-
-    if (command.contains("right_file")) {
-      const fs::path right_file = try_render(inja_env, command["right_file"].get<std::string>(), generated_json);
-      std::ifstream ifs(right_file);
-      right = nlohmann::json::parse(ifs);
-    } else if (command.contains("right")) {
-      right = try_render(inja_env, command["right"].get<std::string>(), generated_json);
-    }
-
-    nlohmann::json patch = nlohmann::json::diff(left, right);
-    return { patch.dump(), 0 };
-  };
-}
-
-void project::create_tasks(const std::string target_name, tf::Task &parent)
-{
-  // XXX: Start time should be determined at the start of the executable and not here
-  auto start_time = fs::file_time_type::clock::now();
-
-  //spdlog::info("Create tasks for: {}", target_name);
-
-  // Check if this target has already been processed
-  const auto &existing_todo = todo_list.equal_range(target_name);
-  if (existing_todo.first != existing_todo.second) {
-    // Add parent to the dependency graph
-    for (auto i = existing_todo.first; i != existing_todo.second; ++i)
-      i->second.task.precede(parent);
-
-    // Nothing else to do
-    return;
-  }
-
-  // Get targets that match the name
-  const auto &targets = target_database.targets.equal_range(target_name);
-
-  // If there is no targets then it must be a leaf node (source file, data dependency, etc)
-  if (targets.first == targets.second) {
-    //spdlog::info("{}: leaf node", target_name);
-    auto new_todo = todo_list.insert(std::make_pair(target_name, construction_task()));
-    auto task     = taskflow.placeholder();
-
-    // Check if target is a data dependency
-    if (target_name.front() == data_dependency_identifier) {
-      task.data(&new_todo->second).work([=, this]() {
-        // spdlog::info("{}: data", target_name);
-        auto *d          = static_cast<construction_task *>(task.data());
-        auto result = has_data_dependency_changed(target_name, previous_summary, project_summary);
-        if (result) {
-            d->last_modified = *result ? fs::file_time_type::max() : fs::file_time_type::min();
-        } else {
-            spdlog::error("Data dependency '{}' error: {}", target_name, result.error());
-            return;
-        }
-        if (d->last_modified > start_time)
-          spdlog::info("{} has been updated", target_name);
-        return;
-      });
-    }
-    // Check if target name matches an existing file in filesystem
-    else if (fs::exists(target_name)) {
-      // Create a new task to retrieve the file timestamp
-      task.data(&new_todo->second).work([=]() {
-        auto *d          = static_cast<construction_task *>(task.data());
-        d->last_modified = fs::last_write_time(target_name);
-        //spdlog::info("{}: timestamp {}", target_name, (uint)d->last_modified.time_since_epoch().count());
-        return;
-      });
-    } else {
-      spdlog::info("Target {} has no action", target_name);
-    }
-    new_todo->second.task = task;
-    new_todo->second.task.precede(parent);
-    return;
-  }
-
-  for (auto i = targets.first; i != targets.second; ++i) {
-    // spdlog::info("{}: Not a leaf node", target_name);
-    // ++work_task_count;
-    auto new_todo          = todo_list.insert(std::make_pair(target_name, construction_task()));
-    new_todo->second.match = i->second;
-    if (i->second->blueprint->task_group.empty()) {
-      new_todo->second.group = todo_task_groups["Processing"];
-    } else {
-      if (todo_task_groups.contains(i->second->blueprint->task_group))
-        new_todo->second.group = todo_task_groups[i->second->blueprint->task_group];
-      else {
-        new_todo->second.group                             = std::make_shared<yakka::task_group>(i->second->blueprint->task_group);
-        todo_task_groups[i->second->blueprint->task_group] = new_todo->second.group;
-      }
-    }
-    ++new_todo->second.group->total_count;
-
-    auto task = taskflow.placeholder();
-    task.data(&new_todo->second).work([=, this]() {
-      if (abort_build)
-        return;
-      // spdlog::info("{}: process --- {}", target_name, task.hash_value());
-      auto *d = static_cast<construction_task *>(task.data());
-      if (d->last_modified != fs::file_time_type::min()) {
-        // I don't think this event happens. This check can probably be removed
-        spdlog::info("{} already done", target_name);
-        return;
-      }
-      if (fs::exists(target_name)) {
-        d->last_modified = fs::last_write_time(target_name);
-        // spdlog::info("{}: timestamp {}", target_name, (uint)d->last_modified.time_since_epoch().count());
-      }
-      if (d->match) {
-        // Check if there are no dependencies
-        if (d->match->dependencies.size() == 0) {
-          // If it doesn't exist as a file, run the command
-          if (!fs::exists(target_name)) {
-            auto result      = yakka::run_command(i->first, d, this);
-            d->last_modified = fs::file_time_type::clock::now();
-            if (result.second != 0) {
-              spdlog::info("Aborting: {} returned {}", target_name, result.second);
-              abort_build = true;
-              return;
-            }
-          }
-        } else if (!d->match->blueprint->process.is_null()) {
-          auto max_element = todo_list.end();
-          for (auto j: d->match->dependencies) {
-            auto temp         = todo_list.equal_range(j);
-            auto temp_element = std::max_element(temp.first, temp.second, [](auto const &i, auto const &j) {
-              return i.second.last_modified < j.second.last_modified;
-            });
-            //spdlog::info("{}: Check max element {}: {} vs {}", target_name, temp_element->first, (int64_t)temp_element->second.last_modified.time_since_epoch().count(), (int64_t)max_element->second.last_modified.time_since_epoch().count());
-            if (max_element == todo_list.end() || temp_element->second.last_modified > max_element->second.last_modified) {
-              max_element = temp_element;
-            }
-          }
-          //spdlog::info("{}: Max element is {}", target_name, max_element->first);
-          if (!fs::exists(target_name) || max_element->second.last_modified.time_since_epoch() > d->last_modified.time_since_epoch()) {
-            spdlog::info("{}: Updating because of {}", target_name, max_element->first);
-            auto [output, retcode] = yakka::run_command(i->first, d, this);
-            d->last_modified       = fs::file_time_type::clock::now();
-            if (retcode < 0) {
-              spdlog::info("Aborting: {} returned {}", target_name, retcode);
-              abort_build = true;
-              return;
-            }
-          }
-        } else {
-          //spdlog::info("{} has no process", target_name);
-        }
-      }
-      if (task_complete_handler) {
-        // spdlog::info("{} complete", target_name);
-        task_complete_handler(d->group);
-      }
-
-      return;
-    });
-
-    new_todo->second.task = task;
-    new_todo->second.task.precede(parent);
-
-    // For each dependency described in blueprint, retrieve or create task, add relationship, and add item to todo list
-    if (i->second)
-      for (auto &dep_target: i->second->dependencies)
-        create_tasks(dep_target.starts_with("./") ? dep_target.substr(dep_target.find_first_not_of("/", 2)) : dep_target, new_todo->second.task);
-    // else
-    //     spdlog::info("{} does not have blueprint match", i->first);
-  }
-}
-
 /**
-     * @brief Save to disk the content of the @ref project_summary to yakka_summary.yaml and yakka_summary.json
-     *
-     */
+ * @brief Save to disk the content of the @ref project_summary to project_summary_filename in the project output directory.
+ *
+ */
 void project::save_summary()
 {
   if (!fs::exists(project_summary["project_output"].get<std::string>()))
     fs::create_directories(project_summary["project_output"].get<std::string>());
 
-  std::ofstream json_file(project_summary["project_output"].get<std::string>() + "/yakka_summary.json");
+  std::ofstream json_file(project_summary["project_output"].get<std::string>() + "/" + yakka::project_summary_filename);
   json_file << project_summary.dump(3);
   json_file.close();
 
@@ -1379,22 +828,29 @@ public:
 void project::validate_schema()
 {
   // Collect all the schema data
-  nlohmann::json schema = "{ \"properties\": {} }"_json;
+  nlohmann::json schema      = "{ \"properties\": {} }"_json;
+  nlohmann::json data_schema = "{ \"properties\": {} }"_json;
 
   for (const auto &c: components) {
     if (c->json.contains("schema")) {
-      json_node_merge(schema["properties"], c->json["schema"]);
+      const auto schema_json_pointer = "/properties"_json_pointer;
+      json_node_merge(schema_json_pointer, schema["properties"], c->json["schema"]);
+    }
+    if (c->json.contains("data_schema")) {
+      const auto schema_json_pointer = "/properties"_json_pointer;
+      json_node_merge(schema_json_pointer, data_schema["properties"], c->json["data_schema"]);
     }
   }
 
-  if (!schema.empty()) {
+  // Verify schema for each component
+  {
     //spdlog::error("Schema: {}", schema.dump(2));
     // Create validator
     nlohmann::json_schema::json_validator validator(nullptr, nlohmann::json_schema::default_string_format_check);
     try {
       validator.set_root_schema(schema);
     } catch (const std::exception &e) {
-      spdlog::error("Setting root schema failed\n{}", e.what());
+      spdlog::error("Setting root schema for components failed\n{}", e.what());
       return;
     }
 
@@ -1405,6 +861,56 @@ void project::validate_schema()
       validator.validate(c->json, err);
     }
   }
+
+  // Verify data schema for the project
+  {
+    // Create validator
+    nlohmann::json_schema::json_validator validator(nullptr, nlohmann::json_schema::default_string_format_check);
+    try {
+      validator.set_root_schema(data_schema);
+    } catch (const std::exception &e) {
+      spdlog::error("Setting root schema for data failed\n{}", e.what());
+      return;
+    }
+
+    custom_error_handler err;
+    auto validation_result = validator.validate(project_summary["data"], err);
+    if (!validation_result.is_null() && validation_result.size() != 0)
+      current_state = state::PROJECT_HAS_FAILED_SCHEMA_CHECK;
+  }
+}
+
+/**
+ * @brief Updates the project data by merging all the component data into the project summary.
+ */
+void project::update_project_data()
+{
+  std::unordered_set<std::string> required_data;
+
+  // Gather all the required data
+  for (const auto &c: components)
+    if (c->json.contains("/requires/data"_json_pointer))
+      for (const auto &d: c->json["requires"]["data"]) {
+        required_data.insert(d.get<std::string>());
+      }
+
+  // Merge all the component data into the project summary
+  for (const auto &c: components) {
+    for (const auto &r: required_data) {
+      const auto pointer = nlohmann::json::json_pointer(r);
+      if (!c->json.contains(pointer)) {
+        continue;
+      }
+
+      if (!project_summary["data"].contains(pointer)) {
+        project_summary["data"][pointer] = nlohmann::json::object();
+      }
+
+      json_node_merge(""_json_pointer, project_summary["data"][pointer], c->json[pointer]);
+    }
+  }
+
+  // Apply schema with default values
 }
 
 bool project::is_disqualified_by_unless(const nlohmann::json &node)
@@ -1721,6 +1227,10 @@ void project::process_blueprints(const std::shared_ptr<component> c)
   if (c->json.contains("blueprints")) {
     for (const auto &[b_key, b_value]: c->json["blueprints"].items()) {
       std::string blueprint_string = try_render(inja_environment, b_value.contains("regex") ? b_value["regex"].get<std::string>() : b_key, project_summary);
+      if (blueprint_string[0] == data_dependency_identifier && !blueprint_string.starts_with(":/data/")) {
+        spdlog::error("Invalid data blueprint: {}", blueprint_string);
+        continue;
+      }
       spdlog::info("Additional blueprint: {}", blueprint_string);
       blueprint_database.blueprints.insert({ blueprint_string, std::make_shared<blueprint>(blueprint_string, b_value, c->json["directory"].get<std::string>()) });
     }
@@ -1739,6 +1249,11 @@ void project::process_tools(const std::shared_ptr<component> c)
       project_summary["tools"][key] = try_render(inja_env, value.get<std::string>(), project_summary);
     }
   }
+}
+
+void project::save_blueprints()
+{
+  blueprint_database.save(this->output_path / "blueprints.json");
 }
 
 void project::add_additional_tool(const fs::path component_path)

@@ -6,12 +6,6 @@
 #include <optional>
 #include <filesystem>
 
-#ifdef EXPERIMENTAL_FILESYSTEM
-namespace fs = std::experimental::filesystem;
-#else
-namespace fs = std::filesystem;
-#endif
-
 namespace yakka {
 
 struct blueprint {
@@ -28,5 +22,7 @@ struct blueprint {
   std::string task_group;
 
   blueprint(const std::string &target, const nlohmann::json &blueprint, const std::string &parent_path);
+
+  nlohmann::json as_json() const;
 };
 } // namespace yakka

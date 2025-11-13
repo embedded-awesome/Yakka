@@ -3,6 +3,8 @@
 #include "subprocess.hpp"
 #include "spdlog/spdlog.h"
 #include "glob/glob.h"
+#include "yakka_schema.hpp"
+#include "blake3.h"
 #include <concepts>
 #include <string_view>
 #include <expected>
@@ -10,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <ranges>
+#include <chrono>
 #include <algorithm>
 #include <iomanip>
 #include <filesystem>
@@ -33,7 +36,7 @@ std::pair<std::string, int> exec(const std::string &command_text, const std::str
 #if defined(__USING_WINDOWS__)
     auto p = subprocess::Popen(command, subprocess::output{ subprocess::PIPE }, subprocess::error{ subprocess::STDOUT });
 #else
-    auto p      = subprocess::Popen(command, subprocess::shell{ true }, subprocess::output{ subprocess::PIPE }, subprocess::error{ subprocess::STDOUT });
+    auto p = subprocess::Popen(command, subprocess::shell{ true }, subprocess::output{ subprocess::PIPE }, subprocess::error{ subprocess::STDOUT });
 #endif
 #if defined(__USING_WINDOWS__)
     auto output  = p.communicate().first;
@@ -62,7 +65,7 @@ int exec(const std::string &command_text, const std::string &arg_text, std::func
 #if defined(__USING_WINDOWS__)
     auto p = subprocess::Popen(command, subprocess::output{ subprocess::PIPE }, subprocess::error{ subprocess::STDOUT });
 #else
-    auto p       = subprocess::Popen(command, subprocess::shell{ true }, subprocess::output{ subprocess::PIPE }, subprocess::error{ subprocess::STDOUT });
+    auto p = subprocess::Popen(command, subprocess::shell{ true }, subprocess::output{ subprocess::PIPE }, subprocess::error{ subprocess::STDOUT });
 #endif
     auto output = p.output();
     std::array<char, 512> buffer;
@@ -153,14 +156,14 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path)
   return temp;
 }
 
-nlohmann::json::json_pointer json_pointer(std::string path)
-{
-  if (path.front() != '/') {
-    path = "/" + path;
-    std::replace(path.begin(), path.end(), '.', '/');
-  }
-  return nlohmann::json::json_pointer{ path };
-}
+// nlohmann::json::json_pointer json_pointer(std::string path)
+// {
+//   if (path.front() != '/') {
+//     path = "/" + path;
+//     std::replace(path.begin(), path.end(), '.', '/');
+//   }
+//   return nlohmann::json::json_pointer{ path };
+// }
 
 nlohmann::json json_path(const nlohmann::json &node, std::string path)
 {
@@ -250,7 +253,10 @@ std::vector<std::string> parse_gcc_dependency_file(const std::string &filename)
   return dependencies;
 }
 
-void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node)
+/**
+ * @param path  Path relative to Yakka component schema
+ */
+void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node)
 {
   switch (node.type()) {
     case nlohmann::detail::value_t::object:
@@ -263,8 +269,7 @@ void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node)
         // Check if the key is already in merge_target
         auto it2 = merge_target.find(it.key());
         if (it2 != merge_target.end()) {
-          json_node_merge(it2.value(), it.value());
-          continue;
+          json_node_merge(""_json_pointer, it2.value(), it.value());
         } else {
           merge_target[it.key()] = it.value();
         }
@@ -287,6 +292,10 @@ void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node)
           break;
       }
       break;
+
+    case nlohmann::detail::value_t::null:
+      break;
+
     default:
       switch (merge_target.type()) {
         case nlohmann::detail::value_t::object:
@@ -302,6 +311,14 @@ void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node)
       }
       break;
   }
+
+  // Apply addition merge strategy
+  // Check if there is an additional stategy, if not return
+  // if (auto schema = schema_validator::get_schema(path)) {
+  //   spdlog::error("Found schema");
+  // } else {
+  //   spdlog::error("No schema found for path {}", path.to_string());
+  // }
 }
 
 std::string component_dotname_to_id(const std::string dotname)
@@ -379,7 +396,8 @@ void add_common_template_commands(inja::Environment &inja_env)
     return fs::exists(args[0]->get<std::string>());
   });
   inja_env.add_callback("hex2dec", 1, [](const inja::Arguments &args) {
-    return std::stoul(args[0]->get<std::string>(), nullptr, 16);
+    std::string hex_string = args[0]->get<std::string>();
+    return std::stoul(hex_string, nullptr, 16);
   });
   inja_env.add_callback("read_file", 1, [](const inja::Arguments &args) {
     auto file = std::ifstream(args[0]->get<std::string>());
@@ -395,8 +413,17 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
   });
   inja_env.add_callback("load_json", 1, [](const inja::Arguments &args) {
-    std::ifstream file_stream(args[0]->get<std::string>());
-    return nlohmann::json::parse(file_stream);
+    const auto file_path = args[0]->get<std::string>();
+    if (std::filesystem::exists(file_path)) {
+      std::ifstream file_stream(file_path);
+      return nlohmann::json::parse(file_stream,
+                                   /* callback */ nullptr,
+                                   /* allow exceptions */ false,
+                                   /* ignore_comments */ true,
+                                   /* ignore_trailing_commas */ true);
+    } else {
+      return nlohmann::json();
+    }
   });
   inja_env.add_callback("quote", 1, [](const inja::Arguments &args) {
     std::stringstream ss;
@@ -451,203 +478,59 @@ void add_common_template_commands(inja::Environment &inja_env)
                 input.end());
     return input;
   });
-}
-
-std::pair<std::string, int> run_command(const std::string target, construction_task *task, project *project)
-{
-  std::string captured_output = "";
-  inja::Environment inja_env  = inja::Environment();
-  auto &blueprint             = task->match;
-  std::string curdir_path     = blueprint->blueprint->parent_path;
-  nlohmann::json data_store;
-
-  add_common_template_commands(inja_env);
-
-  inja_env.add_callback("store", 3, [&](const inja::Arguments &args) {
-    if (args[0] && args[1]) {
-      nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
-      auto key             = args[1]->get<std::string>();
-      data_store[ptr][key] = *args[2];
-    }
-    return nlohmann::json{};
-  });
-  inja_env.add_callback("store", 2, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
-    data_store[ptr] = *args[1];
-    return nlohmann::json{};
-  });
-  inja_env.add_callback("push_back", 2, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
-    if (!data_store.contains(ptr)) {
-      data_store[ptr] = nlohmann::json::array();
-    }
-    data_store[ptr].push_back(*args[1]);
-    return nlohmann::json{};
-  });
-  inja_env.add_callback("unique", 1, [&](const inja::Arguments &args) {
-    nlohmann::json filtered;
-    std::copy_if(args[0]->cbegin(), args[0]->cend(), std::back_inserter(filtered), [&](const nlohmann::json &item) {
-      return std::find(filtered.begin(), filtered.end(), item.get<std::string>()) == filtered.end();
+  inja_env.add_callback("filter", 2, [](const inja::Arguments &args) {
+    json output            = nlohmann::json::array();
+    const auto input       = args[0];
+    const auto regex_match = std::regex(args[1]->get<std::string>());
+    std::copy_if(input->begin(), input->end(), std::back_inserter(output), [&](const auto &item) {
+      return std::regex_match(item.template get<std::string>(), regex_match);
     });
-    return filtered;
+    return output;
   });
-
-  inja_env.add_callback("fetch", 2, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
-    auto key = args[1]->get<std::string>();
-    return data_store[ptr][key];
-  });
-  inja_env.add_callback("fetch", 1, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
-    return data_store[ptr];
-  });
-  inja_env.add_callback("erase", 1, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
-    data_store[ptr].clear();
-    return nlohmann::json{};
-  });
-  inja_env.add_callback("$", 1, [&blueprint](const inja::Arguments &args) {
-    return blueprint->regex_matches[args[0]->get<int>()];
-  });
-  inja_env.add_callback("curdir", 0, [&](const inja::Arguments &args) {
-    return curdir_path;
-  });
-  inja_env.add_callback("render", 1, [&](const inja::Arguments &args) {
-    return try_render(inja_env, args[0]->get<std::string>(), project->project_summary);
-  });
-  inja_env.add_callback("render", 2, [&curdir_path, &inja_env, &project](const inja::Arguments &args) {
-    auto backup               = curdir_path;
-    curdir_path               = args[1]->get<std::string>();
-    std::string render_output = try_render(inja_env, args[0]->get<std::string>(), project->project_summary);
-    curdir_path               = backup;
-    return render_output;
-  });
-
-  inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
-    nlohmann::json aggregate;
-    auto path = json_pointer(args[0]->get<std::string>());
-    // Loop through components, check if object path exists, if so add it to the aggregate
-    for (const auto &[c_key, c_value]: project->project_summary["components"].items()) {
-      // auto v = json_path(c.value(), path);
-      if (!c_value.contains(path) || c_value[path].is_null())
-        continue;
-
-      auto v = c_value[path];
-      if (v.is_object())
-        for (const auto &[i_key, i_value]: v.items()) {
-          aggregate[i_key] = i_value; //try_render(inja_env, i.second.as<std::string>(), project->project_summary, log);
-        }
-      else if (v.is_array())
-        for (const auto &[i_key, i_value]: v.items())
-          if (i_value.is_object())
-            aggregate.push_back(i_value);
-          else
-            aggregate.push_back(try_render(inja_env, i_value.get<std::string>(), project->project_summary));
-      else if (!v.is_null())
-        aggregate.push_back(try_render(inja_env, v.get<std::string>(), project->project_summary));
+  inja_env.add_callback("join", 2, [](const inja::Arguments &args) {
+    const auto input = args[0];
+    if (input->empty() || !input->is_array()) {
+      spdlog::error("join() expects an array as the first argument");
+      return std::string{};
     }
-
-    // Check project data
-    if (project->project_summary["data"].contains(path)) {
-      auto v = project->project_summary["data"][path];
-      if (v.is_object())
-        for (const auto &[i_key, i_value]: v.items())
-          aggregate[i_key] = i_value;
-      else if (v.is_array())
-        for (const auto &i: v)
-          aggregate.push_back(inja_env.render(i.get<std::string>(), project->project_summary));
-      else
-        aggregate.push_back(inja_env.render(v.get<std::string>(), project->project_summary));
+    const auto separator = args[1]->get<std::string>();
+    // Add the first element (input already checked to be not empty)
+    auto it            = input->begin();
+    std::string output = it->template get<std::string>();
+    // Iterate through the rest of the elements and append them with the separator
+    for (++it; it != input->end(); ++it) {
+      output += separator + it->template get<std::string>();
     }
+    return output;
+  });
+  inja_env.add_callback("find_json", 2, [](const inja::Arguments &args) {
+    const auto input      = args[0];
+    const auto search_key = args[1]->get<std::string>();
+    json output;
+    find_json_keys(input->get<nlohmann::json>(), search_key, "", output);
+    return output;
+  });
+  inja_env.add_callback("merge", 2, [](const inja::Arguments &args) {
+    auto target     = args[0]->get<nlohmann::json>();
+    const auto data = args[1]->get<nlohmann::json>();
+    target.update(data, true);
+    return target;
+  });
+  inja_env.add_callback("concatenate", [](const inja::Arguments &args) {
+    std::string aggregate;
+    for (const auto &i: args)
+      aggregate.append(i->get<std::string>());
     return aggregate;
   });
-  inja_env.add_callback("load_component", 1, [&](const inja::Arguments &args) {
-    const auto component_name     = args[0]->get<std::string>();
-    const auto component_location = project->workspace.find_component(component_name);
-    if (!component_location.has_value()) {
-      return nlohmann::json{};
-    }
-    auto [component_path, package_path] = component_location.value();
-    yakka::component new_component;
-    if (new_component.parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
-      return new_component.json;
-    } else {
-      return nlohmann::json{};
-    }
-  });
-
-  std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
-
-  // Note: A blueprint process is a sequence of maps
-  for (const auto &command_entry: blueprint->blueprint->process) {
-    assert(command_entry.is_object());
-
-    if (command_entry.size() != 1) {
-      spdlog::error("Command '{}' for target '{}' is malformed", command_entry.begin().key(), target);
-      return { "", -1 };
-    }
-
-    // Take the first entry in the map as the command
-    auto command                   = command_entry.begin();
-    const std::string command_name = command.key();
-    int retcode                    = 0;
-
-    try {
-      if (project->project_summary["tools"].contains(command_name)) {
-        auto tool                = project->project_summary["tools"][command_name];
-        std::string command_text = "";
-
-        command_text.append(tool);
-
-        std::string arg_text = command.value().get<std::string>();
-
-        // Apply template engine
-        arg_text = try_render(inja_env, arg_text, project->project_summary);
-
-        auto [temp_output, temp_retcode] = exec(command_text, arg_text);
-        retcode                          = temp_retcode;
-
-        if (retcode != 0)
-          spdlog::error("Returned {}\n{}", retcode, temp_output);
-        if (retcode < 0)
-          return { temp_output, retcode };
-
-        captured_output = temp_output;
-        // Echo the output of the command
-        // TODO: Note this should be done by the main thread to ensure the outputs from multiple run_command instances don't overlap
-        spdlog::info(captured_output);
-      }
-      // Else check if it is a built-in command
-      else if (project->blueprint_commands.contains(command_name)) {
-        yakka::process_return test_result = project->blueprint_commands.at(command_name)(target, command.value(), captured_output, project->project_summary, inja_env);
-        captured_output                   = test_result.result;
-        retcode                           = test_result.retcode;
-      } else {
-        spdlog::error("{} tool doesn't exist", command_name);
-      }
-
-      if (retcode < 0)
-        return { captured_output, retcode };
-    } catch (std::exception &e) {
-      spdlog::error("Failed to run command: '{}' as part of {}", command_name, target);
-      spdlog::error("{}", e.what());
-      throw e;
-    }
-  }
-
-  std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
-  auto duration                                     = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-  spdlog::info("{}: {} milliseconds", target, duration);
-  return { captured_output, 0 };
 }
 
 std::pair<std::string, int> download_resource(const std::string url, fs::path destination)
 {
   fs::path filename = destination / url.substr(url.find_last_not_of('/'));
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
-  return exec("powershell", "Invoke-WebRequest " + url + " -OutFile " + filename.generic_string());
+  return exec("powershell", std::format("Invoke-WebRequest {} -OutFile {}", url, filename.generic_string()));
 #else
-  return exec("curl", url + " -o " + filename.generic_string());
+  return exec("curl", std::format("{} -o {}", url, filename.generic_string()));
 #endif
 }
 
@@ -665,90 +548,143 @@ nlohmann::json::json_pointer create_condition_pointer(const nlohmann::json condi
 
 // Helper struct to hold component comparison results
 struct ComparisonResult {
-    bool changed{false};
-    std::string error_message;
+  bool changed{ false };
+  std::string error_message;
 };
 
 [[nodiscard]]
-std::expected<bool, std::string> has_data_dependency_changed(
-    std::string_view data_path,
-    const nlohmann::json& left,
-    const nlohmann::json& right) noexcept
+std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept
 {
-    if (data_path.empty() || data_path[0] != data_dependency_identifier) {
-        return false;
+  if (data_path.empty() || data_path[0] != data_dependency_identifier) {
+    return false;
+  }
+
+  if (data_path[1] != '/') {
+    return std::unexpected{ "Invalid path format: missing root separator" };
+  }
+
+  // Early return if left data is missing
+  if (left.is_null() || left["components"].is_null()) {
+    return true;
+  }
+
+  auto data_paths = std::ranges::views::split(data_path, '/') | std::views::drop(1);
+  nlohmann::json::json_pointer data_pointer{ data_path.substr(1) };
+
+  auto iter = data_paths.begin();
+  const std::string first_part{ std::string_view(*iter) };
+  const std::string second_part{ std::string_view(*(++iter)) };
+  nlohmann::json::json_pointer remaining_pointer;
+  for (const auto &part: data_paths | std::views::drop(2)) {
+    remaining_pointer /= std::string(std::string_view{ part });
+  }
+
+  // Define a lambda to process a component name using the captured 'left' and 'right' json objects
+  const auto process_component = [&](std::string_view component_name, const nlohmann::json::json_pointer &pointer) -> ComparisonResult {
+    if (!left["components"].contains(component_name) || !right["components"].contains(component_name)) {
+      return { true, "" };
     }
-    
-    if (data_path[1] != '/') {
-        return std::unexpected{"Invalid path format: missing root separator"};
-    }
 
-    // Early return if left data is missing
-    if (left.is_null() || left["components"].is_null()) {
-        return true;
-    }
+    const auto &left_comp  = left["components"][std::string{ component_name }];
+    const auto &right_comp = right["components"][std::string{ component_name }];
 
-    try {
-        const auto process_component = [&](std::string_view component_name, 
-                                        const nlohmann::json::json_pointer& pointer) -> ComparisonResult {
-            if (!left["components"].contains(component_name) || !right["components"].contains(component_name)) {
-                return {true, ""};
-            }
+    auto get_value = [](const auto &json, const auto &ptr) {
+      return json.contains(ptr) ? json[ptr] : nlohmann::json{};
+    };
 
-            const auto& left_comp = left["components"][std::string{component_name}];
-            const auto& right_comp = right["components"][std::string{component_name}];
+    auto left_value  = get_value(left_comp, pointer);
+    auto right_value = get_value(right_comp, pointer);
 
-            auto get_value = [](const auto& json, const auto& ptr) {
-                return json.contains(ptr) ? json[ptr] : nlohmann::json{};
-            };
+    return { left_value != right_value, "" };
+  };
 
-            auto left_value = get_value(left_comp, pointer);
-            auto right_value = get_value(right_comp, pointer);
+  try {
+    if (first_part == "components") {
+      if (second_part == std::string{ data_wildcard_identifier }) {
 
-            return {left_value != right_value, ""};
-        };
+        // Using C++20 ranges to process components
+        for (const auto &[component_name, _]: right["components"].items()) {
+          auto result = process_component(component_name, data_pointer);
+          if (!result.error_message.empty()) {
+            return std::unexpected{ std::move(result.error_message) };
+          }
 
-        if (data_path[2] == data_wildcard_identifier) {
-            if (data_path[3] != '/') {
-                return std::unexpected{"Data dependency malformed: " + std::string{data_path}};
-            }
-
-            auto path_view = std::string_view{data_path}.substr(3);
-            nlohmann::json::json_pointer pointer{std::string{path_view}};
-
-            // Using C++20 ranges to process components
-            for (const auto& [component_name, _] : right["components"].items()) {
-                auto result = process_component(component_name, pointer);
-                if (!result.error_message.empty()) {
-                    return std::unexpected{std::move(result.error_message)};
-                }
-                if (result.changed) {
-                    return true;
-                }
-            }
-        } else {
-            auto path_view = std::string_view{data_path}.substr(2);
-            auto separator_pos = path_view.find_first_of('/');
-            if (separator_pos == std::string_view::npos) {
-                return std::unexpected{"Invalid path format: missing component separator"};
-            }
-
-            auto component_name = path_view.substr(0, separator_pos);
-            auto remaining_path = path_view.substr(separator_pos);
-            nlohmann::json::json_pointer pointer{std::string{remaining_path}};
-
-            auto result = process_component(component_name, pointer);
-            if (!result.error_message.empty()) {
-                return std::unexpected{std::move(result.error_message)};
-            }
-            return result.changed;
+          if (result.changed == true) {
+            spdlog::error("Data dependency changed for component: {}", component_name);
+          }
+          return result.changed;
         }
-
-        return false;
-    } catch (const std::exception& e) {
-        return std::unexpected{std::string{"Failed to determine data dependency: "} + e.what()};
+      } else {
+        auto component_name = second_part;
+        auto result         = process_component(component_name, remaining_pointer);
+        if (!result.error_message.empty()) {
+          return std::unexpected{ std::move(result.error_message) };
+        }
+        if (result.changed == true) {
+          spdlog::error("Data dependency changed for component: {}", component_name);
+        }
+        return result.changed;
+      }
+    } else {
+      if (!left.contains(data_pointer) || !right.contains(data_pointer)) {
+        return true;
+      }
+      // auto diff = json::diff(left[data_pointer], right[data_pointer]);
+      // if (!diff.empty()) {
+      //   spdlog::error("Data dependency changed at path: {}", data_pointer.to_string());
+      // }
+      return { left[data_pointer] != right[data_pointer] };
     }
+
+    return false;
+  } catch (const std::exception &e) {
+    return std::unexpected{ std::string{ "Failed to determine data dependency: " } + e.what() };
+  }
 }
 
+void find_json_keys(const nlohmann::json &j, const std::string &target_key, const std::string &current_path, nlohmann::json &paths)
+{
+  if (j.is_object()) {
+    for (auto it = j.begin(); it != j.end(); ++it) {
+      std::string new_path = current_path.empty() ? it.key() : current_path + "." + it.key();
 
+      if (it.key() == target_key) {
+        paths.push_back(new_path); // Store full path to the key
+      }
+
+      find_json_keys(it.value(), target_key, new_path, paths);
+    }
+  } else if (j.is_array()) {
+    for (size_t i = 0; i < j.size(); ++i) {
+      std::string new_path = current_path + "[" + std::to_string(i) + "]";
+      find_json_keys(j[i], target_key, new_path, paths);
+    }
+  }
+}
+
+void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept
+{
+  try {
+    auto start = std::chrono::steady_clock::now();
+
+    std::ifstream file(filename, std::ios::binary);
+    blake3_hasher hasher;
+    blake3_hasher_init(&hasher);
+    char buffer[4096];
+    while (file.read(buffer, sizeof(buffer))) {
+      blake3_hasher_update(&hasher, buffer, file.gcount());
+    }
+    if (file.gcount() > 0) {
+      blake3_hasher_update(&hasher, buffer, file.gcount());
+    }
+    blake3_hasher_finalize(&hasher, out_hash, BLAKE3_OUT_LEN);
+
+    auto end = std::chrono::steady_clock::now();
+    auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    spdlog::info("Hashed {} in {} ms", filename.generic_string(), ms);
+  } catch (std::exception &e) {
+    spdlog::error("Failed to hash file {}: {}", filename.generic_string(), e.what());
+    std::fill(out_hash, out_hash + 32, 0);
+  }
+}
 } // namespace yakka

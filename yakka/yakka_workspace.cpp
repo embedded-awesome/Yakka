@@ -73,9 +73,31 @@ std::expected<void, std::error_code> workspace::init(const fs::path &workspace_p
     });
   }
 
-  configuration["host_os"]              = host_os_string;
-  configuration["executable_extension"] = executable_extension;
-  configuration_json                    = configuration.as<nlohmann::json>();
+  // Check for project file
+  if (fs::exists(workspace_path / yakka::projects_filename)) {
+    projects = nlohmann::json::parse(std::ifstream(workspace_path / yakka::projects_filename));
+  } else {
+    // Iterate through project folders in output directory and create a projects entry for each
+    const auto output_path = workspace_path / yakka::default_output_directory;
+    if (fs::exists(output_path)) {
+      for (const auto &d: fs::directory_iterator(output_path)) {
+        if (fs::is_directory(d.path()) && fs::exists(d.path() / project_summary_filename)) {
+          projects[d.path().filename().string()] = { { "path", d.path().string() } };
+        }
+      }
+    }
+    // Create the projects file
+    std::ofstream project_file(workspace_path / yakka::projects_filename);
+    if (!project_file.is_open()) {
+      spdlog::error("Failed to create projects file at {}\n", (workspace_path / yakka::projects_filename).string());
+      return std::unexpected(std::make_error_code(std::errc::io_error));
+    }
+    project_file << projects;
+    project_file.close();
+  }
+
+  summary["configuration"]["host_os"]              = host_os_string;
+  summary["configuration"]["executable_extension"] = executable_extension;
 
   return {};
 }
@@ -157,21 +179,21 @@ std::optional<std::pair<fs::path, fs::path>> workspace::find_component(std::stri
 std::optional<nlohmann::json> workspace::find_feature(std::string_view feature) const
 {
   // Using structured bindings and if-init statement
-  if (auto node = local_database.get_feature_provider(std::string(feature)); node.has_value()) {
-    return *node;
+  if (auto node = local_database.get_feature_provider(feature); node.has_value()) {
+    return std::optional<nlohmann::json>(*node);
   }
 
-  if (auto node = shared_database.get_feature_provider(std::string(feature)); node.has_value()) {
-    return *node;
+  if (auto node = shared_database.get_feature_provider(feature); node.has_value()) {
+    return std::optional<nlohmann::json>(*node);
   }
 
   // Using ranges to search package databases
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
-    return db.get_feature_provider(std::string(feature)).has_value();
+    return db.get_feature_provider(feature).has_value();
   });
 
   if (found != package_databases.end()) {
-    return found->get_feature_provider(std::string(feature));
+    return found->get_feature_provider(feature);
   }
 
   return std::nullopt;
@@ -180,20 +202,20 @@ std::optional<nlohmann::json> workspace::find_feature(std::string_view feature) 
 // Blueprint finding with modern features
 std::optional<nlohmann::json> workspace::find_blueprint(std::string_view blueprint) const
 {
-  if (auto node = local_database.get_blueprint_provider(std::string(blueprint)); node.has_value()) {
-    return *node;
+  if (auto node = local_database.get_blueprint_provider(blueprint); node.has_value()) {
+    return std::optional<nlohmann::json>(*node);
   }
 
-  if (auto node = shared_database.get_blueprint_provider(std::string(blueprint)); node.has_value()) {
-    return *node;
+  if (auto node = shared_database.get_blueprint_provider(blueprint); node.has_value()) {
+    return std::optional<nlohmann::json>(*node);
   }
 
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
-    return db.get_blueprint_provider(std::string(blueprint)).has_value();
+    return db.get_blueprint_provider(blueprint).has_value();
   });
 
   if (found != package_databases.end()) {
-    return found->get_blueprint_provider(std::string(blueprint));
+    return found->get_blueprint_provider(blueprint);
   }
 
   return std::nullopt;
@@ -206,7 +228,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
     if (!fs::exists(config_file_path))
       return {};
 
-    configuration = YAML::LoadFile(config_file_path.string());
+    const auto configuration = YAML::LoadFile(config_file_path.string());
 
     if (configuration["path"]) {
       std::string path;
@@ -214,6 +236,8 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
         path += std::format("{}{}", p.as<std::string>(), host_os_path_seperator);
       }
       path += std::getenv("PATH");
+
+      summary["configuration"]["path"] = path;
 
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
       _putenv_s("PATH", path.c_str());
@@ -235,11 +259,13 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
           path = homepath + path.substr(1);
         }
         packages.push_back(path);
+        summary["configuration"]["packages"].push_back(path);
       }
     }
 
     if (configuration["home"]) {
-      yakka_shared_home = fs::path(configuration["home"].Scalar());
+      yakka_shared_home                = fs::path(configuration["home"].Scalar());
+      summary["configuration"]["home"] = yakka_shared_home.string();
     }
 
     return {};
@@ -252,9 +278,9 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
 // Modern implementation of component fetching
 std::future<fs::path> workspace::fetch_component(std::string_view name, const YAML::Node &node, std::function<void(std::string_view, size_t)> progress_handler)
 {
-  const auto url = try_render(inja_environment, node["packages"]["default"]["url"].as<std::string>(), configuration_json);
+  const auto url = try_render(inja_environment, node["packages"]["default"]["url"].as<std::string>(), summary);
 
-  const auto branch = try_render(inja_environment, node["packages"]["default"]["branch"].as<std::string>(), configuration_json);
+  const auto branch = try_render(inja_environment, node["packages"]["default"]["branch"].as<std::string>(), summary);
 
   const bool shared_components_write_access = (fs::status(shared_components_path).permissions() & fs::perms::owner_write) != fs::perms::none;
 
@@ -315,16 +341,7 @@ std::expected<void, std::error_code> workspace::update_component(std::string_vie
     return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
 
-  // Execute git commands in sequence
-  if (auto result = execute_git_command("stash", git_directory_string); !result) {
-    return result;
-  }
-
-  if (auto result = execute_git_command("pull --progress", git_directory_string); !result) {
-    return result;
-  }
-
-  return execute_git_command("stash pop", git_directory_string);
+  return execute_git_command("pull --progress --autostash", git_directory_string);
 }
 
 // Modern implementation using C++23 features
@@ -403,12 +420,11 @@ std::expected<fs::path, std::error_code> workspace::do_fetch_component(std::stri
       };
 
       // Check for phase transitions
-      using enum GitPhase;
-      update_phase(Compressing, "Comp");
-      update_phase(Receiving, "Rece");
-      update_phase(Resolving, "Reso");
-      update_phase(Updating, "Updat");
-      update_phase(LfsCheckout, "Filt");
+      update_phase(GitPhase::Compressing, "Comp");
+      update_phase(GitPhase::Receiving, "Rece");
+      update_phase(GitPhase::Resolving, "Reso");
+      update_phase(GitPhase::Updating, "Updat");
+      update_phase(GitPhase::LfsCheckout, "Filt");
 
       // Parse progress information
       std::string data_str{ data };
@@ -447,12 +463,67 @@ std::expected<fs::path, std::error_code> workspace::do_fetch_component(std::stri
     spdlog::info("{}: checkout in {}ms", name, *checkout_result);
 
     // Signal completion
+    spdlog::drop(std::format("fetchlog-{}", name));
     progress_handler("Complete"sv, 100);
     return checkout_location;
 
   } catch (const std::exception &e) {
     spdlog::error("Error in do_fetch_component: {}", e.what());
     return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+  }
+}
+
+void workspace::update_versions()
+{
+  // Scan registries
+  const auto registry_path = workspace_path / ".yakka/registries";
+  if (!fs::exists(registry_path))
+    return;
+
+  // Using ranges and views for directory traversal
+  auto registry_files = std::views::filter(fs::recursive_directory_iterator(registry_path), [](const auto &entry) {
+    return entry.path().extension() == ".yaml";
+  });
+
+  for (const auto &file_path: registry_files) {
+    std::string registry_name = file_path.path().filename().string();
+
+    versions[registry_name] = {};
+
+    // Extract remote URL
+    versions[registry_name]["url"] = exec("git", "-C " + file_path.path().parent_path().string() + " config --get remote.origin.url").first;
+
+    // Extract last commit hash
+    versions[registry_name]["rev"] = exec("git", "-C " + file_path.path().parent_path().string() + " rev-parse HEAD").first;
+
+    // Extract version
+
+    // Hash the registry file
+    uint8_t hash[32];
+    hash_file(file_path.path(), hash);
+
+    std::stringstream hashstr;
+    hashstr << std::hex << std::setfill('0');
+    for (int i = 0; i < 32; i++) {
+      hashstr << std::setw(2) << static_cast<int>(hash[i]);
+    }
+    versions[registry_name]["hash"] = hashstr.str();
+  }
+
+  // Scan local components
+  // For component in local database
+  {
+    // Extract version
+
+    // Hash the component files
+  }
+
+  // Scan shared components
+  // For component in shared database
+  {
+    // Extract version
+
+    // Hash the component files
   }
 }
 

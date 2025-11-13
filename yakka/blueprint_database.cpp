@@ -66,7 +66,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
     });
     local_inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
       nlohmann::json aggregate;
-      auto path = json_pointer(args[0]->get<std::string>());
+      auto path = nlohmann::json::json_pointer{args[0]->get<std::string>()};
       // Loop through components, check if object path exists, if so add it to the aggregate
       for (const auto &[c_key, c_value]: project_summary["components"].items()) {
         // auto v = json_path(c.value(), path);
@@ -146,13 +146,42 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
     }
 
     result.push_back(match);
-    // return match;
   }
 
   if (!blueprint_match_found) {
-    if (!fs::exists(target))
+    if (!fs::exists(target) && target[0] != yakka::data_dependency_identifier)
       spdlog::info("No blueprint for '{}'", target);
   }
   return result;
+}
+
+void blueprint_database::load(const fs::path filename)
+{
+}
+
+void blueprint_database::save(const fs::path filename)
+{
+  nlohmann::json output;
+
+  for (const auto &bp: blueprints) {
+    nlohmann::json blueprint;
+    blueprint["target"]      = bp.second->target;
+    blueprint["regex"]       = bp.second->regex.value_or("");
+    blueprint["parent_path"] = bp.second->parent_path;
+
+    nlohmann::json dependencies = nlohmann::json::array();
+    for (const auto &dep: bp.second->dependencies) {
+      nlohmann::json dependency;
+      dependency["type"] = dep.type;
+      dependency["name"] = dep.name;
+      dependencies.push_back(dependency);
+    }
+    blueprint["dependencies"] = dependencies;
+
+    output[bp.first].push_back(blueprint);
+  }
+
+  std::ofstream file(filename);
+  file << output.dump(2);
 }
 } // namespace yakka

@@ -22,8 +22,6 @@ int main(int argc, char **argv)
   project.parse_blueprints();
   project.generate_target_database();
 
-  project.load_common_commands();
-
   // Task flow test
   tf::Executor executor;
   auto finish = project.taskflow.emplace([=]() {

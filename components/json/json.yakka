@@ -1,0 +1,6 @@
+name: JSON
+
+includes:
+  global:
+    - master/include
+    - master/include/nlohmann

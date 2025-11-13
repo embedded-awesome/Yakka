@@ -1,5 +1,9 @@
 // Copyright (c) 2020 Pantor. All rights reserved.
 
+#include "inja/environment.hpp"
+
+#include "test-common.hpp"
+
 TEST_CASE("functions") {
   inja::Environment env;
 
@@ -35,7 +39,8 @@ TEST_CASE("functions") {
     CHECK(env.render("{{ 5^3 }}", data) == "125");
     CHECK(env.render("{{ 5 + 12 + 4 * (4 - (1 + 1))^2 - 75 * 1 }}", data) == "-42");
 
-    // CHECK_THROWS_WITH(env.render("{{ +1 }}", data), "[inja.exception.render_error] (at 1:4) empty expression");
+    CHECK_THROWS_WITH(env.render("{{ +1 }}", data), "[inja.exception.parser_error] (at 1:7) too few arguments");
+    CHECK_THROWS_WITH(env.render("{{ 1 + }}", data), "[inja.exception.parser_error] (at 1:8) too few arguments");
   }
 
   SUBCASE("upper") {
@@ -55,6 +60,11 @@ TEST_CASE("functions") {
     CHECK(env.render("{{ lower(city) }}", data) == "new york");
     // CHECK_THROWS_WITH( env.render("{{ lower(5.45) }}", data), "[inja.exception.json_error]
     // [json.exception.type_error.302] type must be string, but is number" );
+  }
+
+  SUBCASE("capitalize") {
+    CHECK(env.render("{{ capitalize(name) }}", data) == "Peter");
+    CHECK(env.render("{{ capitalize(city) }}", data) == "New york");
   }
 
   SUBCASE("range") {
@@ -264,7 +274,7 @@ TEST_CASE("callbacks") {
   CHECK(env.render("{{ double-greetings() }}", data) == "Hello Hello!");
   CHECK(env.render("{{ multiply(4, 5) }}", data) == "20.0");
   CHECK(env.render("{{ multiply(4, 2 + 3) }}", data) == "20.0");
-  CHECK(env.render("{{ multiply(2 + 2, 5) }}", data) == "20.0");
+  CHECK(env.render("{{ multiply(2 + 2, 6) }}", data) == "24.0");
   CHECK(env.render("{{ multiply(length(\"tester\"), 5) }}", data) == "30.0");
   CHECK(env.render("{{ multiply(5, length(\"t\")) }}", data) == "5.0");
   CHECK(env.render("{{ multiply(3, 4, 5) }}", data) == "60.0");

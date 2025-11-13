@@ -1,51 +1,136 @@
-# Yakka
+# Yakka — the embedded builder
 
-Yakka is a modern, data-focused build tool designed to aid embedded software development.
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![Release](https://img.shields.io/badge/release-latest-blue)]() [![License](https://img.shields.io/badge/license-Apache--2.0-blue)]()
 
-It recognizes that creating and delivering software is more than just compilation or linking and thus makes it easy to define new processes.
+**Yakka is a data‑first build system for embedded projects that models code, tools, and artifacts as reusable components and blueprints so you can describe all parts of a system with YAML, and template powered transforms.**
 
-Yakka can be utilized as a full build system but also recognizes the value of tooling diversity and thus can integrate as part of an 
-existing build system by only providing required functionality
+---
 
-## Why use Yakka
+### Table of Contents
+- Quick summary
+- Why Yakka
+- Features
+- Quickstart
+- Examples and docs
+- Usage and CLI
+- Blueprints and component schema
+- Contributing
+- License and maintainers
 
-Yakka aims to be descriptive, storing information as data rather than encoding it within a programming language. 
-This enables an ecosystem of open tooling and allows the use simple tools such as `jq` or `yq` to analyze components or projects.
+---
 
-It uses standard, commonly used technologies; YAML, JSON, template engine (Jinja*), regular expressions.
+### Quick summary
+Yakka makes embedded builds **declarative, composable, and auditable**. Instead of imperative scripts, you describe components (sources, toolchains, libraries) and how they relate to each other, and define blueprints (templates or small transforms) that produce data or artifacts. Yakka resolves components, evalutates blueprints, and runs the minimal steps required to produce any kind of output needed to design, develop, release, and maintain embedded software.
 
-Yakka is extremely flexible by defining a minimal data schema and enabling components to create their own schemas and processes.
+---
 
-Data transformation, such as compilation, are defined by 'blueprints' specified in components, such as a toolchain, rather than being built into Yakka.
-This allows components to include not only data or binaries, but also the definition of the process to accomplish the transformation.
+### Why Yakka
+- **Readable**: build logic lives in YAML and templates, not opaque shell scripts.  
+- **Composable**: treat toolchains, libraries, and apps as first‑class components that can be reused across projects.  
+- **Auditable**: the entire build graph is data; it’s easy to inspect, diff, and version.  
+- **Toolchain agnostic**: integrate GCC, Clang, or custom toolchains via blueprints.
+- **Extensible**: add domain or tool extensions (Doxygen, Renode, Qemu, Devicetree, config) by defining simple blueprints.
+- **Browser accessible**: built-in HTTP server exposes data to web components for custom GUI.
 
-Everything is a component. This includes source code, tools, documentation, projects, applications, ...
-No need for a multitude of file types or special rules making the system easy to understand.
+---
 
-Being data focused enables blueprints to have data dependencies allowing optimized builds and advanced data generation techniques.
+### Features
+- **Data‑first components**: everything is a component with metadata and blueprints.  
+- **Blueprints**: templates or build steps included in components that implement transforms (compile, link, generate_devicetree).  
+- **Human‑friendly formats**: YAML/JSON for data, Jinja for templates.
+- **Built-in commands**: Cross platform support for common blueprint actions (file system access, regex, hashing, encryption, binary manipulation)
 
+---
 
-## Examples
+### Quickstart
 
-### Minimal component
+**Install**  
+No installation step is needed. Download and store Yakka in your development repository so developers can simply clone and start being productive immediately.
+
+```bash
+# Example: download a release binary
+curl -L -o yakka https://github.com/embedded-awesome/Yakka/releases/latest/download/yakka-[linux|macos|windows]
+chmod +x yakka-[linux|macos|windows]
+./yakka-[linux|macos|windows]
 ```
-name: 'my component'
+
+**Minimal project layout**
+```
+workspace/
+├─ my_app.yakka
+├─ application.h
+├─ main.c
+└─ yakka
 ```
 
-### Simple C component
-```
-name: 'my component'
+**Example component: components/my_app.yakka**
+```yaml
+name: My project
+version: 0.1.0
+
 sources:
-  - my_source.c
+  - main.c
+
+includes:
+  global:
+    - .
 ```
 
-
-## Usage
-
-### Linking a project
-This example defines three components and the `link` blueprint that is part of the `gcc_arm` component.
-```
-yakka link! my_project platform_1 gcc_arm
+**Run a link build**
+```bash
+# Resolve components and run the link blueprint from the toolchain
+./yakka link! my_app gcc_arm
 ```
 
-### 
+**Expected result**
+- Yakka resolves `my_app` and `gcc_arm`, runs the `link` blueprint, and produces `output/my_app-gcc_arm/project.elf` 
+- View `output/my_app-gcc_arm/project_summary.json` for all component information
+- View `yakka.log` for detailed log of last action 
+
+---
+
+### Examples and docs
+- **examples/** — include runnable projects demonstrating:
+  - Bare‑metal C app with GCC toolchain.  
+  - Multi‑component app (app + HAL + BSP).  
+  - Custom blueprint showing packaging or OTA artifact creation.  
+- **docs/** — expand on component schema, blueprint syntax, and best practices.  
+- Add a `README` inside each example explaining how to run it and what to expect.
+
+---
+
+### Usage and CLI
+Common commands and patterns (adjust to your CLI implementation):
+- `yakka list` — list discovered components and their types.  
+- `yakka` — show command usage and flags.
+
+---
+
+### Blueprints and component schema
+- **Blueprints** are the small, focused transforms attached to components. They can be:
+  - Jinja templates that render a command list.  
+  - Inline scripts executed in a sandboxed environment.  
+  - References to external scripts or tools.
+- **Component schema** (recommended keys):
+  - `name` - descriptive identity (the only mandatory key)
+  - `requires`, `provides`, `supports` — relationships to other components and features
+  - `blueprints` — map of blueprint names to templates or scripts.
+
+Keep blueprints small and composable; prefer many focused blueprints over one large monolith.
+
+---
+
+### Contributing
+- **CONTRIBUTING.md** — include contribution guidelines, testing, and commit message conventions.  
+- **CODE_OF_CONDUCT.md** — set expectations for community behavior.  
+- Add tests under `test/` and examples under `examples/`.  
+- Use feature branches and open pull requests with a clear description and example usage.
+
+---
+
+### License and maintainers
+**License:** Apache‑2.0
+**Maintainers:**
+ - nik@embedded-awesome.org
+
+---

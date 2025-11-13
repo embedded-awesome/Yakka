@@ -1,0 +1,43 @@
+name: blake3
+version: 1.8.2
+description: BLAKE3 hashing library (C implementation) - sources and include folders
+
+sources:
+  - BLAKE3-1.8.2/c/blake3.c
+  - BLAKE3-1.8.2/c/blake3_dispatch.c
+  - BLAKE3-1.8.2/c/blake3_portable.c
+
+supports:
+  components:
+    xcode:
+      sources:
+        - BLAKE3-1.8.2/c/blake3_neon.c
+    msvc:
+      sources:
+        - BLAKE3-1.8.2/c/blake3_avx2_x86-64_windows_msvc.asm
+        - BLAKE3-1.8.2/c/blake3_sse41_x86-64_windows_msvc.asm
+        - BLAKE3-1.8.2/c/blake3_avx512_x86-64_windows_msvc.asm
+        - BLAKE3-1.8.2/c/blake3_sse2_x86-64_windows_msvc.asm
+    gcc:
+      sources:
+        - BLAKE3-1.8.2/c/blake3_sse2_x86-64_unix.S
+        - BLAKE3-1.8.2/c/blake3_sse41_x86-64_unix.S
+        - BLAKE3-1.8.2/c/blake3_avx2_x86-64_unix.S
+        - BLAKE3-1.8.2/c/blake3_avx512_x86-64_unix.S
+
+includes:
+  global:
+    - BLAKE3-1.8.2/c
+
+#defines:
+#  local:
+#    - BLAKE3_ATOMICS=1
+
+# flags:
+#   S:
+#     local:
+#       - -masm=intel
+#       - -msse2
+#       - -msse4.1
+#       - -mavx2
+#       - -mavx512f -mavx512vl

@@ -1,8 +1,0 @@
-name: Yakka CLI app
-
-sources:
-  - yakka_cli.cpp
-
-requires:
-  components:
-    - yakka

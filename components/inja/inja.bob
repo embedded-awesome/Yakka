@@ -1,5 +1,0 @@
-name: Inja
-
-includes:
-  global:
-    - master/include/inja

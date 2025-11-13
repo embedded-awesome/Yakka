@@ -19,12 +19,31 @@
 #include "exceptions.hpp"
 #include "fmt/fmt.h"
 #include "function_storage.hpp"
-#include "inja.hpp"
 #include "node.hpp"
 #include "template.hpp"
+#include "throw.hpp"
 #include "utils.hpp"
 
 namespace inja {
+
+/*!
+@brief Escapes HTML
+*/
+inline std::string htmlescape(const std::string& data) {
+  std::string buffer;
+  buffer.reserve((unsigned int)(1.1 * data.size()));
+  for (size_t pos = 0; pos != data.size(); ++pos) {
+    switch (data[pos]) {
+      case '&':  buffer.append("&amp;");       break;
+      case '\"': buffer.append("&quot;");      break;
+      case '\'': buffer.append("&apos;");      break;
+      case '<':  buffer.append("&lt;");        break;
+      case '>':  buffer.append("&gt;");        break;
+      default:   buffer.append(&data[pos], 1); break;
+    }
+  }
+  return buffer;
+}
 
 /*!
  * \brief Class for rendering a Template with data.
@@ -64,34 +83,6 @@ class Renderer : public NodeVisitor {
       return false;
     }
     return !data->empty();
-  }
-
-  static std::string htmlescape(const std::string& data) {
-    std::string buffer;
-    buffer.reserve(1.1 * data.size());
-    for (size_t pos = 0; pos != data.size(); ++pos) {
-      switch (data[pos]) {
-      case '&':
-        buffer.append("&amp;");
-        break;
-      case '\"':
-        buffer.append("&quot;");
-        break;
-      case '\'':
-        buffer.append("&apos;");
-        break;
-      case '<':
-        buffer.append("&lt;");
-        break;
-      case '>':
-        buffer.append("&gt;");
-        break;
-      default:
-        buffer.append(&data[pos], 1);
-        break;
-      }
-    }
-    return buffer;
   }
 
   void print_data(const std::shared_ptr<json>& value) {
@@ -144,7 +135,7 @@ class Renderer : public NodeVisitor {
     data_eval_stack.push(result_ptr.get());
   }
 
-  template <size_t N, size_t N_start = 0, bool throw_not_found = false> std::array<const json*, N> get_arguments(const FunctionNode& node) {
+  template <size_t N, size_t N_start = 0, bool throw_not_found = true> std::array<const json*, N> get_arguments(const FunctionNode& node) {
     if (node.arguments.size() < N_start + N) {
       throw_renderer_error("function needs " + std::to_string(N_start + N) + " variables, but has only found " + std::to_string(node.arguments.size()), node);
     }
@@ -174,7 +165,7 @@ class Renderer : public NodeVisitor {
     return result;
   }
 
-  template <bool throw_not_found = false> Arguments get_argument_vector(const FunctionNode& node) {
+  template <bool throw_not_found = true> Arguments get_argument_vector(const FunctionNode& node) {
     const size_t N = node.arguments.size();
     for (const auto& a : node.arguments) {
       a->accept(*this);
@@ -358,14 +349,26 @@ class Renderer : public NodeVisitor {
     case Op::At: {
       const auto args = get_arguments<2>(node);
       if (args[0]->is_object()) {
-        data_eval_stack.push(&args[0]->at(args[1]->get<std::string>()));
+        auto key = args[1]->get<std::string>();
+        if (key[0] == '/') {
+          nlohmann::json::json_pointer ptr(key);
+          data_eval_stack.push(&args[0]->at(ptr));
+        }
+        else
+          data_eval_stack.push(&args[0]->at(args[1]->get<std::string>()));
       } else {
         data_eval_stack.push(&args[0]->at(args[1]->get<int>()));
       }
     } break;
+    case Op::Capitalize: {
+      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
+      result[0] = static_cast<char>(::toupper(result[0]));
+      std::transform(result.begin() + 1, result.end(), result.begin() + 1, [](char c) { return static_cast<char>(::tolower(c)); });
+      make_result(std::move(result));
+    } break;
     case Op::Default: {
       const auto test_arg = get_arguments<1, 0, false>(node)[0];
-      data_eval_stack.push(test_arg ? test_arg : get_arguments<1, 1>(node)[0]);
+      data_eval_stack.push(test_arg && !test_arg->is_null() ? test_arg : get_arguments<1, 1>(node)[0]);
     } break;
     case Op::DivisibleBy: {
       const auto args = get_arguments<2>(node);
@@ -382,9 +385,15 @@ class Renderer : public NodeVisitor {
     case Op::ExistsInObject: {
       const auto args = get_arguments<2>(node);
       auto&& name = args[1]->get_ref<const json::string_t&>();
-      if (args[0])
-        make_result(args[0]->find(name) != args[0]->end());
-      else
+      if (args[0]) {
+        if (args[0]->is_object())
+          make_result(args[0]->find(name) != args[0]->end());
+        else if (args[0]->is_array())
+          make_result(std::any_of(args[0]->begin(), args[0]->end(),
+                                  [&](const auto& obj) { return obj.is_string() && obj.template get_ref<const json::string_t&>().compare(name) == 0; }));
+        else
+          make_result(false);
+      } else
         make_result(false);
     } break;
     case Op::First: {
@@ -528,13 +537,68 @@ class Renderer : public NodeVisitor {
       make_result(os.str());
     } break;
     case Op::Hex: {
-      make_result(fmt::format("{:x}", get_arguments<1>(node)[0]->get<int>()));
+      const auto args = get_arguments<1>(node);
+      if (args[0] != nullptr) {
+        make_result(fmt::format("{:x}", args[0]->get<int>()));
+      } else {
+        throw_renderer_error("NULL arguments to hex()", node);
+      }
     } break;
-    case Op::Capitalize: {
-      auto input = get_arguments<1>(node)[0]->get<std::string>();
-      std::transform(input.begin(), input.end(), input.begin(), ::toupper);
-      make_result(input);
+    case Op::Map: {
+      auto args = get_argument_vector(node);
+      const auto number_of_args = args.size();
+      if (number_of_args < 2) {
+        throw_renderer_error("map() needs at least two arguments", node);
+      }
+      inja::json output;
+      const auto data = args[0];
+      const auto function_name = args[1]->get<std::string>();
+      const auto found_function = function_storage.find_function(function_name, number_of_args - 1);
+      if (found_function.operation == FunctionStorage::Operation::None) {
+        throw_renderer_error("map() function '" + args[1]->get<std::string>() + "' not found", node);
+      }
+      // Remove the function name and the data from the arguments
+      // Perhaps it's better to create a splice of the arguments vector?
+      args.erase(args.begin());
+      args.erase(args.begin());
+
+      if (found_function.operation == FunctionStorage::Operation::Callback) {
+        for (const auto& i: data->items()) {
+          args.emplace(args.begin(), &i.value());
+          const auto result = found_function.callback(args);
+          args.erase(args.begin());
+          if (result.is_null()) {
+            continue;
+          } else {
+            output.push_back(result);
+          }
+        }
+      } else {
+        // // Create the FunctionNode to pass to the callback
+        // FunctionNode found_function_node {found_function.operation, node.pos};
+        // found_function_node.number_args = number_of_args - 1;
+        // for (const auto& arg : args) {
+        //   found_function_node.arguments.push_back(arg);
+        //   if (arg == nullptr) {
+        //     throw_renderer_error("NULL argument to map() function", node);
+        //   }
+        // }
+        // found_function_node.arguments = args;
+
+        // // Iterate through the data and call the function for each item
+        // for (const auto& i: data->items()) {
+        //   found_function_node.arguments.emplace(found_function_node.arguments.begin(), &i.value());
+        //   visit(found_function_node);
+        //   found_function_node.arguments.erase(found_function_node.arguments.begin());
+        //   if (result.is_null()) {
+        //     continue;
+        //   } else {
+        //     output.push_back(result);
+        //   }
+        // }
+      }
     } break;
+    
     case Op::None:
       break;
     }

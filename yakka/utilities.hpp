@@ -18,10 +18,10 @@ using command_list_t   = std::unordered_set<std::string>;
 std::pair<std::string, int> exec(const std::string &command_text, const std::string &arg_text);
 int exec(const std::string &command_text, const std::string &arg_text, std::function<void(std::string &)> function);
 bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2);
-void json_node_merge(nlohmann::json &merge_target, const nlohmann::json &node);
+void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node);
 YAML::Node yaml_path(const YAML::Node &node, std::string path);
 nlohmann::json json_path(const nlohmann::json &node, std::string path);
-nlohmann::json::json_pointer json_pointer(std::string path);
+// nlohmann::json::json_pointer json_pointer(std::string path);
 std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(const std::vector<std::string> &argument_string);
 std::string generate_project_name(const component_list_t &components, const feature_list_t &features);
 std::vector<std::string> parse_gcc_dependency_file(const std::string &filename);
@@ -31,38 +31,46 @@ std::string try_render(inja::Environment &env, const std::string &input, const n
 std::string try_render_file(inja::Environment &env, const std::string &filename, const nlohmann::json &data);
 std::pair<std::string, int> download_resource(const std::string url, fs::path destination);
 nlohmann::json::json_pointer create_condition_pointer(const nlohmann::json condition);
+void find_json_keys(const nlohmann::json &j, const std::string &target_key, const std::string &current_path, nlohmann::json& paths);
 
-std::expected<bool, std::string> has_data_dependency_changed(
-    std::string_view data_path,
-    const nlohmann::json& left,
-    const nlohmann::json& right) noexcept;
-    
+void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept;
+
+std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept;
+
 void add_common_template_commands(inja::Environment &inja_env);
 
-template <class CharContainer> static size_t get_file_contents(const std::string &filename, CharContainer *container)
+template <class CharContainer>
+static std::expected<size_t, std::error_code> get_file_contents(std::filesystem::path filename, CharContainer *container)
 {
-  ::FILE *file = ::fopen(filename.c_str(), "rb");
-  if (file == nullptr) {
-    return 0;
+  std::ifstream file(filename, std::ios::binary | std::ios::ate);
+  if (!file) {
+    return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
-  ::fseek(file, 0, SEEK_END);
-  long size = ::ftell(file);
-  container->resize(static_cast<typename CharContainer::size_type>(size));
-  if (size) {
-    ::rewind(file);
-    size_t ret = ::fread(&(*container)[0], 1, container->size(), file);
-    (void)ret;
-    //C4_CHECK(ret == (size_t)size);
+
+  const auto file_size = file.tellg();
+  if (file_size < 0) {
+    return std::unexpected(std::make_error_code(std::errc::io_error));
   }
-  ::fclose(file);
+
+  container->resize(static_cast<typename CharContainer::size_type>(file_size));
+
+  file.seekg(0);
+  if (!file.read(reinterpret_cast<char *>(container->data()), file_size)) {
+    return std::unexpected(std::make_error_code(std::errc::io_error));
+  }
+
   return container->size();
 }
 
-template <class CharContainer> CharContainer get_file_contents(const std::string &filename)
+template <class CharContainer>
+static std::expected<CharContainer, std::error_code> get_file_contents(std::filesystem::path filename)
 {
   CharContainer cc;
-  get_file_contents(filename, &cc);
-  return cc;
+  auto result = get_file_contents(filename, &cc);
+  if (result) {
+    return cc;
+  }
+  return std::unexpected(result.error());
 }
 
 } // namespace yakka

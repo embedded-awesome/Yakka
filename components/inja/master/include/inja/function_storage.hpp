@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "inja.hpp"
+#include "json.hpp"
 
 namespace inja {
 
@@ -70,6 +70,7 @@ public:
     Join,
     Callback,
     Hex,
+    Map,
     None,
   };
 
@@ -114,6 +115,7 @@ private:
       {std::make_pair("super", 1), FunctionData {Operation::Super}},
       {std::make_pair("join", 2), FunctionData {Operation::Join}},
       {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
+      {std::make_pair("map", -1), FunctionData {Operation::Map}},
   };
 
 public:

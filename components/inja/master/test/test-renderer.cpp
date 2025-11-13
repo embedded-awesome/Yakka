@@ -1,5 +1,9 @@
 // Copyright (c) 2020 Pantor. All rights reserved.
 
+#include "inja/environment.hpp"
+
+#include "test-common.hpp"
+
 TEST_CASE("types") {
   inja::Environment env;
   inja::json data;
@@ -18,6 +22,7 @@ TEST_CASE("types") {
   data["relatives"]["brother"] = "Chris";
   data["relatives"]["sister"] = "Jenny";
   data["vars"] = {2, 3, 4, 0, -1, -2, -3};
+  data["max_value"] = 18446744073709551615ull;
 
   SUBCASE("basic") {
     CHECK(env.render("", data) == "");
@@ -38,6 +43,7 @@ TEST_CASE("types") {
     CHECK(env.render("{{ \"{{ no_value }}\" }}", data) == "{{ no_value }}");
     CHECK(env.render("{{ @name }}", data) == "@name");
     CHECK(env.render("{{ $name }}", data) == "$name");
+    CHECK(env.render("{{max_value}}", data) == "18446744073709551615");
 
     CHECK_THROWS_WITH(env.render("{{unknown}}", data), "[inja.exception.render_error] (at 1:3) variable 'unknown' not found");
   }
@@ -148,6 +154,12 @@ Yeah!
                      data) == R""""(Yeah!
 )"""");
   }
+
+  SUBCASE("pipe syntax") {
+    CHECK(env.render("{{ brother.name | upper }}", data) == "CHRIS");
+    CHECK(env.render("{{ brother.name | upper | lower }}", data) == "chris");
+    CHECK(env.render("{{ [\"C\", \"A\", \"B\"] | sort | join(\",\") }}", data) == "A,B,C");
+  }
 }
 
 TEST_CASE("templates") {
@@ -158,7 +170,7 @@ TEST_CASE("templates") {
 
   SUBCASE("reuse") {
     inja::Environment env;
-    inja::Template temp = env.parse("{% if is_happy %}{{ name }}{% else %}{{ city }}{% endif %}");
+    const inja::Template temp = env.parse("{% if is_happy %}{{ name }}{% else %}{{ city }}{% endif %}");
 
     CHECK(env.render(temp, data) == "Peter");
 
@@ -169,10 +181,10 @@ TEST_CASE("templates") {
 
   SUBCASE("include") {
     inja::Environment env;
-    inja::Template t1 = env.parse("Hello {{ name }}");
+    const inja::Template t1 = env.parse("Hello {{ name }}");
     env.include_template("greeting", t1);
 
-    inja::Template t2 = env.parse("{% include \"greeting\" %}!");
+    const inja::Template t2 = env.parse("{% include \"greeting\" %}!");
     CHECK(env.render(t2, data) == "Hello Peter!");
     CHECK_THROWS_WITH(env.parse("{% include \"does-not-exist\" %}!"), "[inja.exception.file_error] failed accessing file at 'does-not-exist'");
 
@@ -185,15 +197,15 @@ TEST_CASE("templates") {
     CHECK_THROWS_WITH(env.parse("{% include \"does-not-exist\" %}!"), "[inja.exception.file_error] failed accessing file at 'does-not-exist'");
 
     env.set_search_included_templates_in_files(false);
-    env.set_include_callback([&env](const std::string&, const std::string&) { return env.parse("Hello {{ name }}"); });
+    env.set_include_callback([&env](const std::filesystem::path&, const std::string&) { return env.parse("Hello {{ name }}"); });
 
-    inja::Template t1 = env.parse("{% include \"greeting\" %}!");
+    const inja::Template t1 = env.parse("{% include \"greeting\" %}!");
     CHECK(env.render(t1, data) == "Hello Peter!");
 
     env.set_search_included_templates_in_files(true);
-    env.set_include_callback([&env](const std::string&, const std::string& name) { return env.parse("Bye " + name); });
+    env.set_include_callback([&env](const std::filesystem::path&, const std::string& name) { return env.parse("Bye " + name); });
 
-    inja::Template t2 = env.parse("{% include \"Jeff\" %}!");
+    const inja::Template t2 = env.parse("{% include \"Jeff\" %}!");
     CHECK(env.render(t2, data) == "Bye Jeff!");
   }
 
@@ -209,9 +221,9 @@ TEST_CASE("templates") {
 
   SUBCASE("count variables") {
     inja::Environment env;
-    inja::Template t1 = env.parse("Hello {{ name }}");
-    inja::Template t2 = env.parse("{% if is_happy %}{{ name }}{% else %}{{ city }}{% endif %}");
-    inja::Template t3 = env.parse("{% if at(name, test) %}{{ name }}{% else %}{{ city }}{{ upper(city) }}{% endif %}");
+    const inja::Template t1 = env.parse("Hello {{ name }}");
+    const inja::Template t2 = env.parse("{% if is_happy %}{{ name }}{% else %}{{ city }}{% endif %}");
+    const inja::Template t3 = env.parse("{% if at(name, test) %}{{ name }}{% else %}{{ city }}{{ upper(city) }}{% endif %}");
 
     CHECK(t1.count_variables() == 1);
     CHECK(t2.count_variables() == 3);
