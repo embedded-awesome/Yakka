@@ -269,8 +269,7 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
         // Check if the key is already in merge_target
         auto it2 = merge_target.find(it.key());
         if (it2 != merge_target.end()) {
-          auto merge_path = path / nlohmann::json::json_pointer(it.key());
-          json_node_merge(merge_path, it2.value(), it.value());
+          json_node_merge(""_json_pointer, it2.value(), it.value());
         } else {
           merge_target[it.key()] = it.value();
         }

@@ -113,7 +113,7 @@ void project::init_project()
 void project::process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node)
 {
   // Merge the feature values into the parent component
-  json_node_merge("/"_json_pointer, component->json, child_node);
+  json_node_merge(""_json_pointer, component->json, child_node);
 
   // Process required components
   if (child_node.contains("/requires/components"_json_pointer)) {
@@ -652,8 +652,7 @@ void project::evaluate_choices()
         matches      = std::count_if(value["features"].begin(), value["features"].end(), [&](const auto &j) {
           return required_features.contains(j.template get<std::string>());
         });
-      }
-      else if (value.contains("components")) {
+      } else if (value.contains("components")) {
         option_count = value["components"].size();
         matches      = std::count_if(value["components"].begin(), value["components"].end(), [&](const auto &j) {
           return required_components.contains(j.template get<std::string>());
