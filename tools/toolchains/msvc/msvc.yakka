@@ -7,8 +7,7 @@ requires:
 msvc:
   path: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/"
   # path: "C:/Program Files/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/"
-  # version: '14.44.35207'
-  version: '14.44.35211'
+  version: '14.44.35207'
   kit:
     path: "C:/Program Files (x86)/Windows Kits/10"
     version: "10.0.22621.0"
