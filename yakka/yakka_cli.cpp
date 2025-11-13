@@ -383,9 +383,9 @@ int main(int argc, char **argv)
   duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to process blueprints", duration);
 
+  yakka::task_engine task_engine;
+  progress_bar_task_ui progress_bar_ui;
   try {
-    progress_bar_task_ui progress_bar_ui;
-    yakka::task_engine task_engine;
     task_engine.run_taskflow(project, &progress_bar_ui);
   } catch (const std::exception &e) {
     spdlog::error("Running task engine failed: {}", e.what());
