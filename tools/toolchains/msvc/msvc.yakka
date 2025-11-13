@@ -6,8 +6,8 @@ requires:
 
 msvc:
   path: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/"
-  version: '14.42.34433'
-#  version: '14.44.35207'
+#  version: '14.42.34433'
+  version: '14.44.35207'
   kit:
     path: "C:/Program Files (x86)/Windows Kits/10"
     version: "10.0.22621.0"
@@ -18,10 +18,10 @@ flags:
       - /Fm /c /EHsc /Ox /FS -MT /utf-8
       - /Zi
 #      - /GL
-      - -I"{{data.msvc.path}}/{{data.msvc.version}}/include"
-      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/um"
-      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/shared"
-      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/ucrt"
+      - -I"{{components.msvc.msvc.path}}/{{components.msvc.msvc.version}}/include"
+      - -I"{{components.msvc.msvc.kit.path}}/Include/{{components.msvc.msvc.kit.version}}/um"
+      - -I"{{components.msvc.msvc.kit.path}}/Include/{{components.msvc.msvc.kit.version}}/shared"
+      - -I"{{components.msvc.msvc.kit.path}}/Include/{{components.msvc.msvc.kit.version}}/ucrt"
       - -DEBUG:FULL
 
   cpp:
@@ -29,10 +29,10 @@ flags:
       - /Fm /c /EHsc /Ox /FS -MT /utf-8 /std:c++latest
       - /Zi
 #      - /GL
-      - -I"{{data.msvc.path}}/{{data.msvc.version}}/include" 
-      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/um"
-      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/shared" 
-      - -I"{{data.msvc.kit.path}}/Include/{{data.msvc.kit.version}}/ucrt"
+      - -I"{{components.msvc.msvc.path}}/{{components.msvc.msvc.version}}/include" 
+      - -I"{{components.msvc.msvc.kit.path}}/Include/{{components.msvc.msvc.kit.version}}/um"
+      - -I"{{components.msvc.msvc.kit.path}}/Include/{{components.msvc.msvc.kit.version}}/shared" 
+      - -I"{{components.msvc.msvc.kit.path}}/Include/{{components.msvc.msvc.kit.version}}/ucrt"
       - -DEBUG:FULL
   asm:
     global:
@@ -45,9 +45,9 @@ flags:
       - -DEBUG:FULL
       - -OPT:NOICF
       -  /LTCG
-      - -LIBPATH:"{{data.msvc.kit.path}}/Lib/{{data.msvc.kit.version}}/um/x64"
-      - -LIBPATH:"{{data.msvc.path}}/{{data.msvc.version}}/lib/onecore/x64"
-      - -LIBPATH:"{{data.msvc.kit.path}}/Lib/{{data.msvc.kit.version}}/ucrt/x64"
+      - -LIBPATH:"{{components.msvc.msvc.kit.path}}/Lib/{{components.msvc.msvc.kit.version}}/um/x64"
+      - -LIBPATH:"{{components.msvc.msvc.path}}/{{components.msvc.msvc.version}}/lib/onecore/x64"
+      - -LIBPATH:"{{components.msvc.msvc.kit.path}}/Lib/{{components.msvc.msvc.kit.version}}/ucrt/x64"
 
 tools:
   cl: "{{components.msvc.msvc.path}}/{{components.msvc.msvc.version}}/bin/Hostx64/x64/cl.exe"
@@ -62,10 +62,10 @@ blueprints:
     process:
       - echo: '{{ data.msvc }}'
   
-  ':/data/msvc/version':
-    process:
-      - echo: '{{ glob( concatenate(data.msvc.path, "/*") ) | first() | not_dir() }}'
-      - save:
+  # ':/data/msvc/version':
+  #   process:
+  #     - echo: '{{ glob( concatenate(data.msvc.path, "/*") ) | first() | not_dir() }}'
+  #     - save:
   
   compile:
     depends:
