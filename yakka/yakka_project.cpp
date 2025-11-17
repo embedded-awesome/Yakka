@@ -106,14 +106,14 @@ void project::init_project()
   if (fs::exists(project_file)) {
     YAML::Node node = YAML::LoadFile(project_file.generic_string());
     // Merge data from the project file
-    json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>());
+    json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>(), &data_schema);
   }
 }
 
 void project::process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node)
 {
   // Merge the feature values into the parent component
-  json_node_merge(""_json_pointer, component->json, child_node);
+  json_node_merge(""_json_pointer, component->json, child_node, &project_schema);
 
   // Process required components
   if (child_node.contains("/requires/components"_json_pointer)) {
@@ -377,6 +377,14 @@ bool project::add_component(const std::string &component_name, component_databas
         spdlog::info("Processing required component '{}' in {}", c, component_id);
         process_requirements(new_component, new_component->json["supports"]["components"][c]);
       }
+  }
+
+  // Process schema data
+  if (new_component->json.contains("schema")) {
+    project_schema.add_schema_data(new_component->json["schema"]);
+  }
+  if (new_component->json.contains("data_schema")) {
+    data_schema.add_schema_data(new_component->json["data_schema"]);
   }
 
   // Process all the existing components support for the new component
@@ -815,69 +823,17 @@ void project::save_summary()
   template_contributions_file.close();
 }
 
-class custom_error_handler : public nlohmann::json_schema::basic_error_handler {
-public:
-  std::string component_name;
-  void error(const nlohmann::json::json_pointer &ptr, const nlohmann::json &instance, const std::string &message) override
-  {
-    nlohmann::json_schema::basic_error_handler::error(ptr, instance, message);
-    spdlog::error("Validation error in '{}': {} - {} : - {}", component_name, ptr.to_string(), instance.dump(3), message);
-  }
-};
-
 void project::validate_schema()
 {
-  // Collect all the schema data
-  nlohmann::json schema      = "{ \"properties\": {} }"_json;
-  nlohmann::json data_schema = "{ \"properties\": {} }"_json;
-
-  for (const auto &c: components) {
-    if (c->json.contains("schema")) {
-      const auto schema_json_pointer = "/properties"_json_pointer;
-      json_node_merge(schema_json_pointer, schema["properties"], c->json["schema"]);
-    }
-    if (c->json.contains("data_schema")) {
-      const auto schema_json_pointer = "/properties"_json_pointer;
-      json_node_merge(schema_json_pointer, data_schema["properties"], c->json["data_schema"]);
-    }
-  }
-
   // Verify schema for each component
-  {
-    //spdlog::error("Schema: {}", schema.dump(2));
-    // Create validator
-    nlohmann::json_schema::json_validator validator(nullptr, nlohmann::json_schema::default_string_format_check);
-    try {
-      validator.set_root_schema(schema);
-    } catch (const std::exception &e) {
-      spdlog::error("Setting root schema for components failed\n{}", e.what());
-      return;
-    }
-
-    // Iterate through each component and validate
-    custom_error_handler err;
-    for (const auto &c: components) {
-      err.component_name = c->id;
-      validator.validate(c->json, err);
-    }
+  for (const auto &c: components) {
+    project_schema.validate(c->json, c->id);
   }
 
   // Verify data schema for the project
-  {
-    // Create validator
-    nlohmann::json_schema::json_validator validator(nullptr, nlohmann::json_schema::default_string_format_check);
-    try {
-      validator.set_root_schema(data_schema);
-    } catch (const std::exception &e) {
-      spdlog::error("Setting root schema for data failed\n{}", e.what());
-      return;
-    }
-
-    custom_error_handler err;
-    auto validation_result = validator.validate(project_summary["data"], err);
-    if (!validation_result.is_null() && validation_result.size() != 0)
-      current_state = state::PROJECT_HAS_FAILED_SCHEMA_CHECK;
-  }
+  auto validation_result = data_schema.validate(project_summary["data"], "project_data");
+  if (!validation_result.is_null() && validation_result.size() != 0)
+    current_state = state::PROJECT_HAS_FAILED_SCHEMA_CHECK;
 }
 
 /**
@@ -906,7 +862,7 @@ void project::update_project_data()
         project_summary["data"][pointer] = nlohmann::json::object();
       }
 
-      json_node_merge(""_json_pointer, project_summary["data"][pointer], c->json[pointer]);
+      json_node_merge(pointer, project_summary["data"][pointer], c->json[pointer], &data_schema);
     }
   }
 
@@ -935,8 +891,8 @@ bool project::condition_is_fulfilled(const nlohmann::json &node)
 
 void project::create_config_file(const std::shared_ptr<yakka::component> component, const nlohmann::json &config, const std::string &prefix, std::string instance_name)
 {
-  std::string config_filename = config["path"].get<std::string>();
-  fs::path config_file_path   = component->component_path / config_filename;
+  std::string config_filename            = config["path"].get<std::string>();
+  std::filesystem::path config_file_path = component->component_path / config_filename;
 
   // Check for overrides
   if (config.contains("file_id")) {
@@ -960,8 +916,9 @@ void project::create_config_file(const std::shared_ptr<yakka::component> compone
     }
   }
 
-  config_file_path          = this->inja_environment.render(config_file_path.generic_string(), { { "instance", prefix } });
-  fs::path destination_path = fs::path{ default_output_directory + project_name + "/config" } / this->inja_environment.render(fs::path(config_filename).filename().string(), { { "instance", instance_name } });
+  config_file_path = this->inja_environment.render(config_file_path.generic_string(), { { "instance", prefix } });
+  std::filesystem::path destination_path =
+    std::filesystem::path{ default_output_directory + project_name + "/config" } / this->inja_environment.render(std::filesystem::path(config_filename).filename().string(), { { "instance", instance_name } });
   if (!instance_name.empty()) {
     // Convert instance name uppercase
     std::transform(instance_name.begin(), instance_name.end(), instance_name.begin(), ::toupper);
@@ -1028,7 +985,7 @@ void project::process_slc_rules()
         if (is_disqualified_by_unless(p) || !condition_is_fulfilled(p))
           continue;
 
-        fs::path source_path{ p["path"].get<std::string>() };
+        std::filesystem::path source_path{ p["path"].get<std::string>() };
         if (source_path.extension() != ".h")
           c->json["sources"].push_back(p["path"]);
       }
@@ -1069,7 +1026,7 @@ void project::process_slc_rules()
         if (is_disqualified_by_unless(p) || !condition_is_fulfilled(p))
           continue;
 
-        fs::path source_path{ p["path"].get<std::string>() };
+        std::filesystem::path source_path{ p["path"].get<std::string>() };
         c->json["libraries"].push_back(p["path"]);
       }
     }
@@ -1131,8 +1088,8 @@ void project::process_slc_rules()
           if (is_disqualified_by_unless(t) || !condition_is_fulfilled(t))
             continue;
 
-          fs::path template_file = t["path"].get<std::string>();
-          fs::path target_file   = template_file.filename();
+          std::filesystem::path template_file = t["path"].get<std::string>();
+          std::filesystem::path target_file   = template_file.filename();
           target_file.replace_extension();
 
           const auto target = "{{project_output}}/generated/" + target_file.string();
@@ -1169,7 +1126,7 @@ void project::process_slc_rules()
             if (is_disqualified_by_unless(s) || !condition_is_fulfilled(s))
               continue;
 
-            c->json["generated"]["linker_script"] = "{{project_output}}/generated/" + fs::path{ s["value"].get<std::string>() }.filename().string();
+            c->json["generated"]["linker_script"] = "{{project_output}}/generated/" + std::filesystem::path{ s["value"].get<std::string>() }.filename().string();
           }
         }
       }
@@ -1256,7 +1213,7 @@ void project::save_blueprints()
   blueprint_database.save(this->output_path / "blueprints.json");
 }
 
-void project::add_additional_tool(const fs::path component_path)
+void project::add_additional_tool(const std::filesystem::path component_path)
 {
   // Load component
   auto tool_component = std::make_shared<component>();

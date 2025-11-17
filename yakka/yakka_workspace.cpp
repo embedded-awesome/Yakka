@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 namespace yakka {
 
 // Using std::expected for error handling
-std::expected<void, std::error_code> workspace::init(const fs::path &workspace_path)
+std::expected<void, std::error_code> workspace::init(const std::filesystem::path &workspace_path)
 {
   this->workspace_path = workspace_path;
 
@@ -142,7 +142,7 @@ std::optional<YAML::Node> workspace::find_registry_component(std::string_view na
 }
 
 // Modern implementation of component finding with structured bindings
-std::optional<std::pair<fs::path, fs::path>> workspace::find_component(std::string_view component_dotname, component_database::flag flags)
+std::optional<std::pair<std::filesystem::path, std::filesystem::path>> workspace::find_component(std::string_view component_dotname, component_database::flag flags)
 {
   const bool try_update_the_database = false;
   const auto component_id            = yakka::component_dotname_to_id(std::string(component_dotname));
@@ -162,9 +162,9 @@ std::optional<std::pair<fs::path, fs::path>> workspace::find_component(std::stri
   }
 
   if (local.has_value())
-    return std::pair{ *local, fs::path{} };
+    return std::pair{ *local, std::filesystem::path{} };
   if (shared.has_value())
-    return std::pair{ *shared, fs::path{} };
+    return std::pair{ *shared, std::filesystem::path{} };
 
   if (!local_database.has_done_scan() && try_update_the_database) {
     local_database.clear();
@@ -222,7 +222,7 @@ std::optional<nlohmann::json> workspace::find_blueprint(std::string_view bluepri
 }
 
 // Config file loading with modern error handling
-std::expected<void, std::error_code> workspace::load_config_file(const fs::path &config_file_path)
+std::expected<void, std::error_code> workspace::load_config_file(const std::filesystem::path &config_file_path)
 {
   try {
     if (!fs::exists(config_file_path))
@@ -264,7 +264,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
     }
 
     if (configuration["home"]) {
-      yakka_shared_home                = fs::path(configuration["home"].Scalar());
+      yakka_shared_home                = std::filesystem::path(configuration["home"].Scalar());
       summary["configuration"]["home"] = yakka_shared_home.string();
     }
 
@@ -276,7 +276,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const fs::path 
 }
 
 // Modern implementation of component fetching
-std::future<fs::path> workspace::fetch_component(std::string_view name, const YAML::Node &node, std::function<void(std::string_view, size_t)> progress_handler)
+std::future<std::filesystem::path> workspace::fetch_component(std::string_view name, const YAML::Node &node, std::function<void(std::string_view, size_t)> progress_handler)
 {
   const auto url = try_render(inja_environment, node["packages"]["default"]["url"].as<std::string>(), summary);
 
@@ -288,7 +288,7 @@ std::future<fs::path> workspace::fetch_component(std::string_view name, const YA
 
   const auto checkout_location = (node["type"] && node["type"].as<std::string>() == "tool" && shared_components_write_access) ? shared_components_path / "repos" / std::string(name) : workspace_path / "components" / std::string(name);
 
-  return std::async(std::launch::async, [=]() -> fs::path {
+  return std::async(std::launch::async, [=]() -> std::filesystem::path {
     auto result = do_fetch_component(std::string(name), url, branch, git_location, checkout_location, progress_handler);
     if (result) {
       return *result;
@@ -345,11 +345,11 @@ std::expected<void, std::error_code> workspace::update_component(std::string_vie
 }
 
 // Modern implementation using C++23 features
-std::expected<fs::path, std::error_code> workspace::do_fetch_component(std::string_view name,
+std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_component(std::string_view name,
                                                                        std::string_view url,
                                                                        std::string_view branch,
-                                                                       const fs::path &git_location,
-                                                                       const fs::path &checkout_location,
+                                                                       const std::filesystem::path &git_location,
+                                                                       const std::filesystem::path &checkout_location,
                                                                        std::function<void(std::string_view, size_t)> progress_handler)
 {
   // Modern enum class for Git phases
@@ -532,17 +532,17 @@ void workspace::update_versions()
  *        Typically this would be ~/.yakka or /Users/<username>/.yakka or $HOME/.yakka
  * @return std::string
  */
-fs::path workspace::get_yakka_shared_home()
+std::filesystem::path workspace::get_yakka_shared_home()
 {
   // Try read HOME environment variable
   char *sys_home = std::getenv("HOME");
   if (sys_home != nullptr)
-    return fs::path(sys_home) / ".yakka";
+    return std::filesystem::path(sys_home) / ".yakka";
 
   // Otherwise try the Windows USERPROFILE
   char *sys_user_profile = std::getenv("USERPROFILE");
   if (sys_user_profile != nullptr)
-    return fs::path(std::string(sys_user_profile)) / ".yakka";
+    return std::filesystem::path(std::string(sys_user_profile)) / ".yakka";
 
   // Otherwise we default to using the local .yakka folder
   return ".yakka";
@@ -550,7 +550,7 @@ fs::path workspace::get_yakka_shared_home()
 
 #if 0
 // Modern implementation of get_yakka_shared_home using C++23 features
-static std::expected<fs::path, std::error_code> get_yakka_shared_home()
+static std::expected<std::filesystem::path, std::error_code> get_yakka_shared_home()
 {
   // Define possible environment variables to check
   static constexpr std::array env_vars = {
@@ -563,7 +563,7 @@ static std::expected<fs::path, std::error_code> get_yakka_shared_home()
     // Check environment variables in order of preference
     for (const auto &env_var: env_vars) {
       if (auto *path = std::getenv(env_var.data())) {
-        auto home_path = fs::path(path) / ".yakka";
+        auto home_path = std::filesystem::path(path) / ".yakka";
 
         // Verify path is valid and accessible
         std::error_code ec;
@@ -585,11 +585,11 @@ static std::expected<fs::path, std::error_code> get_yakka_shared_home()
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
     // Windows: Try AppData folder
     if (auto *app_data = std::getenv("APPDATA")) {
-      return fs::path(app_data) / "yakka";
+      return std::filesystem::path(app_data) / "yakka";
     }
 #else
     // Unix-like: Try XDG_DATA_HOME or ~/.local/share
-    auto xdg_path = fs::path(std::getenv("HOME")) / ".local/share/yakka";
+    auto xdg_path = std::filesystem::path(std::getenv("HOME")) / ".local/share/yakka";
     std::error_code ec;
     if (fs::create_directories(xdg_path, ec); !ec || ec == std::errc::file_exists) {
       return xdg_path;
@@ -607,7 +607,7 @@ static std::expected<fs::path, std::error_code> get_yakka_shared_home()
 }
 
 // Helper method to validate a potential yakka home directory
-static bool is_valid_yakka_home(const fs::path &path) noexcept
+static bool is_valid_yakka_home(const std::filesystem::path &path) noexcept
 {
   try {
     // clang-format off
@@ -621,7 +621,7 @@ static bool is_valid_yakka_home(const fs::path &path) noexcept
 }
 
 // Helper to ensure proper permissions on yakka home directory
-static std::expected<void, std::error_code> ensure_yakka_home_permissions(const fs::path &path) noexcept
+static std::expected<void, std::error_code> ensure_yakka_home_permissions(const std::filesystem::path &path) noexcept
 {
   try {
     std::error_code ec;
@@ -642,7 +642,7 @@ static std::expected<void, std::error_code> ensure_yakka_home_permissions(const 
 }
 
 // Helper to create standard yakka directory structure
-static std::expected<void, std::error_code> create_yakka_directory_structure(const fs::path &base_path) noexcept
+static std::expected<void, std::error_code> create_yakka_directory_structure(const std::filesystem::path &base_path) noexcept
 {
   try {
     // Define standard subdirectories
@@ -670,7 +670,7 @@ static std::expected<void, std::error_code> create_yakka_directory_structure(con
 }
 
 // Method to initialize yakka home directory with proper structure
-static std::expected<fs::path, std::error_code> initialize_yakka_home()
+static std::expected<std::filesystem::path, std::error_code> initialize_yakka_home()
 {
   auto home_result = get_yakka_shared_home();
   if (!home_result) {

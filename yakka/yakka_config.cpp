@@ -3,6 +3,7 @@
 #include "yakka_component.hpp"
 #include "yakka_workspace.hpp"
 #include "yakka_project.hpp"
+#include "utilities.hpp"
 #include "spdlog.h"
 #include <ryml.hpp>
 #include <ryml_std.hpp> // For std::string and std::vector interop

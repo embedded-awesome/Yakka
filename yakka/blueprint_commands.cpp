@@ -243,7 +243,7 @@ process_return save_command(std::string target, const nlohmann::json &command, s
 
   try {
     std::ofstream save_file;
-    fs::path p(save_filename);
+    std::filesystem::path p(save_filename);
     if (!p.parent_path().empty())
       fs::create_directories(p.parent_path());
     save_file.open(save_filename, std::ios_base::binary);
@@ -270,7 +270,7 @@ process_return create_command(std::string target, const nlohmann::json &command,
       filename = command.get<std::string>();
       filename = try_render(inja_env, filename, project_summary);
       if (!filename.empty()) {
-        fs::path p(filename);
+        std::filesystem::path p(filename);
         fs::create_directories(p.parent_path());
       }
     } catch (std::exception &e) {
@@ -514,7 +514,7 @@ process_return diff_command(std::string target, const nlohmann::json &command, s
   nlohmann::json left;
   nlohmann::json right;
   if (command.contains("left_file")) {
-    const fs::path left_file = try_render(inja_env, command["left_file"].get<std::string>(), project_summary);
+    const std::filesystem::path left_file = try_render(inja_env, command["left_file"].get<std::string>(), project_summary);
     std::ifstream ifs(left_file);
     left = nlohmann::json::parse(ifs);
   } else if (command.contains("left")) {
@@ -522,7 +522,7 @@ process_return diff_command(std::string target, const nlohmann::json &command, s
   }
 
   if (command.contains("right_file")) {
-    const fs::path right_file = try_render(inja_env, command["right_file"].get<std::string>(), project_summary);
+    const std::filesystem::path right_file = try_render(inja_env, command["right_file"].get<std::string>(), project_summary);
     std::ifstream ifs(right_file);
     right = nlohmann::json::parse(ifs);
   } else if (command.contains("right")) {
