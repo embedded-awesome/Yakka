@@ -9,6 +9,40 @@ using namespace std::chrono_literals;
 
 namespace yakka {
 
+bool task_engine::is_valid()
+{
+  std::unordered_set<tf::Task> visited;
+  std::unordered_set<tf::Task> recursion_stack;
+
+  std::function<bool(tf::Task)> search_dependencies = [&](tf::Task task) {
+    if (recursion_stack.contains(task))
+      return true; // Found a cycle (back edge)
+    if (visited.contains(task))
+      return false; // Already processed in a previous DFS tree
+
+    recursion_stack.insert(task);
+
+    bool is_circular = false;
+    task.for_each_dependent([&](tf::Task dependent) {
+      if (search_dependencies(dependent))
+        is_circular = true;
+    });
+
+    recursion_stack.erase(task);
+    visited.insert(task);
+    return is_circular;
+  };
+
+  bool is_circular = false;
+  taskflow.for_each_task([&](tf::Task task) {
+    if (task.num_successors() == 0)
+      if (search_dependencies(task))
+        is_circular = true;
+  });
+
+  return !is_circular;
+}
+
 void task_engine::init(task_complete_type task_complete_handler)
 {
   this->task_complete_handler = task_complete_handler;
@@ -436,6 +470,15 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
   auto t2       = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to create tasks", duration);
+
+  t1 = std::chrono::high_resolution_clock::now();
+  if (!is_valid()) {
+    spdlog::error("Blueprints have circular dependency");
+    return;
+  }
+  t2       = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  spdlog::info("{}ms to validate task graph", duration);
 
   ui->init(*this);
 
