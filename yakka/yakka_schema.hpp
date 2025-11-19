@@ -1,13 +1,42 @@
-#include "yaml-cpp/yaml.h"
+#pragma once
+
 #include "yakka_component.hpp"
+#include "yaml-cpp/yaml.h"
 #include <nlohmann/json-schema.hpp>
 #include "spdlog.h"
-#include "slcc_schema.hpp"
 #include <ranges>
 
 namespace yakka {
 
-class schema_validator {
+class schema {
+public:
+  enum class merge_strategy {
+    Default,   // Default behavior (convert multipel scalar values to arrays, merge objects and arrays)
+    Max,       // choose the larger numeric value
+    Min,       // choose the smaller numeric value
+    Append,    // append values (e.g., arrays or strings)
+    Abort,     // stop and signal an error on conflict
+    Sort,      // sort arrays after merging
+    Unique,    // remove duplicate entries in arrays after merging
+    Overwrite, // overwrite existing values
+  };
+
+public:
+  schema() : schema_data("{ \"properties\": {} }"_json), validator(nullptr, nlohmann::json_schema::default_string_format_check)
+  {
+  }
+
+  void add_schema_data(const nlohmann::json &schema_data);
+  nlohmann::json validate(const nlohmann::json &data, std::string id = "");
+  schema::merge_strategy get_merge_strategy(const nlohmann::json::json_pointer &path) const;
+
+private:
+  nlohmann::json schema_data;
+  nlohmann::json_schema::json_validator validator;
+  bool validator_updated = false;
+};
+
+class yakka_schema_validator {
   nlohmann::json yakka_schema;
   nlohmann::json slcc_schema;
   nlohmann::json_schema::json_validator yakka_validator;
@@ -134,36 +163,20 @@ class schema_validator {
   };
 
 public:
-  static schema_validator &get()
+  static yakka_schema_validator &get()
   {
-    static schema_validator the_validator;
+    static yakka_schema_validator the_validator;
     return the_validator;
   }
 
-  enum merge_strategy {
-    DEFAULT,
-    MAX,
-    MIN,
-    SORT,
-    UNIQUE
-  };
-
 private:
-  schema_validator() : yakka_validator(nullptr, nlohmann::json_schema::default_string_format_check), slcc_validator(nullptr, nlohmann::json_schema::default_string_format_check)
-  {
-    // This should be straight JSON without conversion
-    yakka_schema = YAML::Load(yakka_component_schema_yaml).as<nlohmann::json>();
-    slcc_schema  = YAML::Load(slcc_schema_yaml).as<nlohmann::json>();
-    yakka_validator.set_root_schema(yakka_schema);
-    slcc_validator.set_root_schema(slcc_schema);
-  }
+  yakka_schema_validator();
 
 public:
-  schema_validator(schema_validator const &) = delete;
-  void operator=(schema_validator const &)   = delete;
+  yakka_schema_validator(yakka_schema_validator const &) = delete;
+  void operator=(yakka_schema_validator const &)   = delete;
 
   bool validate(yakka::component *component);
-  static std::optional<schema_validator::merge_strategy> get_schema(const nlohmann::json::json_pointer &path);
 };
 
 // schema_validator yakka_validator();

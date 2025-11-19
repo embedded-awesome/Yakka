@@ -1,6 +1,5 @@
 #pragma once
 
-#include "utilities.hpp"
 #include "yaml-cpp/yaml.h"
 #include <set>
 #include <string>
@@ -55,5 +54,9 @@ enum yakka_status {
   SUCCESS = 0,
   FAIL,
 };
+
+using component_list_t = std::unordered_set<std::string>;
+using feature_list_t   = std::unordered_set<std::string>;
+using command_list_t   = std::unordered_set<std::string>;
 
 } // namespace yakka

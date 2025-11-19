@@ -38,7 +38,7 @@ public:
    * - Loading package registries
    * - Setting up project configuration
    */
-  std::expected<void, std::error_code> init(const fs::path &workspace_path = fs::current_path());
+  std::expected<void, std::error_code> init(const std::filesystem::path &workspace_path = fs::current_path());
 
   /**
    * @brief Asynchronously fetches a component from a remote source
@@ -81,7 +81,7 @@ public:
    * The search order is local database, shared database, then package databases
    * The flags parameter can be used to filter component types (e.g., only SLCC, ignore Yakka components, etc.)
    */
-  std::optional<std::pair<fs::path, fs::path>> find_component(std::string_view component_dotname, component_database::flag flags = component_database::flag::ALL_COMPONENTS);
+  std::optional<std::pair<std::filesystem::path, std::filesystem::path>> find_component(std::string_view component_dotname, component_database::flag flags = component_database::flag::ALL_COMPONENTS);
 
   /**
    * @brief Finds a feature provider in the workspace
@@ -102,7 +102,7 @@ public:
    * @param config_file_path Path to the config file
    * @return Success or error code
    */
-  std::expected<void, std::error_code> load_config_file(const fs::path &config_file_path);
+  std::expected<void, std::error_code> load_config_file(const std::filesystem::path &config_file_path);
 
   /**
    * @brief Renders a template string using the workspace's template environment
@@ -129,7 +129,7 @@ public:
    * @brief Gets the path to the Yakka shared home directory
    * @return Path to the shared home directory
    */
-  fs::path get_yakka_shared_home();
+  std::filesystem::path get_yakka_shared_home();
 
   /**
    * @brief Executes a Git command in the specified directory
@@ -149,11 +149,11 @@ public:
    * @param progress_handler Function to report progress
    * @return Path where component was fetched or error code
    */
-  static std::expected<fs::path, std::error_code> do_fetch_component(std::string_view name,
+  static std::expected<std::filesystem::path, std::error_code> do_fetch_component(std::string_view name,
                                                                      std::string_view url,
                                                                      std::string_view branch,
-                                                                     const fs::path &git_location,
-                                                                     const fs::path &checkout_location,
+                                                                     const std::filesystem::path &git_location,
+                                                                     const std::filesystem::path &checkout_location,
                                                                      std::function<void(std::string_view, size_t)> progress_handler);
 
   /**

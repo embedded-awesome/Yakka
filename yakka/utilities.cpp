@@ -257,8 +257,11 @@ std::vector<std::string> parse_gcc_dependency_file(const std::string &filename)
 /**
  * @param path  Path relative to Yakka component schema
  */
-void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node)
+void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node, const schema* schema)
 {
+  // Check for a strategy for this path
+  schema::merge_strategy strategy = (schema != nullptr) ? schema->get_merge_strategy(path) : schema::merge_strategy::Default;
+
   switch (node.type()) {
     case nlohmann::detail::value_t::object:
       if (merge_target.type() != nlohmann::detail::value_t::object) {
@@ -270,7 +273,7 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
         // Check if the key is already in merge_target
         auto it2 = merge_target.find(it.key());
         if (it2 != merge_target.end()) {
-          json_node_merge(""_json_pointer, it2.value(), it.value());
+          json_node_merge(path / it.key(), it2.value(), it.value(), schema);
         } else {
           merge_target[it.key()] = it.value();
         }
@@ -302,12 +305,23 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
         case nlohmann::detail::value_t::object:
           spdlog::error("Cannot merge scalar into an object");
           break;
-        default:
-          // Convert scalar into an array
-          merge_target = nlohmann::json::array({ merge_target });
-          [[fallthrough]];
         case nlohmann::detail::value_t::array:
           merge_target.push_back(node);
+          break;
+        default:
+          if (strategy == schema::merge_strategy::Abort) {
+            spdlog::error("Conflict detected while merging scalar values at path {}", path.to_string());
+            return;
+          } else if (strategy == schema::merge_strategy::Overwrite) {
+            merge_target = node;
+          } else if (strategy == schema::merge_strategy::Max && node.is_number() && merge_target.is_number()) {
+            merge_target = std::max(merge_target, node);
+          } else if (strategy == schema::merge_strategy::Min && node.is_number() && merge_target.is_number()) {
+            merge_target = std::min(merge_target, node);
+          } else {
+            merge_target = nlohmann::json::array({ merge_target });
+            merge_target.push_back(node);
+          }
           break;
       }
       break;
@@ -536,9 +550,9 @@ void add_common_template_commands(inja::Environment &inja_env)
   });
 }
 
-std::pair<std::string, int> download_resource(const std::string url, fs::path destination)
+std::pair<std::string, int> download_resource(const std::string url, std::filesystem::path destination)
 {
-  fs::path filename = destination / url.substr(url.find_last_not_of('/'));
+  std::filesystem::path filename = destination / url.substr(url.find_last_not_of('/'));
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
   return exec("powershell", std::format("Invoke-WebRequest {} -OutFile {}", url, filename.generic_string()));
 #else
