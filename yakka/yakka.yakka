@@ -32,6 +32,7 @@ requires:
     - json-schema-validator
     - rapidyaml
     - blake3
+    - pugixml
 
 supports:
   components:

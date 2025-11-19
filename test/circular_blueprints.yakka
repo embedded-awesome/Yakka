@@ -1,0 +1,15 @@
+name: Circular blueprints test
+
+
+blueprints:
+  blueprint1:
+    depends:
+      - blueprint2
+    process:
+      - echo: 'Blueprint1'
+  blueprint2:
+    depends:
+      - blueprint1
+    process:
+      - echo: 'Blueprint2'
+  

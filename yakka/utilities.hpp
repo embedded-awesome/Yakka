@@ -2,6 +2,7 @@
 
 #include "yaml-cpp/yaml.h"
 #include "inja.hpp"
+#include "pugixml.hpp"
 #include "yakka_schema.hpp"
 #include <string>
 #include <string_view>
@@ -32,6 +33,7 @@ nlohmann::json::json_pointer create_condition_pointer(const nlohmann::json condi
 void find_json_keys(const nlohmann::json &j, const std::string &target_key, const std::string &current_path, nlohmann::json& paths);
 
 void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept;
+nlohmann::json xml_to_json(const pugi::xml_node& node);
 
 std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept;
 
