@@ -155,11 +155,11 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
   return result;
 }
 
-void blueprint_database::load(const fs::path filename)
+void blueprint_database::load(const std::filesystem::path filename)
 {
 }
 
-void blueprint_database::save(const fs::path filename)
+void blueprint_database::save(const std::filesystem::path filename)
 {
   nlohmann::json output;
 

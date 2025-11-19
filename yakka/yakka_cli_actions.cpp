@@ -1,4 +1,5 @@
 #include "yakka_cli_actions.hpp"
+#include "utilities.hpp"
 #include <indicators/dynamic_progress.hpp>
 #include <indicators/progress_bar.hpp>
 #include <indicators/cursor_control.hpp>
@@ -176,7 +177,7 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
     DynamicProgress<ProgressBar> fetch_progress_ui;
     std::map<std::string, std::shared_ptr<ProgressBar>> fetch_progress_bars;
 
-    std::map<std::string, std::future<fs::path>> fetch_list;
+    std::map<std::string, std::future<std::filesystem::path>> fetch_list;
     int largest_name_length = 16;
     do {
       // Ask the workspace to fetch them

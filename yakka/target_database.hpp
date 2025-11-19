@@ -11,8 +11,8 @@ namespace fs = std::filesystem;
 namespace yakka {
 class target_database {
 public:
-  void load(const fs::path file_path);
-  void save(const fs::path file_path);
+  void load(const std::filesystem::path file_path);
+  void save(const std::filesystem::path file_path);
 
   const std::vector<std::shared_ptr<blueprint_match>>& add_target(const std::string target, blueprint_database &blueprint_database, nlohmann::json project_summary);
   const std::vector<std::shared_ptr<blueprint_match>>& get_target(const std::string target) const {

@@ -6,6 +6,7 @@
 #include "component_database.hpp"
 #include "target_database.hpp"
 #include "blueprint_database.hpp"
+#include "yakka_schema.hpp"
 //#include "yaml-cpp/yaml.h"
 #include "nlohmann/json.hpp"
 #include "inja.hpp"
@@ -52,9 +53,9 @@ public:
   state evaluate_dependencies();
   bool add_component(const std::string &component_name, component_database::flag flags);
   bool add_feature(const std::string &feature_name);
-  //std::optional<fs::path> find_component(const std::string component_dotname);
+  //std::optional<std::filesystem::path> find_component(const std::string component_dotname);
   void evaluate_choices();
-  void add_additional_tool(const fs::path component_path);
+  void add_additional_tool(const std::filesystem::path component_path);
 
   // Component processing functions
   void process_tools(const std::shared_ptr<component> c);
@@ -108,8 +109,8 @@ public:
 
   YAML::Node project_summary_yaml;
   std::string project_directory;
-  fs::path project_summary_file;
-  fs::path project_file;
+  std::filesystem::path project_summary_file;
+  std::filesystem::path project_file;
   fs::file_time_type project_summary_last_modified;
   std::vector<std::shared_ptr<yakka::component>> components;
   //yakka::component_database component_database;
@@ -118,6 +119,9 @@ public:
 
   nlohmann::json previous_summary;
   nlohmann::json project_summary;
+
+  yakka::schema project_schema;
+  yakka::schema data_schema;
 
   yakka::workspace &workspace;
 

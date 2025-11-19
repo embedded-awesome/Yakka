@@ -196,11 +196,11 @@ std::expected<path, error> component_database::get_component(std::string_view id
 std::expected<std::string, error> component_database::get_component_id(const path &path) const
 {
   for (const auto &[name, node]: database["components"].items()) {
-    if (node.is_string() && fs::path{ node.get<std::string>() } == path) {
+    if (node.is_string() && std::filesystem::path{ node.get<std::string>() } == path) {
       return name;
     }
     if (node.is_array() && std::ranges::any_of(node, [&](const auto &n) {
-          return fs::path{ n.template get<std::string>() } == path;
+          return std::filesystem::path{ n.template get<std::string>() } == path;
         })) {
       return name;
     }

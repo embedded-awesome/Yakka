@@ -10,11 +10,11 @@ namespace fs = std::filesystem;
 // Mock classes
 class MockComponentDatabase {
 public:
-  MOCK_METHOD(void, load, (const fs::path &));
+  MOCK_METHOD(void, load, (const std::filesystem::path &));
   MOCK_METHOD(std::string, get_component, (const std::string &, yakka::component_database::flag));
   MOCK_METHOD(nlohmann::json, get_feature_provider, (const std::string &));
   MOCK_METHOD(nlohmann::json, get_blueprint_provider, (const std::string &));
-  MOCK_METHOD(fs::path, get_path, ());
+  MOCK_METHOD(std::filesystem::path, get_path, ());
   MOCK_METHOD(void, clear, ());
   MOCK_METHOD(void, scan_for_components, ());
 };
@@ -49,7 +49,7 @@ protected:
     fs::remove_all(test_dir);
   }
 
-  fs::path test_dir;
+  std::filesystem::path test_dir;
   std::unique_ptr<yakka::workspace> workspace;
 };
 
@@ -171,7 +171,7 @@ TEST_F(WorkspaceTest, HandlesConcurrentComponentFetching)
   component_node["packages"]["default"]["url"]    = "https://example.com/component.git";
   component_node["packages"]["default"]["branch"] = "main";
 
-  std::vector<std::future<fs::path>> futures;
+  std::vector<std::future<std::filesystem::path>> futures;
   for (int i = 0; i < 5; ++i) {
     futures.push_back(workspace->fetch_component(std::format("test-component-{}", i), component_node, [](std::string_view phase, size_t progress) {
     }));
@@ -197,7 +197,7 @@ protected:
 TEST_F(WorkspaceTestWithMockFS, HandlesFilesystemErrors)
 {
   // Test with a path that we don't have permissions for
-  fs::path invalid_path = "/root/invalid_path";
+  std::filesystem::path invalid_path = "/root/invalid_path";
   auto result           = workspace->init(invalid_path);
 
   EXPECT_FALSE(result);

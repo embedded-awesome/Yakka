@@ -333,7 +333,7 @@ int main(int argc, char **argv)
     YAML::Node yaml_data       = YAML::Load(additional_data);
     nlohmann::json json_data   = yaml_data.as<nlohmann::json>();
     spdlog::info("Additional data: {}", json_data.dump());
-    yakka::json_node_merge("/data"_json_pointer, project.project_summary["data"], json_data);
+    yakka::json_node_merge("/data"_json_pointer, project.project_summary["data"], json_data, &project.project_schema);
   }
 
   t1 = std::chrono::high_resolution_clock::now();

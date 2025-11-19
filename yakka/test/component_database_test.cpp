@@ -21,7 +21,7 @@ protected:
     fs::remove_all(test_path);
   }
 
-  fs::path test_path;
+  std::filesystem::path test_path;
 };
 
 TEST_F(ComponentDatabaseTest, InitializationTest)
@@ -44,7 +44,7 @@ TEST_F(ComponentDatabaseTest, InsertComponent)
   component_database db;
   db.load(test_path).value();
 
-  fs::path config_file = test_path / "test.yakka";
+  std::filesystem::path config_file = test_path / "test.yakka";
   std::ofstream(config_file).close();
 
   db.insert("test_component", config_file);
@@ -93,7 +93,7 @@ TEST_F(ComponentDatabaseTest, ErrorHandling)
   EXPECT_FALSE(result.has_value());
 
   // Test invalid file path
-  auto add_result = db.add_component("test", fs::path("non_existent_path"));
+  auto add_result = db.add_component("test", std::filesystem::path("non_existent_path"));
   EXPECT_FALSE(add_result.has_value());
 }
 
