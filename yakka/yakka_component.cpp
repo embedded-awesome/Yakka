@@ -1,12 +1,13 @@
 #include "yakka_component.hpp"
 #include "yakka_schema.hpp"
+#include "utilities.hpp"
 #include "spdlog/spdlog.h"
 #include "semver/semver.hpp"
 
 using namespace semver::literals;
 
 namespace yakka {
-yakka_status component::parse_file(fs::path file_path, fs::path package_path)
+yakka_status component::parse_file(std::filesystem::path file_path, std::filesystem::path package_path)
 {
   this->file_path         = file_path;
   this->package_path      = package_path;
@@ -36,7 +37,7 @@ yakka_status component::parse_file(fs::path file_path, fs::path package_path)
   } else if (file_path.filename().extension() == slcc_component_extension) {
     this->type = SLCC_FILE;
 
-    bool result = yakka::schema_validator::get().validate(this);
+    bool result = yakka_schema_validator::get().validate(this);
     if (!result) {
       return yakka_status::FAIL;
     }
@@ -48,7 +49,7 @@ yakka_status component::parse_file(fs::path file_path, fs::path package_path)
   } else {
     this->type = YAKKA_FILE;
     // Validate basic Yakka data
-    bool result = yakka::schema_validator::get().validate(this);
+    bool result = yakka_schema_validator::get().validate(this);
     if (!result) {
       return yakka_status::FAIL;
     }
