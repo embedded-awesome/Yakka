@@ -5,6 +5,7 @@
 #include "glob/glob.h"
 #include "yakka_schema.hpp"
 #include "blake3.h"
+#include "pugixml.hpp"
 #include <concepts>
 #include <string_view>
 #include <expected>
@@ -412,6 +413,17 @@ void add_common_template_commands(inja::Environment &inja_env)
       return nlohmann::json();
     }
   });
+  inja_env.add_callback("load_xml", 1, [](const inja::Arguments &args) {
+    const auto file_path = args[0]->get<std::string>();
+    if (std::filesystem::exists(file_path)) {
+      pugi::xml_document doc;
+      pugi::xml_parse_result result = doc.load_file(file_path.c_str());
+      if (result.status == pugi::xml_parse_status::status_ok) {
+        return xml_to_json(doc.child("device"));
+      }
+    }
+    return nlohmann::json();
+  });
   inja_env.add_callback("load_json", 1, [](const inja::Arguments &args) {
     const auto file_path = args[0]->get<std::string>();
     if (std::filesystem::exists(file_path)) {
@@ -687,4 +699,25 @@ void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept
     std::fill(out_hash, out_hash + 32, 0);
   }
 }
+
+nlohmann::json xml_to_json(const pugi::xml_node &node)
+{
+  nlohmann::json j;
+  // Add attributes
+  for (auto &attr: node.attributes()) {
+    j["_" + std::string(attr.name())] = attr.value();
+  }
+  // Add children
+  for (auto &child: node.children()) {
+    if (child.name()[0] != 0) {
+      j[child.name()].push_back(xml_to_json(child));
+    }
+  }
+  // Add text content
+  if (node.text()) {
+    j["_text"] = node.text().get();
+  }
+  return j;
+}
+
 } // namespace yakka
