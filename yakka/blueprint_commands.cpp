@@ -182,7 +182,7 @@ process_return template_command(std::string target, const nlohmann::json &comman
       if (command.contains("data_file")) {
         std::filesystem::path data_filename = try_render(inja_env, command["data_file"].get<std::string>(), project_summary);
         if (data_filename.extension() == ".yaml" || data_filename.extension() == ".yml") {
-          YAML::Node data_yaml = YAML::LoadFile(data_filename);
+          YAML::Node data_yaml = YAML::LoadFile(data_filename.string());
           if (!data_yaml.IsNull())
             data = data_yaml.as<nlohmann::json>();
         } else if (data_filename.extension() == ".json") {
