@@ -859,7 +859,10 @@ void project::update_project_data()
       }
 
       if (!project_summary["data"].contains(pointer)) {
-        project_summary["data"][pointer] = nlohmann::json::object();
+        if (c->json[pointer].is_array())
+          project_summary["data"][pointer] = nlohmann::json::array();
+        else
+          project_summary["data"][pointer] = nlohmann::json::object();
       }
 
       json_node_merge(pointer, project_summary["data"][pointer], c->json[pointer], &data_schema);
