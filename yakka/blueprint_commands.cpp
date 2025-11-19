@@ -180,10 +180,15 @@ process_return template_command(std::string target, const nlohmann::json &comman
     }
     if (command.is_object()) {
       if (command.contains("data_file")) {
-        std::string data_filename = try_render(inja_env, command["data_file"].get<std::string>(), project_summary);
-        YAML::Node data_yaml      = YAML::LoadFile(data_filename);
-        if (!data_yaml.IsNull())
-          data = data_yaml.as<nlohmann::json>();
+        std::filesystem::path data_filename = try_render(inja_env, command["data_file"].get<std::string>(), project_summary);
+        if (data_filename.extension() == ".yaml" || data_filename.extension() == ".yml") {
+          YAML::Node data_yaml = YAML::LoadFile(data_filename);
+          if (!data_yaml.IsNull())
+            data = data_yaml.as<nlohmann::json>();
+        } else if (data_filename.extension() == ".json") {
+          std::ifstream i(data_filename);
+          i >> data;
+        }
       } else if (command.contains("data")) {
         std::string data_string = try_render(inja_env, command["data"].get<std::string>(), project_summary);
         YAML::Node data_yaml    = YAML::Load(data_string);
@@ -236,7 +241,7 @@ process_return save_command(std::string target, const nlohmann::json &command, s
       spdlog::error("Data dependency pointer must start with '/data'");
       return { "", -1 };
     }
-    auto pointer = nlohmann::json::json_pointer{ save_filename.substr(6) };
+    auto pointer          = nlohmann::json::json_pointer{ save_filename.substr(6) };
     project_data[pointer] = captured_output;
     return { captured_output, 0 };
   }
