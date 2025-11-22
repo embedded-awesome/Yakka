@@ -323,8 +323,10 @@ int main(int argc, char **argv)
   // Generate and save the summary
   project.save_summary();
 
-  if (project.current_state != yakka::project::state::PROJECT_VALID && !result["ignore-eval"].as<bool>())
+  if (project.current_state != yakka::project::state::PROJECT_VALID && !result["ignore-eval"].as<bool>()) {
+    spdlog::error("Project evaluation failed with state {}", static_cast<int>(project.current_state));
     exit(-1);
+  }
 
   // Insert additional command line data before processing blueprints
   if (result["data"].count() != 0) {
