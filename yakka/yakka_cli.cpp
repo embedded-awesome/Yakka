@@ -430,24 +430,17 @@ static void evaluate_project_dependencies(yakka::workspace &workspace, yakka::pr
 static void print_project_choice_errors(yakka::project &project)
 {
   for (auto &i: project.incomplete_choices) {
-    bool valid_options = false;
     spdlog::error("Component '{}' has a choice '{}' - Must choose from the following", i.first, i.second);
-    if (project.project_summary["choices"][i.second].contains("features")) {
-      valid_options = true;
-      spdlog::error("Features: ");
-      for (auto &b: project.project_summary["choices"][i.second]["features"])
-        spdlog::error("  - {}", b.get<std::string>());
-    }
-
-    if (project.project_summary["choices"][i.second].contains("components")) {
-      valid_options = true;
-      spdlog::error("Components: ");
-      for (auto &b: project.project_summary["choices"][i.second]["components"])
-        spdlog::error("  - {}", b.get<std::string>());
-    }
-
-    if (!valid_options) {
-      spdlog::error("ERROR: Choice data is invalid");
+    for (const auto &b: project.project_summary["choices"][i.second]["options"]) {
+      if (b.contains("feature"))
+        spdlog::error("  - feature '{}'", b["feature"].get<std::string>());
+      else if (b.contains("component"))
+        spdlog::error("  - component '{}'", b["component"].get<std::string>());
+      else {
+        spdlog::error("Invalid choice {}: Invalid format");
+        project.current_state = yakka::project::state::PROJECT_HAS_INVALID_COMPONENT;
+        return;
+      }
     }
     project.current_state = yakka::project::state::PROJECT_HAS_INCOMPLETE_CHOICES;
   }

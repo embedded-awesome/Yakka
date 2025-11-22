@@ -55,6 +55,7 @@ public:
   bool add_feature(const std::string &feature_name);
   //std::optional<std::filesystem::path> find_component(const std::string component_dotname);
   void evaluate_choices();
+  project::state process_choice(const std::string &choice_name);
   void add_additional_tool(const std::filesystem::path component_path);
 
   // Component processing functions

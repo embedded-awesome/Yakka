@@ -419,6 +419,71 @@ bool project::add_feature(const std::string &feature_name)
   return true;
 }
 
+project::state project::process_choice(const std::string &choice_name)
+{
+  const auto &choice = project_summary["choices"][choice_name];
+  int matches        = 0;
+  int option_count   = 0;
+
+  // Go through each option
+  for (const auto &o: choice["options"]) {
+    ++option_count;
+    if (o.contains("feature")) {
+      if (required_features.contains(o["feature"].get<std::string>()))
+        matches++;
+    } else if (o.contains("component")) {
+      if (required_components.contains(o["component"].get<std::string>()))
+        matches++;
+    } else {
+      spdlog::error("Invalid choice {}", choice_name);
+      return project::state::PROJECT_HAS_INVALID_COMPONENT;
+    }
+  }
+
+  // Check for an invalid choice where there is only one option but a default is specified
+  if (option_count == 1 && choice.contains("default")) {
+    spdlog::error("Invalid choice {}: has default choice for single option", choice_name);
+    return project::state::PROJECT_HAS_INVALID_COMPONENT;
+  }
+
+  // Check we can use a default value
+  if (matches == 0 && choice.contains("default") && option_count > 1) {
+    spdlog::info("Selecting default choice for {}", choice_name);
+
+    // Lambda to contain logic for adding default choice
+    const auto add_default_choice = [&](const nlohmann::json &choice_data) -> project::state {
+      if (choice_data.contains("feature")) {
+        unprocessed_features.insert(choice_data["feature"].get<std::string>());
+      } else if (choice_data.contains("component")) {
+        unprocessed_components.insert(choice_data["component"].get<std::string>());
+      } else {
+        spdlog::error("Invalid choice {}: Default value is missing 'feature'/'component'", choice_name);
+        return project::state::PROJECT_HAS_INVALID_COMPONENT;
+      }
+      return project::state::PROJECT_VALID;
+    };
+
+    if (choice["default"].is_array()) {
+      if (!choice.contains("type") || choice["type"].get<std::string>() != "multi") {
+        spdlog::error("Invalid choice '{}': Default has multiple values for non-multi choice", choice_name);
+      }
+      // Add all the default options
+      for (const auto &default_option: choice["default"]) {
+        const auto result = add_default_choice(default_option);
+        if (result != project::state::PROJECT_VALID)
+          return result;
+      }
+    } else {
+      const auto result = add_default_choice(choice["default"]);
+      if (result != project::state::PROJECT_VALID)
+        return result;
+    }
+    unprocessed_choices.erase(choice_name);
+  }
+
+  return project::state::PROJECT_VALID;
+}
+
 /**
  * @brief Processes all the @ref unprocessed_components and @ref unprocessed_features, adding items to @ref unknown_components if they are not in the component database
  *        It is assumed the caller will process the @ref unknown_components before adding them back to @ref unprocessed_component and calling this again.
@@ -451,41 +516,9 @@ project::state project::evaluate_dependencies()
     // Check if we have finished but we have unprocessed choices
     if (unprocessed_components.empty() && unprocessed_features.empty() && !unprocessed_choices.empty()) {
       for (const auto &c: unprocessed_choices) {
-        const auto &choice = project_summary["choices"][c];
-        int matches        = 0;
-        int option_count   = 0;
-        if (choice.contains("features")) {
-          matches      = std::count_if(choice["features"].begin(), choice["features"].end(), [&](const nlohmann::json &j) {
-            return required_features.contains(j.get<std::string>());
-          });
-          option_count = choice["features"].size();
-        } else if (choice.contains("components")) {
-          matches      = std::count_if(choice["components"].begin(), choice["components"].end(), [&](const nlohmann::json &j) {
-            return required_components.contains(j.get<std::string>());
-          });
-          option_count = choice["components"].size();
-        } else {
-          spdlog::error("Invalid choice {}", c);
-          return project::state::PROJECT_HAS_INVALID_COMPONENT;
-        }
-        if (option_count == 1 && choice.contains("default")) {
-          spdlog::error("Invalid choice {}: has default choice for single option", c);
-          return project::state::PROJECT_HAS_INVALID_COMPONENT;
-        }
-        if (matches == 0 && choice.contains("default") && option_count > 1) {
-          spdlog::info("Selecting default choice for {}", c);
-          if (choice["default"].contains("feature")) {
-            unprocessed_features.insert(choice["default"]["feature"].get<std::string>());
-            unprocessed_choices.erase(c);
-          } else if (choice["default"].contains("component")) {
-            unprocessed_components.insert(choice["default"]["component"].get<std::string>());
-            unprocessed_choices.erase(c);
-          } else {
-            spdlog::error("Invalid default choice in {}", c);
-            return project::state::PROJECT_HAS_INVALID_COMPONENT;
-          }
-          break;
-        }
+        auto result = process_choice(c);
+        if (result != project::state::PROJECT_VALID)
+          return result;
       }
     }
 
@@ -650,7 +683,7 @@ project::state project::evaluate_dependencies()
 
 void project::evaluate_choices()
 {
-  // For each component, check each choice has exactly one match in required features
+  // For each component, check each choice has exactly one match in required features unless it's a multi
   for (const auto &c: components) {
     for (const auto &[choice_name, value]: c->json["choices"].items()) {
       int matches      = 0;
@@ -827,12 +860,12 @@ void project::validate_schema()
 {
   // Verify schema for each component
   for (const auto &c: components) {
-    project_schema.validate(c->json, c->id);
+    if (project_schema.validate(c->json, c->id) == false)
+      current_state = state::PROJECT_HAS_FAILED_SCHEMA_CHECK;
   }
 
   // Verify data schema for the project
-  auto validation_result = data_schema.validate(project_summary["data"], "project_data");
-  if (!validation_result.is_null() && validation_result.size() != 0)
+  if (data_schema.validate(project_summary["data"], "project_data") == false)
     current_state = state::PROJECT_HAS_FAILED_SCHEMA_CHECK;
 }
 

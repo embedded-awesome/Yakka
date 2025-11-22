@@ -8,10 +8,12 @@ namespace yakka {
 class custom_error_handler : public nlohmann::json_schema::basic_error_handler {
 public:
   std::string component_name;
+  bool error_triggered = false;
   void error(const nlohmann::json::json_pointer &ptr, const nlohmann::json &instance, const std::string &message) override
   {
     nlohmann::json_schema::basic_error_handler::error(ptr, instance, message);
-    spdlog::error("Validation error in '{}': {} - {} : - {}", component_name, ptr.to_string(), instance.dump(3), message);
+    spdlog::error("Validation error in '{}': {} - {} :- {}", component_name, ptr.to_string(), instance.dump(3), message);
+    error_triggered = true;
   }
 };
 
@@ -22,7 +24,7 @@ void schema::add_schema_data(const nlohmann::json &schema_data)
   validator_updated = false;
 }
 
-nlohmann::json schema::validate(const nlohmann::json &data, std::string id)
+bool schema::validate(const nlohmann::json &data, std::string id)
 {
   custom_error_handler err;
   err.component_name = id;
@@ -34,12 +36,13 @@ nlohmann::json schema::validate(const nlohmann::json &data, std::string id)
       validator_updated = true;
     } catch (const std::exception &e) {
       spdlog::error("Setting root schema failed\n{}", e.what());
-      return {};
+      return false;
     }
   }
 
   // Validate schema
-  return validator.validate(data, err);
+  validator.validate(data, err);
+  return !err.error_triggered;
 }
 
 schema::merge_strategy schema::get_merge_strategy(const nlohmann::json::json_pointer &path) const

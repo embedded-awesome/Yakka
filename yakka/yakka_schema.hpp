@@ -27,7 +27,7 @@ public:
   }
 
   void add_schema_data(const nlohmann::json &schema_data);
-  nlohmann::json validate(const nlohmann::json &data, std::string id = "");
+  bool validate(const nlohmann::json &data, std::string id = "");
   schema::merge_strategy get_merge_strategy(const nlohmann::json::json_pointer &path) const;
 
 private:
@@ -125,27 +125,47 @@ class yakka_schema_validator {
               type: string
             exclusive:
               type: boolean
-            features:
+            options:
               type: array
               items:
-                type: string
-            components:
-              type: array
-              items:
-                type: string
+                type: object
+                oneOf:
+                  - properties:
+                      feature:
+                        type: string
+                      label:
+                        type: string
+                      description:
+                        type: string
+                    required:
+                      - feature
+                  - properties:
+                      component:
+                        type: string
+                      label:
+                        type: string
+                      description:
+                        type: string
+                    required:
+                      - component
             default:
-              type: object
               oneOf:
-                - properties:
+                - type: object
+                  properties:
                     feature:
                       type: string
                   required:
                     - feature
-                - properties:
+                - type: object
+                  properties:
                     component:
                       type: string
                   required:
                     - component
+                - type: array
+                  items:
+                    type: object
+
 
   required: 
     - name
