@@ -630,13 +630,9 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
 
         // Using C++20 ranges to process components
         for (const auto &[component_name, _]: right["components"].items()) {
-          auto result = process_component(component_name, data_pointer);
+          auto result = process_component(component_name, remaining_pointer);
           if (!result.error_message.empty()) {
             return std::unexpected{ std::move(result.error_message) };
-          }
-
-          if (result.changed == true) {
-            spdlog::error("Data dependency changed for component: {}", component_name);
           }
           return result.changed;
         }
@@ -645,9 +641,6 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
         auto result         = process_component(component_name, remaining_pointer);
         if (!result.error_message.empty()) {
           return std::unexpected{ std::move(result.error_message) };
-        }
-        if (result.changed == true) {
-          spdlog::error("Data dependency changed for component: {}", component_name);
         }
         return result.changed;
       }
