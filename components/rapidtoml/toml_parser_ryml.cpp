@@ -684,26 +684,209 @@ namespace toml_ryml
       return bool_str;
     }
 
+    void parse_array_into_node(ryml::NodeRef node)
+    {
+      if (!node.valid())
+        return;
+        
+      advance(); // skip '['
+      if (is_error())
+        return;
+
+      // Parse array elements
+      while (!is_eof())
+      {
+        // Skip whitespace and comments
+        consume_leading_whitespace();
+        if (is_error())
+          return;
+          
+        // Check for end of array
+        if (cp->value == U']')
+        {
+          advance(); // skip ']'
+          return;
+        }
+        
+        // Parse array element
+        if (cp->value == U'[')
+        {
+          // Nested array
+          auto child = node.append_child();
+          child |= ryml::SEQ;
+          parse_array_into_node(child);
+        }
+        else if (cp->value == U'{')
+        {
+          // Inline table in array
+          auto child = node.append_child();
+          child |= ryml::MAP;
+          parse_inline_table_into_node(child);
+        }
+        else
+        {
+          // Scalar value
+          auto value_str = parse_value();
+          if (is_error())
+            return;
+          auto child = node.append_child();
+          child << value_str;
+        }
+        
+        if (is_error())
+          return;
+        
+        // Skip whitespace after element
+        consume_leading_whitespace();
+        if (is_error())
+          return;
+        
+        // Check for comma or end of array
+        if (cp->value == U',')
+        {
+          advance(); // skip comma
+          if (is_error())
+            return;
+        }
+        else if (cp->value != U']')
+        {
+          set_error("expected ',' or ']' in array");
+          return;
+        }
+      }
+      
+      set_error("unexpected EOF in array");
+    }
+    
     std::string parse_array()
     {
-      // Stub
+      // Fallback for when called directly (shouldn't happen normally)
+      std::string array_content = "[";
       advance(); // skip '['
 
-      // Skip to ']'
       while (!is_eof() && cp->value != U']')
+      {
+        array_content.append(cp->bytes, cp->count);
         advance();
+        if (is_error())
+          return "[]";
+      }
+      
       if (!is_eof())
+      {
+        array_content += "]";
         advance(); // skip ']'
+      }
 
-      return "[]";
+      return array_content;
     }
 
+    void parse_inline_table_into_node(ryml::NodeRef node)
+    {
+      if (!node.valid())
+        return;
+        
+      advance(); // skip '{'
+      if (is_error())
+        return;
+
+      // Parse key-value pairs
+      while (!is_eof())
+      {
+        // Skip whitespace
+        consume_leading_whitespace();
+        if (is_error())
+          return;
+          
+        // Check for end of inline table
+        if (cp->value == U'}')
+        {
+          advance(); // skip '}'
+          return;
+        }
+        
+        // Parse key
+        key_buffer.clear();
+        start_recording();
+        parse_key();
+        stop_recording();
+        
+        if (is_error())
+          return;
+        
+        // Skip whitespace before '='
+        consume_leading_whitespace();
+        if (is_error() || is_eof())
+          return;
+        
+        // Expect '='
+        if (cp->value != U'=')
+        {
+          set_error("expected '=' in inline table");
+          return;
+        }
+        
+        advance(); // skip '='
+        if (is_error())
+          return;
+        
+        // Skip whitespace after '='
+        consume_leading_whitespace();
+        if (is_error() || is_eof())
+          return;
+        
+        // Parse value
+        auto kv = node.append_child();
+        kv << ryml::key(recording_buffer);
+        
+        if (cp->value == U'[')
+        {
+          kv |= ryml::SEQ;
+          parse_array_into_node(kv);
+        }
+        else if (cp->value == U'{')
+        {
+          kv |= ryml::MAP;
+          parse_inline_table_into_node(kv);
+        }
+        else
+        {
+          auto value_str = parse_value();
+          if (is_error())
+            return;
+          kv << value_str;
+        }
+        
+        if (is_error())
+          return;
+        
+        // Skip whitespace after value
+        consume_leading_whitespace();
+        if (is_error())
+          return;
+        
+        // Check for comma or end of inline table
+        if (cp->value == U',')
+        {
+          advance(); // skip comma
+          if (is_error())
+            return;
+        }
+        else if (cp->value != U'}')
+        {
+          set_error("expected ',' or '}' in inline table");
+          return;
+        }
+      }
+      
+      set_error("unexpected EOF in inline table");
+    }
+    
     std::string parse_inline_table()
     {
-      // Stub
+      // Fallback for when called directly (shouldn't happen normally)
       advance(); // skip '{'
 
-      // Skip to '}'
       while (!is_eof() && cp->value != U'}')
         advance();
       if (!is_eof())
@@ -793,12 +976,65 @@ namespace toml_ryml
       }
 
       // Create or find the table node in the tree
-      // For now, just create at root level
-      auto table_node = tree.rootref().append_child();
-      table_node << ryml::key(recording_buffer);
-      table_node |= ryml::MAP;
+      // Handle dotted table names by creating nested structure
+      std::string table_path = recording_buffer;
+      ryml::NodeRef table_node = tree.rootref();
+      
+      // Split the table path by dots and create nested tables
+      size_t start = 0;
+      size_t dot_pos = table_path.find('.');
+      
+      while (dot_pos != std::string::npos)
+      {
+        std::string segment = table_path.substr(start, dot_pos - start);
+        
+        // Look for existing child with this key
+        ryml::NodeRef child;
+        for (auto c : table_node.children())
+        {
+          if (c.has_key() && c.key() == ryml::csubstr(segment.c_str(), segment.length()))
+          {
+            child = c;
+            break;
+          }
+        }
+        
+        // Create child if not found
+        if (!child.valid())
+        {
+          child = table_node.append_child();
+          child << ryml::key(segment);
+          child |= ryml::MAP;
+        }
+        
+        table_node = child;
+        start = dot_pos + 1;
+        dot_pos = table_path.find('.', start);
+      }
+      
+      // Handle the last segment
+      std::string last_segment = table_path.substr(start);
+      
+      // Look for existing child with this key
+      ryml::NodeRef final_node;
+      for (auto c : table_node.children())
+      {
+        if (c.has_key() && c.key() == ryml::csubstr(last_segment.c_str(), last_segment.length()))
+        {
+          final_node = c;
+          break;
+        }
+      }
+      
+      // Create final node if not found
+      if (!final_node.valid())
+      {
+        final_node = table_node.append_child();
+        final_node << ryml::key(last_segment);
+        final_node |= ryml::MAP;
+      }
 
-      return table_node;
+      return final_node;
     }
 
     //-------------------------------------------------------------------------
@@ -848,17 +1084,41 @@ namespace toml_ryml
       }
 
       // Parse the value
-      auto value_str = parse_value();
-      if (is_error())
-        return false;
-
-      // Insert into target table
+      // Check if it's an array or inline table (needs special handling)
       if (target_table.valid())
       {
         auto kv = target_table.append_child();
         kv << ryml::key(recording_buffer);
-        kv << value_str;
+        
+        if (cp->value == U'[')
+        {
+          // Array - create sequence node and parse recursively
+          kv |= ryml::SEQ;
+          parse_array_into_node(kv);
+        }
+        else if (cp->value == U'{')
+        {
+          // Inline table - create map node and parse recursively
+          kv |= ryml::MAP;
+          parse_inline_table_into_node(kv);
+        }
+        else
+        {
+          // Scalar value
+          auto value_str = parse_value();
+          if (is_error())
+            return false;
+          kv << value_str;
+        }
       }
+      else
+      {
+        // No valid target table, still consume the value to advance parser
+        parse_value();
+      }
+
+      if (is_error())
+        return false;
 
       return true;
     }
