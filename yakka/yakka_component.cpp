@@ -198,6 +198,10 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
   yakka_file_node << ryml::key("yakka_file");
   yakka_file_node << file_path.string();
   
+  // Populate json cache for backward compatibility
+  json = ryml_to_json(tree.rootref());
+  json_cache_valid = true;
+  
   return yakka_status::SUCCESS;
 }
 
@@ -366,6 +370,29 @@ void component::convert_to_yakka()
       }
     }
   }
+  
+  // Update json cache after modifications
+  json = ryml_to_json(tree.rootref());
+  json_cache_valid = true;
+}
+
+// Lazy conversion from ryml to json (only when needed)
+const nlohmann::json& component::get_json() const
+{
+  if (!json_cache_valid) {
+    json = ryml_to_json(tree.rootref());
+    json_cache_valid = true;
+  }
+  return json;
+}
+
+nlohmann::json& component::get_json_mutable()
+{
+  if (!json_cache_valid) {
+    json = ryml_to_json(tree.rootref());
+    json_cache_valid = true;
+  }
+  return json;
 }
 
 } /* namespace yakka */
