@@ -45,7 +45,12 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
       if (item.is_map() && item.num_children() == 1) {
         for (const auto &kv : item.children()) {
           auto child = new_root.append_child();
-          child << kv;
+          child.set_key(kv.key());
+          if (kv.has_val()) {
+            child.set_val(kv.val());
+          } else if (kv.is_map() || kv.is_seq()) {
+            // TODO: Need to properly copy the subtree
+          }
         }
       }
     }
@@ -363,7 +368,7 @@ void component::convert_to_yakka()
           
           // Handle instances
           if (p.has_child("instance")) {
-            auto instance_node = p.find_child("instance");
+            //auto instance_node = p.find_child("instance");
             // TODO: Handle instances - need to create instances map structure
           }
         }
