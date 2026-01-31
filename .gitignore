@@ -5,3 +5,6 @@ output
 .bob
 .yakka
 components/openssl
+*.log
+yakka-components.json
+yakka-projects.json

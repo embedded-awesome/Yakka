@@ -843,7 +843,7 @@ void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, con
         } else {
           // Overwrite with new value - copy the node value
           if (child.has_val()) {
-            target_child = child.val();
+            target_child.set_val(child.val());
           }
         }
       } else {
@@ -852,7 +852,7 @@ void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, con
         if (child.has_val()) {
           ryml::NodeRef new_child = target.append_child();
           new_child.set_key(key);
-          new_child = child.val();
+          new_child.set_val(child.val());
         }
       }
     }
@@ -861,7 +861,7 @@ void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, con
     for (const auto &child : source.children()) {
       if (child.has_val()) {
         ryml::NodeRef new_child = target.append_child();
-        new_child = child.val();
+        new_child.set_val(child.val());
       }
     }
   }
