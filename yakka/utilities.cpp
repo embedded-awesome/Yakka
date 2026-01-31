@@ -157,27 +157,10 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path)
   return temp;
 }
 
-// nlohmann::json::json_pointer json_pointer(std::string path)
-// {
-//   if (path.front() != '/') {
-//     path = "/" + path;
-//     std::replace(path.begin(), path.end(), '.', '/');
-//   }
-//   return nlohmann::json::json_pointer{ path };
-// }
-
 nlohmann::json json_path(const nlohmann::json &node, std::string path)
 {
   nlohmann::json::json_pointer temp(path);
   return node[temp];
-
-  // return node[nlohmann::json_pointer(path)];
-  // auto temp = node;
-  // std::stringstream ss(path);
-  // std::string s;
-  // while (std::getline(ss, s, '.'))
-  //     temp = temp[s];//.reset(temp[s]);
-  // return temp;
 }
 
 std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(const std::vector<std::string> &argument_string)
@@ -186,7 +169,6 @@ std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(con
   feature_list_t features;
   command_list_t commands;
 
-  //    for (auto s = argument_string.begin(); s != argument_string.end(); ++s)
   for (auto s: argument_string) {
     // Identify features, commands, and components
     if (s.front() == '+')
@@ -257,10 +239,15 @@ std::vector<std::string> parse_gcc_dependency_file(const std::string &filename)
 /**
  * @param path  Path relative to Yakka component schema
  */
-void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node, const schema* schema)
+void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node, const schema *schema)
 {
   // Check for a strategy for this path
   schema::merge_strategy strategy = (schema != nullptr) ? schema->get_merge_strategy(path) : schema::merge_strategy::Default;
+
+  if (merge_target.is_null()) {
+    merge_target = node;
+    return;
+  }
 
   switch (node.type()) {
     case nlohmann::detail::value_t::object:
@@ -490,6 +477,16 @@ void add_common_template_commands(inja::Environment &inja_env)
     auto index = args[1]->get<int>();
     return input.substr(index);
   });
+  inja_env.add_callback("string", 1, [](const inja::Arguments &args) {
+    if (args[0]->is_string())
+      return args[0]->get<std::string>();
+    else if (args[0]->is_number_integer())
+      return std::to_string(args[0]->get<int>());
+    else if (args[0]->is_number_float())
+      return std::to_string(args[0]->get<float>());
+    else
+      return std::string{};
+  });
   inja_env.add_callback("trim", 1, [](const inja::Arguments &args) {
     auto input = args[0]->get<std::string>();
     input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) {
@@ -547,6 +544,20 @@ void add_common_template_commands(inja::Environment &inja_env)
     for (const auto &i: args)
       aggregate.append(i->get<std::string>());
     return aggregate;
+  });
+  inja_env.add_callback("contains", [](const inja::Arguments &args) {
+    auto target              = args[0]->get<nlohmann::json>();
+    const auto search_string = args[1]->get<std::string>();
+    if (target.is_array()) {
+      for (const auto &item: target) {
+        if (item.get<std::string>().contains(search_string))
+          return true;
+      }
+      return false;
+    } else if (target.is_string()) {
+      return target.contains(search_string);
+    }
+    return false;
   });
 }
 

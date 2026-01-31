@@ -1,0 +1,8 @@
+name: Rapid TOML
+
+sources:
+  - toml_parser_ryml.cpp
+
+requires:
+  components:
+    - rapidyaml

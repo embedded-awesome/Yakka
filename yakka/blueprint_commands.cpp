@@ -24,7 +24,6 @@ process_return execute_command(std::string target, const nlohmann::json &command
   std::string temp = command.get<std::string>();
   try {
     captured_output = inja_env.render(temp, project_summary);
-    //std::replace( captured_output.begin( ), captured_output.end( ), '/', '\\' );
     spdlog::debug("Executing '{}'", captured_output);
     auto [temp_output, retcode] = exec(captured_output, std::string(""));
 
@@ -190,7 +189,11 @@ process_return template_command(std::string target, const nlohmann::json &comman
           i >> data;
         }
       } else if (command.contains("data")) {
-        std::string data_string = try_render(inja_env, command["data"].get<std::string>(), project_summary);
+        std::string data_string;
+        if (command["data"].is_null()) 
+          data_string = captured_output;
+        else
+          data_string = try_render(inja_env, command["data"].get<std::string>(), project_summary);
         YAML::Node data_yaml    = YAML::Load(data_string);
         if (!data_yaml.IsNull())
           data = data_yaml.as<nlohmann::json>();

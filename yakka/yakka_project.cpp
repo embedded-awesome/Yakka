@@ -880,7 +880,11 @@ void project::update_project_data()
   for (const auto &c: components)
     if (c->json.contains("/requires/data"_json_pointer))
       for (const auto &d: c->json["requires"]["data"]) {
-        required_data.insert(d.get<std::string>());
+        const auto pointer = d.get<std::string>();
+        if (pointer[0] == yakka::data_dependency_identifier)
+          required_data.insert(pointer.substr(1));
+        else
+          required_data.insert(pointer);
       }
 
   // Merge all the component data into the project summary
@@ -891,11 +895,9 @@ void project::update_project_data()
         continue;
       }
 
+      // Create an empty node if it doesn't exist
       if (!project_summary["data"].contains(pointer)) {
-        if (c->json[pointer].is_array())
-          project_summary["data"][pointer] = nlohmann::json::array();
-        else
-          project_summary["data"][pointer] = nlohmann::json::object();
+        project_summary["data"][pointer] = nlohmann::json();
       }
 
       json_node_merge(pointer, project_summary["data"][pointer], c->json[pointer], &data_schema);
