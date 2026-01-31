@@ -6,6 +6,8 @@
 #include "yakka_schema.hpp"
 #include "blake3.h"
 #include "pugixml.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <concepts>
 #include <string_view>
 #include <expected>
@@ -725,6 +727,137 @@ nlohmann::json xml_to_json(const pugi::xml_node &node)
     j["_text"] = node.text().get();
   }
   return j;
+}
+
+// RapidYAML to nlohmann::json conversion (only used when interfacing with inja or schema validator)
+nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node)
+{
+  if (!node.valid() || node.is_seed()) {
+    return nlohmann::json();
+  }
+
+  if (node.is_map()) {
+    nlohmann::json j = nlohmann::json::object();
+    for (const auto &child : node.children()) {
+      std::string key;
+      if (child.has_key()) {
+        child.key() >> key;
+        j[key] = ryml_to_json(child);
+      }
+    }
+    return j;
+  } else if (node.is_seq()) {
+    nlohmann::json j = nlohmann::json::array();
+    for (const auto &child : node.children()) {
+      j.push_back(ryml_to_json(child));
+    }
+    return j;
+  } else if (node.has_val()) {
+    // Try to parse as different types
+    std::string val_str;
+    node.val() >> val_str;
+    
+    // Check for null
+    if (val_str == "null" || val_str == "~" || val_str.empty()) {
+      return nlohmann::json();
+    }
+    
+    // Check for boolean
+    if (val_str == "true" || val_str == "yes" || val_str == "on") {
+      return nlohmann::json(true);
+    }
+    if (val_str == "false" || val_str == "no" || val_str == "off") {
+      return nlohmann::json(false);
+    }
+    
+    // Try to parse as number
+    if (!val_str.empty() && (std::isdigit(val_str[0]) || val_str[0] == '-' || val_str[0] == '+')) {
+      try {
+        // Try integer first
+        if (val_str.find('.') == std::string::npos && 
+            val_str.find('e') == std::string::npos && 
+            val_str.find('E') == std::string::npos) {
+          return nlohmann::json(std::stoll(val_str));
+        } else {
+          return nlohmann::json(std::stod(val_str));
+        }
+      } catch (...) {
+        // Not a number, treat as string
+      }
+    }
+    
+    // Default to string
+    return nlohmann::json(val_str);
+  }
+
+  return nlohmann::json();
+}
+
+// Helper function to get value as string from ryml node
+std::string ryml_get_val_as_string(const ryml::ConstNodeRef &node)
+{
+  if (!node.valid() || !node.has_val()) {
+    return "";
+  }
+  std::string result;
+  node.val() >> result;
+  return result;
+}
+
+// Helper function to check if ryml node has a child with given key
+bool ryml_has_child(const ryml::ConstNodeRef &node, c4::csubstr key)
+{
+  if (!node.valid() || !node.is_map()) {
+    return false;
+  }
+  return node.has_child(key);
+}
+
+// Helper function to get child node by key
+ryml::ConstNodeRef ryml_get_child(const ryml::ConstNodeRef &node, c4::csubstr key)
+{
+  if (!node.valid() || !node.is_map()) {
+    return ryml::ConstNodeRef();
+  }
+  return node.find_child(key);
+}
+
+// Merge two ryml nodes
+void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, const schema* schema)
+{
+  // For now, implement basic merging
+  // Full implementation would need to handle merge strategies from schema
+  if (!source.valid() || !target.valid()) {
+    return;
+  }
+
+  if (source.is_map() && target.is_map()) {
+    for (const auto &child : source.children()) {
+      if (!child.has_key()) continue;
+      
+      c4::csubstr key = child.key();
+      if (target.has_child(key)) {
+        ryml::NodeRef target_child = target.find_child(key);
+        if (child.is_map() && target_child.is_map()) {
+          ryml_node_merge(child, target_child, schema);
+        } else {
+          // Overwrite with new value
+          target_child << child;
+        }
+      } else {
+        // Add new key
+        ryml::NodeRef new_child = target.append_child();
+        new_child << key;
+        new_child << child;
+      }
+    }
+  } else if (source.is_seq() && target.is_seq()) {
+    // For sequences, append all elements
+    for (const auto &child : source.children()) {
+      ryml::NodeRef new_child = target.append_child();
+      new_child << child;
+    }
+  }
 }
 
 } // namespace yakka

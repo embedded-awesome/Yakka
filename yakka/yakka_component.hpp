@@ -3,6 +3,8 @@
 #include "yakka_blueprint.hpp"
 #include "yakka.hpp"
 #include "semver/semver.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <vector>
 #include <string>
 #include <iostream>
@@ -23,7 +25,11 @@ struct component {
   std::string id;
   std::filesystem::path file_path;
   std::filesystem::path component_path;
-  nlohmann::json json;
+  
+  // Use ryml::Tree for internal data storage (zero-copy, efficient)
+  ryml::Tree tree;
+  std::string yaml_buffer; // Buffer to hold YAML file contents (ryml uses views into this)
+  
   semver::version version;
 
   // Optional path to package
@@ -35,6 +41,10 @@ struct component {
     SLCP_FILE,
     SLCE_FILE,
   } type;
+  
+  // Helper to get root node for easy access
+  ryml::ConstNodeRef root() const { return tree.rootref(); }
+  ryml::NodeRef root() { return tree.rootref(); }
 };
 
 } /* namespace yakka */

@@ -4,6 +4,8 @@
 #include "inja.hpp"
 #include "pugixml.hpp"
 #include "yakka_schema.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <string>
 #include <string_view>
 #include <expected>
@@ -38,6 +40,13 @@ nlohmann::json xml_to_json(const pugi::xml_node& node);
 std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept;
 
 void add_common_template_commands(inja::Environment &inja_env);
+
+// RapidYAML conversion utilities
+nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node);
+void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, const schema* schema = nullptr);
+std::string ryml_get_val_as_string(const ryml::ConstNodeRef &node);
+bool ryml_has_child(const ryml::ConstNodeRef &node, c4::csubstr key);
+ryml::ConstNodeRef ryml_get_child(const ryml::ConstNodeRef &node, c4::csubstr key);
 
 template <class CharContainer>
 static std::expected<size_t, std::error_code> get_file_contents(std::filesystem::path filename, CharContainer *container)

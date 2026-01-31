@@ -1,0 +1,23 @@
+[2026-01-31 21:39:27.395] [yakkalog] [info] Parsing './yakka/yakka_cli.yakka'
+[2026-01-31 21:39:27.402] [yakkalog] [info] Parsing './components/cpp-httplib/cpp-httplib.yakka'
+[2026-01-31 21:39:27.402] [yakkalog] [info] Parsing './yakka/yakka.yakka'
+[2026-01-31 21:39:27.402] [yakkalog] [info] Parsing './components/pugixml/pugixml.yakka'
+[2026-01-31 21:39:27.402] [yakkalog] [info] Parsing './components/yaml-cpp/yaml-cpp.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/cpp-subprocess/cpp-subprocess.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/inja/inja.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/json/json.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/cpp-semver/cpp-semver.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/json-schema-validator/json-schema-validator.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/indicators/indicators.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/cxxopts/cxxopts.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/spdlog/spdlog.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/rapidyaml/rapidyaml.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/taskflow/taskflow.yakka'
+[2026-01-31 21:39:27.403] [yakkalog] [info] Parsing './components/glob/glob.yakka'
+[2026-01-31 21:39:27.404] [yakkalog] [info] Parsing './components/blake3/blake3.yakka'
+[2026-01-31 21:39:27.404] [yakkalog] [info] 8ms to process components
+[2026-01-31 21:39:27.404] [yakkalog] [info] Required features:
+[2026-01-31 21:39:27.404] [yakkalog] [info] 0ms to validate schemas
+[2026-01-31 21:39:27.404] [yakkalog] [info] No blueprint for 'compile'
+[2026-01-31 21:39:27.404] [yakkalog] [info] 0ms to process blueprints
+[2026-01-31 21:39:27.404] [yakkalog] [info] Target compile has no action
