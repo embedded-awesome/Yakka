@@ -2,11 +2,15 @@
 
 #include "yakka_component.hpp"
 #include "yaml-cpp/yaml.h"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <nlohmann/json-schema.hpp>
 #include "spdlog.h"
 #include <ranges>
 
 namespace yakka {
+
+struct RymlPointer;
 
 class schema {
 public:
@@ -22,25 +26,25 @@ public:
   };
 
 public:
-  schema() : schema_data("{ \"properties\": {} }"_json), validator(nullptr, nlohmann::json_schema::default_string_format_check)
+  schema() : schema_data(ryml::Tree()), validator(nullptr, ryml_schema::default_string_format_check)
   {
   }
 
-  void add_schema_data(const nlohmann::json &schema_data);
-  bool validate(const nlohmann::json &data, std::string id = "");
-  schema::merge_strategy get_merge_strategy(const nlohmann::json::json_pointer &path) const;
+  void add_schema_data(const ryml::Tree &schema_data);
+  bool validate(const ryml::Tree &data, std::string id = "");
+  schema::merge_strategy get_merge_strategy(const RymlPointer &path) const;
 
 private:
-  nlohmann::json schema_data;
-  nlohmann::json_schema::json_validator validator;
+  ryml::Tree schema_data;
+  ryml_schema::json_validator validator;
   bool validator_updated = false;
 };
 
 class yakka_schema_validator {
-  nlohmann::json yakka_schema;
-  nlohmann::json slcc_schema;
-  nlohmann::json_schema::json_validator yakka_validator;
-  nlohmann::json_schema::json_validator slcc_validator;
+  ryml::Tree yakka_schema;
+  ryml::Tree slcc_schema;
+  ryml_schema::json_validator yakka_validator;
+  ryml_schema::json_validator slcc_validator;
 
   // clang-format off
   const std::string yakka_component_schema_yaml = R"(
@@ -172,12 +176,12 @@ class yakka_schema_validator {
   )";
   // clang-format on
 
-  class custom_error_handler : public nlohmann::json_schema::basic_error_handler {
+  class custom_error_handler : public ryml_schema::basic_error_handler {
   public:
     yakka::component *component;
-    void error(const nlohmann::json::json_pointer &ptr, const nlohmann::json &instance, const std::string &message) override
+    void error(const RymlPointer &ptr, const ryml::Tree &instance, const std::string &message) override
     {
-      nlohmann::json_schema::basic_error_handler::error(ptr, instance, message);
+      ryml_schema::basic_error_handler::error(ptr, instance, message);
       spdlog::error("Validation error in '{}': {} - {} : - {}", component->file_path.generic_string(), ptr.to_string(), instance.dump(3), message);
     }
   };

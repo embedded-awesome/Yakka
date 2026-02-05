@@ -105,7 +105,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
   server.Get("/api/registries", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/registries\n");
     res.set_header("Access-Control-Allow-Origin", "*");
-    res.set_content(workspace.registries.as<nlohmann::json>().dump(), "application/json");
+    res.set_content(workspace.registries.as<ryml::Tree>().dump(), "application/json");
   });
 
   server.Get("/api/project/:id", [&](const httplib::Request &req, httplib::Response &res) {
@@ -120,7 +120,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     if (fs::exists(project_summary_file)) {
       // Read the entire file content into json object
       std::ifstream project_summary_stream(project_summary_file);
-      nlohmann::json project_summary = nlohmann::json::parse(project_summary_stream);
+      ryml::Tree project_summary = ryml::Tree::parse(project_summary_stream);
       const auto project_file        = project_summary["project_name"].get<std::string>() + ".yakka";
       if (fs::exists(project_file)) {
         auto file_content = yakka::get_file_contents<std::string>(project_file);
@@ -132,7 +132,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
         ryml::Tree node = ryml::parse_in_arena(ryml::to_csubstr(*file_content));
         // Merge data from the project file
         const auto project_json = ryml_to_json(node.crootref());
-        json_node_merge("/data"_json_pointer, project_summary, project_json);
+        json_node_merge(ryml_pointer("/data"), project_summary, project_json);
       }
 
       // std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -173,7 +173,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       project_file_stream << project_data;
       project_file_stream.close();
       res.set_content("{\"status\": \"OK\"}", "application/json");
-    } catch (const nlohmann::json::parse_error &e) {
+    } catch (const ryml::Tree::parse_error &e) {
       spdlog::error("Failed to parse incoming JSON data: {}\n", e.what());
       res.status = 400;
       return;

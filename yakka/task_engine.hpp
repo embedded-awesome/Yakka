@@ -4,7 +4,8 @@
 #include "yakka_project.hpp"
 #include "blueprint_database.hpp"
 #include "taskflow.hpp"
-#include "json.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <string>
 #include <atomic>
 #include <filesystem>
@@ -58,12 +59,12 @@ public:
 
   void init(task_complete_type task_complete_handler);
   void create_tasks(const std::string target_name, tf::Task &parent, yakka::project &project);
-  std::pair<std::string, int> run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, nlohmann::json &project_data);
+  std::pair<std::string, int> run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::Tree &project_data);
   void run_taskflow(yakka::project &project, task_engine_ui *ui);
   bool is_valid();
 
   std::atomic<bool> abort_build;
-  nlohmann::json project_data;
+  ryml::Tree project_data;
   tf::Taskflow taskflow;
 
   task_complete_type task_complete_handler;

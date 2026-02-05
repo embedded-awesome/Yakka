@@ -159,27 +159,103 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path)
   return temp;
 }
 
-// nlohmann::json::json_pointer json_pointer(std::string path)
+// RymlPointer ryml_pointer(std::string path)
 // {
 //   if (path.front() != '/') {
 //     path = "/" + path;
 //     std::replace(path.begin(), path.end(), '.', '/');
 //   }
-//   return nlohmann::json::json_pointer{ path };
+//   return RymlPointer{ path };
 // }
 
-nlohmann::json json_path(const nlohmann::json &node, std::string path)
+ryml::Tree json_path(const ryml::Tree &node, std::string path)
 {
-  nlohmann::json::json_pointer temp(path);
+  RymlPointer temp(path);
   return node[temp];
 
-  // return node[nlohmann::json_pointer(path)];
+  // return node[RymlPointer(path)];
   // auto temp = node;
   // std::stringstream ss(path);
   // std::string s;
   // while (std::getline(ss, s, '.'))
   //     temp = temp[s];//.reset(temp[s]);
   // return temp;
+}
+
+static std::string unescape_ryml_pointer_segment(std::string_view segment)
+{
+  std::string result;
+  result.reserve(segment.size());
+  for (size_t i = 0; i < segment.size(); ++i) {
+    if (segment[i] == '~' && i + 1 < segment.size()) {
+      char next = segment[i + 1];
+      if (next == '0') {
+        result.push_back('~');
+        ++i;
+        continue;
+      }
+      if (next == '1') {
+        result.push_back('/');
+        ++i;
+        continue;
+      }
+    }
+    result.push_back(segment[i]);
+  }
+  return result;
+}
+
+static std::vector<std::string> parse_ryml_pointer_segments(std::string path)
+{
+  std::vector<std::string> segments;
+  if (path.empty()) {
+    return segments;
+  }
+
+  if (path.front() != '/') {
+    std::replace(path.begin(), path.end(), '.', '/');
+    path = "/" + path;
+  }
+
+  std::string_view path_view(path);
+  size_t start = 1;
+  while (start <= path_view.size()) {
+    size_t slash = path_view.find('/', start);
+    if (slash == std::string_view::npos) {
+      slash = path_view.size();
+    }
+    auto segment_view = path_view.substr(start, slash - start);
+    segments.emplace_back(unescape_ryml_pointer_segment(segment_view));
+    if (slash >= path_view.size()) {
+      break;
+    }
+    start = slash + 1;
+  }
+
+  return segments;
+}
+
+RymlPointer::RymlPointer(std::string path) : segments(parse_ryml_pointer_segments(std::move(path)))
+{
+}
+
+RymlPointer::RymlPointer(std::vector<std::string> segments_in) : segments(std::move(segments_in))
+{
+}
+
+const std::vector<std::string> &RymlPointer::parts() const noexcept
+{
+  return segments;
+}
+
+bool RymlPointer::empty() const noexcept
+{
+  return segments.empty();
+}
+
+RymlPointer ryml_pointer(std::string path)
+{
+  return RymlPointer{ std::move(path) };
 }
 
 std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(const std::vector<std::string> &argument_string)
@@ -259,7 +335,7 @@ std::vector<std::string> parse_gcc_dependency_file(const std::string &filename)
 /**
  * @param path  Path relative to Yakka component schema
  */
-void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_target, const nlohmann::json &node, const schema* schema)
+void json_node_merge(RymlPointer path, ryml::Tree &merge_target, const ryml::Tree &node, const schema* schema)
 {
   // Check for a strategy for this path
   schema::merge_strategy strategy = (schema != nullptr) ? schema->get_merge_strategy(path) : schema::merge_strategy::Default;
@@ -289,7 +365,7 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
           break;
         default:
           // Convert scalar into an array
-          merge_target = nlohmann::json::array({ merge_target });
+          merge_target = ryml::Tree::array({ merge_target });
           [[fallthrough]];
         case nlohmann::detail::value_t::array:
         case nlohmann::detail::value_t::null:
@@ -321,7 +397,7 @@ void json_node_merge(nlohmann::json::json_pointer path, nlohmann::json &merge_ta
           } else if (strategy == schema::merge_strategy::Min && node.is_number() && merge_target.is_number()) {
             merge_target = std::min(merge_target, node);
           } else {
-            merge_target = nlohmann::json::array({ merge_target });
+            merge_target = ryml::Tree::array({ merge_target });
             merge_target.push_back(node);
           }
           break;
@@ -343,7 +419,7 @@ std::string component_dotname_to_id(const std::string dotname)
   return dotname.find_last_of(".") != std::string::npos ? dotname.substr(dotname.find_last_of(".") + 1) : dotname;
 }
 
-std::string try_render(inja::Environment &env, const std::string &input, const nlohmann::json &data)
+std::string try_render(inja::Environment &env, const std::string &input, const ryml::Tree &data)
 {
   try {
     return env.render(input, data);
@@ -353,7 +429,7 @@ std::string try_render(inja::Environment &env, const std::string &input, const n
   }
 }
 
-std::string try_render_file(inja::Environment &env, const std::string &filename, const nlohmann::json &data)
+std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::Tree &data)
 {
   try {
     return env.render_file(filename, data);
@@ -368,8 +444,8 @@ std::string try_render(inja::Environment &env, const std::string &input, const r
 {
   try {
     // TODO: Convert ryml to format inja can consume
-    // For now, convert to nlohmann::json as bridge
-    nlohmann::json json_data = ryml_to_json(data);
+    // For now, convert to ryml::Tree as bridge
+    ryml::Tree json_data = ryml_to_json(data);
     return env.render(input, json_data);
   } catch (std::exception &e) {
     spdlog::error("Template error: {}\n{}", input, e.what());
@@ -381,7 +457,7 @@ std::string try_render_file(inja::Environment &env, const std::string &filename,
 {
   try {
     // TODO: Convert ryml to format inja can consume
-    nlohmann::json json_data = ryml_to_json(data);
+    ryml::Tree json_data = ryml_to_json(data);
     return env.render_file(filename, json_data);
   } catch (std::exception &e) {
     spdlog::error("Template error: {}\n{}", filename, e.what());
@@ -404,7 +480,7 @@ void add_common_template_commands(inja::Environment &inja_env)
     return std::filesystem::path{ args.at(0)->get<std::string>() }.parent_path().string();
   });
   inja_env.add_callback("glob", [](inja::Arguments &args) {
-    nlohmann::json aggregate = nlohmann::json::array();
+    ryml::Tree aggregate = ryml::Tree::array();
     std::vector<std::string> string_args;
     for (const auto &i: args)
       string_args.push_back(i->get<std::string>());
@@ -452,9 +528,9 @@ void add_common_template_commands(inja::Environment &inja_env)
     const auto file_path = args[0]->get<std::string>();
     if (std::filesystem::exists(file_path)) {
       auto yaml_data = YAML::LoadFile(file_path);
-      return yaml_data.as<nlohmann::json>();
+      return yaml_data.as<ryml::Tree>();
     } else {
-      return nlohmann::json();
+      return ryml::Tree();
     }
   });
   inja_env.add_callback("load_xml", 1, [](const inja::Arguments &args) {
@@ -466,19 +542,19 @@ void add_common_template_commands(inja::Environment &inja_env)
         return xml_to_json(doc.child("device"));
       }
     }
-    return nlohmann::json();
+    return ryml::Tree();
   });
   inja_env.add_callback("load_json", 1, [](const inja::Arguments &args) {
     const auto file_path = args[0]->get<std::string>();
     if (std::filesystem::exists(file_path)) {
       std::ifstream file_stream(file_path);
-      return nlohmann::json::parse(file_stream,
+      return ryml::Tree::parse(file_stream,
                                    /* callback */ nullptr,
                                    /* allow exceptions */ false,
                                    /* ignore_comments */ true,
                                    /* ignore_trailing_commas */ true);
     } else {
-      return nlohmann::json();
+      return ryml::Tree();
     }
   });
   inja_env.add_callback("quote", 1, [](const inja::Arguments &args) {
@@ -505,7 +581,7 @@ void add_common_template_commands(inja::Environment &inja_env)
   inja_env.add_callback("split", 2, [](const inja::Arguments &args) {
     auto input = args[0]->get<std::string>();
     auto delim = args[1]->get<std::string>();
-    nlohmann::json output;
+    ryml::Tree output;
     for (auto word: std::views::split(input, delim))
       output.push_back(std::string_view(word));
     return output;
@@ -535,7 +611,7 @@ void add_common_template_commands(inja::Environment &inja_env)
     return input;
   });
   inja_env.add_callback("filter", 2, [](const inja::Arguments &args) {
-    json output            = nlohmann::json::array();
+    json output            = ryml::Tree::array();
     const auto input       = args[0];
     const auto regex_match = std::regex(args[1]->get<std::string>());
     std::copy_if(input->begin(), input->end(), std::back_inserter(output), [&](const auto &item) {
@@ -563,12 +639,12 @@ void add_common_template_commands(inja::Environment &inja_env)
     const auto input      = args[0];
     const auto search_key = args[1]->get<std::string>();
     json output;
-    find_json_keys(input->get<nlohmann::json>(), search_key, "", output);
+    find_json_keys(input->get<ryml::Tree>(), search_key, "", output);
     return output;
   });
   inja_env.add_callback("merge", 2, [](const inja::Arguments &args) {
-    auto target     = args[0]->get<nlohmann::json>();
-    const auto data = args[1]->get<nlohmann::json>();
+    auto target     = args[0]->get<ryml::Tree>();
+    const auto data = args[1]->get<ryml::Tree>();
     target.update(data, true);
     return target;
   });
@@ -590,12 +666,12 @@ std::pair<std::string, int> download_resource(const std::string url, std::filesy
 #endif
 }
 
-nlohmann::json::json_pointer create_condition_pointer(const nlohmann::json condition)
+RymlPointer create_condition_pointer(const ryml::Tree condition)
 {
-  nlohmann::json::json_pointer pointer;
+  RymlPointer pointer;
 
   for (const auto &item: condition) {
-    pointer /= "/supports/features"_json_pointer;
+    pointer /= ryml_pointer("/supports/features");
     pointer /= item.get<std::string>();
   }
 
@@ -609,7 +685,7 @@ struct ComparisonResult {
 };
 
 [[nodiscard]]
-std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const nlohmann::json &left, const nlohmann::json &right) noexcept
+std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const ryml::Tree &left, const ryml::Tree &right) noexcept
 {
   if (data_path.empty() || data_path[0] != data_dependency_identifier) {
     return false;
@@ -625,18 +701,18 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
   }
 
   auto data_paths = std::ranges::views::split(data_path, '/') | std::views::drop(1);
-  nlohmann::json::json_pointer data_pointer{ data_path.substr(1) };
+  RymlPointer data_pointer{ data_path.substr(1) };
 
   auto iter = data_paths.begin();
   const std::string first_part{ std::string_view(*iter) };
   const std::string second_part{ std::string_view(*(++iter)) };
-  nlohmann::json::json_pointer remaining_pointer;
+  RymlPointer remaining_pointer;
   for (const auto &part: data_paths | std::views::drop(2)) {
     remaining_pointer /= std::string(std::string_view{ part });
   }
 
   // Define a lambda to process a component name using the captured 'left' and 'right' json objects
-  const auto process_component = [&](std::string_view component_name, const nlohmann::json::json_pointer &pointer) -> ComparisonResult {
+  const auto process_component = [&](std::string_view component_name, const RymlPointer &pointer) -> ComparisonResult {
     if (!left["components"].contains(component_name) || !right["components"].contains(component_name)) {
       return { true, "" };
     }
@@ -645,7 +721,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
     const auto &right_comp = right["components"][std::string{ component_name }];
 
     auto get_value = [](const auto &json, const auto &ptr) {
-      return json.contains(ptr) ? json[ptr] : nlohmann::json{};
+      return json.contains(ptr) ? json[ptr] : ryml::Tree{};
     };
 
     auto left_value  = get_value(left_comp, pointer);
@@ -691,7 +767,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
   }
 }
 
-void find_json_keys(const nlohmann::json &j, const std::string &target_key, const std::string &current_path, nlohmann::json &paths)
+void find_json_keys(const ryml::Tree &j, const std::string &target_key, const std::string &current_path, ryml::Tree &paths)
 {
   if (j.is_object()) {
     for (auto it = j.begin(); it != j.end(); ++it) {
@@ -737,9 +813,9 @@ void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept
   }
 }
 
-nlohmann::json xml_to_json(const pugi::xml_node &node)
+ryml::Tree xml_to_json(const pugi::xml_node &node)
 {
-  nlohmann::json j;
+  ryml::Tree j;
   // Add attributes
   for (auto &attr: node.attributes()) {
     j["_" + std::string(attr.name())] = attr.value();
@@ -772,15 +848,15 @@ std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem:
   }
 }
 
-// RapidYAML to nlohmann::json conversion (only used when interfacing with inja or schema validator)
-nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node)
+// RapidYAML to ryml::Tree conversion (only used when interfacing with inja or schema validator)
+ryml::Tree ryml_to_json(const ryml::ConstNodeRef &node)
 {
   if (!node.valid()) {
-    return nlohmann::json();
+    return ryml::Tree();
   }
 
   if (node.is_map()) {
-    nlohmann::json j = nlohmann::json::object();
+    ryml::Tree j = ryml::Tree::object();
     for (const auto &child : node.children()) {
       std::string key;
       if (child.has_key()) {
@@ -790,7 +866,7 @@ nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node)
     }
     return j;
   } else if (node.is_seq()) {
-    nlohmann::json j = nlohmann::json::array();
+    ryml::Tree j = ryml::Tree::array();
     for (const auto &child : node.children()) {
       j.push_back(ryml_to_json(child));
     }
@@ -802,15 +878,15 @@ nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node)
     
     // Check for null
     if (val_str == "null" || val_str == "~" || val_str.empty()) {
-      return nlohmann::json();
+      return ryml::Tree();
     }
     
     // Check for boolean
     if (val_str == "true" || val_str == "yes" || val_str == "on") {
-      return nlohmann::json(true);
+      return ryml::Tree(true);
     }
     if (val_str == "false" || val_str == "no" || val_str == "off") {
-      return nlohmann::json(false);
+      return ryml::Tree(false);
     }
     
     // Try to parse as number
@@ -820,9 +896,9 @@ nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node)
         if (val_str.find('.') == std::string::npos && 
             val_str.find('e') == std::string::npos && 
             val_str.find('E') == std::string::npos) {
-          return nlohmann::json(std::stoll(val_str));
+          return ryml::Tree(std::stoll(val_str));
         } else {
-          return nlohmann::json(std::stod(val_str));
+          return ryml::Tree(std::stod(val_str));
         }
       } catch (...) {
         // Not a number, treat as string
@@ -830,10 +906,10 @@ nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node)
     }
     
     // Default to string
-    return nlohmann::json(val_str);
+    return ryml::Tree(val_str);
   }
 
-  return nlohmann::json();
+  return ryml::Tree();
 }
 
 // Helper function to get value as string from ryml node
@@ -863,6 +939,54 @@ ryml::ConstNodeRef ryml_get_child(const ryml::ConstNodeRef &node, c4::csubstr ke
     return ryml::ConstNodeRef();
   }
   return node.find_child(key);
+}
+
+ryml::ConstNodeRef ryml_get_path(const ryml::ConstNodeRef &node, const RymlPointer &path)
+{
+  if (!node.valid()) {
+    return ryml::ConstNodeRef();
+  }
+
+  ryml::ConstNodeRef current = node;
+  for (const auto &segment : path.parts()) {
+    if (segment.empty()) {
+      continue;
+    }
+
+    if (current.is_seq()) {
+      size_t index = 0;
+      try {
+        index = static_cast<size_t>(std::stoul(segment));
+      } catch (...) {
+        spdlog::error("Non-numeric index '{}' used for sequence navigation", segment);
+        return ryml::ConstNodeRef();
+      }
+
+      if (index >= current.num_children()) {
+        return ryml::ConstNodeRef();
+      }
+
+      current = current.child(index);
+      continue;
+    }
+
+    if (!current.is_map()) {
+      return ryml::ConstNodeRef();
+    }
+
+    c4::csubstr key = c4::to_csubstr(segment);
+    if (!current.has_child(key)) {
+      return ryml::ConstNodeRef();
+    }
+    current = current.find_child(key);
+  }
+
+  return current;
+}
+
+bool ryml_has_path(const ryml::ConstNodeRef &node, const RymlPointer &path)
+{
+  return ryml_get_path(node, path).valid();
 }
 
 // Merge two ryml nodes
@@ -926,9 +1050,36 @@ ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const std::vector<std::stri
   ryml::NodeRef current = node;
   for (const auto &segment : path) {
     if (segment.empty()) continue; // Skip empty segments (e.g., from leading "/")
-    
+
+    if (current.is_seq()) {
+      size_t index = 0;
+      try {
+        index = static_cast<size_t>(std::stoul(segment));
+      } catch (...) {
+        spdlog::error("Non-numeric index '{}' used for sequence navigation", segment);
+        return ryml::NodeRef();
+      }
+
+      if (index < current.num_children()) {
+        current = current.child(index);
+        continue;
+      }
+
+      if (!create_if_missing) {
+        spdlog::warn("Sequence index '{}' not found", segment);
+        return ryml::NodeRef();
+      }
+
+      while (current.num_children() <= index) {
+        ryml::NodeRef new_child = current.append_child();
+        new_child |= ryml::MAP; // Default to map type for newly created children
+      }
+      current = current.child(index);
+      continue;
+    }
+
     c4::csubstr key = c4::to_csubstr(segment);
-    
+
     if (current.has_child(key)) {
       current = current.find_child(key);
     } else if (create_if_missing) {
@@ -941,7 +1092,7 @@ ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const std::vector<std::stri
           return ryml::NodeRef(); // Return invalid node
         }
       }
-      
+
       // Create new child
       ryml::NodeRef new_child = current.append_child();
       new_child << ryml::key(key);
@@ -954,6 +1105,11 @@ ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const std::vector<std::stri
   }
   
   return current;
+}
+
+ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const RymlPointer &path, bool create_if_missing)
+{
+  return ryml_navigate_path(node, path.parts(), create_if_missing);
 }
 
 /**
@@ -979,10 +1135,10 @@ void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_t
   }
 
   // Get merge strategy from schema if available
-  // Note: This requires converting path to json_pointer format for schema lookup
+  // Note: This requires converting path to RymlPointer format for schema lookup
   schema::merge_strategy strategy = schema::merge_strategy::Default;
   if (schema != nullptr) {
-    // Build json_pointer from path vector
+    // Build RymlPointer from path vector
     std::string pointer_str;
     for (const auto &segment : path) {
       if (!segment.empty()) {
@@ -993,7 +1149,7 @@ void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_t
       pointer_str = "";
     }
     try {
-      nlohmann::json::json_pointer json_ptr(pointer_str);
+      RymlPointer json_ptr(pointer_str);
       strategy = schema->get_merge_strategy(json_ptr);
     } catch (...) {
       // If pointer construction fails, use default strategy

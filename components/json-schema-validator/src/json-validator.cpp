@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: MIT
  *
  */
-#include <nlohmann/json-schema.hpp>
+#include <ryml/json-schema.hpp>
 
 #include "json-patch.hpp"
 
@@ -16,11 +16,16 @@
 #include <sstream>
 #include <string>
 
-using nlohmann::json;
-using nlohmann::json_patch;
-using nlohmann::json_uri;
-using nlohmann::json_schema::root_schema;
-using namespace nlohmann::json_schema;
+using ryml_schema::json;
+using ryml_schema::json_patch;
+using ryml_schema::json_uri;
+using ryml_schema::json_pointer;
+using ryml_schema::error_handler;
+using ryml_schema::format_checker;
+using ryml_schema::content_checker;
+using ryml_schema::schema_loader;
+namespace ryml_schema { class root_schema; }
+using ryml_schema::root_schema;
 
 #ifdef JSON_SCHEMA_BOOST_REGEX
 #	include <boost/regex.hpp>
@@ -45,8 +50,8 @@ protected:
 	virtual std::shared_ptr<schema> make_for_default_(
 	    std::shared_ptr<::schema> & /* sch */,
 	    root_schema * /* root */,
-	    std::vector<nlohmann::json_uri> & /* uris */,
-	    nlohmann::json & /* default_value */) const
+	    std::vector<ryml_schema::json_uri> & /* uris */,
+	    ryml_schema::json & /* default_value */) const
 	{
 		return nullptr;
 	};
@@ -57,9 +62,9 @@ public:
 	schema(root_schema *root)
 	    : root_(root) {}
 
-	virtual void validate(const json::json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const = 0;
+	virtual void validate(const json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const = 0;
 
-	virtual const json &default_value(const json::json_pointer &, const json &, error_handler &) const
+	virtual const json &default_value(const json_pointer &, const json &, error_handler &) const
 	{
 		return default_value_;
 	}
@@ -69,7 +74,7 @@ public:
 	static std::shared_ptr<schema> make(json &schema,
 	                                    root_schema *root,
 	                                    const std::vector<std::string> &key,
-	                                    std::vector<nlohmann::json_uri> uris);
+	                                    std::vector<ryml_schema::json_uri> uris);
 };
 
 class schema_ref : public schema
@@ -79,7 +84,7 @@ class schema_ref : public schema
 	std::shared_ptr<schema> target_strong_; // for references to references keep also the shared_ptr because
 	                                        // no one else might use it after resolving
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const final
+	void validate(const json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const final
 	{
 		auto target = target_.lock();
 
@@ -89,7 +94,7 @@ class schema_ref : public schema
 			e.error(ptr, instance, "unresolved or freed schema-reference " + id_);
 	}
 
-	const json &default_value(const json::json_pointer &ptr, const json &instance, error_handler &e) const override final
+	const json &default_value(const json_pointer &ptr, const json &instance, error_handler &e) const override final
 	{
 		if (!default_value_.is_null())
 			return default_value_;
@@ -107,8 +112,8 @@ protected:
 	virtual std::shared_ptr<schema> make_for_default_(
 	    std::shared_ptr<::schema> &sch,
 	    root_schema *root,
-	    std::vector<nlohmann::json_uri> &uris,
-	    nlohmann::json &default_value) const override
+	    std::vector<ryml_schema::json_uri> &uris,
+	    ryml_schema::json &default_value) const override
 	{
 		// create a new reference schema using the original reference (which will be resolved later)
 		// to store this overloaded default value #209
@@ -134,9 +139,7 @@ public:
 
 } // namespace
 
-namespace nlohmann
-{
-namespace json_schema
+namespace ryml_schema
 {
 
 class root_schema
@@ -227,7 +230,7 @@ public:
 			auto unk_kw = &file.unknown_keywords;
 			for (auto &rt : ref_tokens) {
 				// create a json_pointer from rt as rt can be an stringified integer doing find on an array won't work
-				json::json_pointer rt_ptr{"/" + rt};
+				json_pointer rt_ptr{"/" + rt};
 				if (unk_kw->contains(rt_ptr) == false)
 					(*unk_kw)[rt] = json::object();
 				unk_kw = &(*unk_kw)[rt_ptr];
@@ -337,7 +340,7 @@ public:
 		}
 	}
 
-	void validate(const json::json_pointer &ptr,
+	void validate(const json_pointer &ptr,
 	              const json &instance,
 	              json_patch &patch,
 	              error_handler &e,
@@ -365,8 +368,7 @@ public:
 	}
 };
 
-} // namespace json_schema
-} // namespace nlohmann
+} // namespace ryml_schema
 
 namespace
 {
@@ -375,11 +377,11 @@ class first_error_handler : public error_handler
 {
 public:
 	bool error_{false};
-	json::json_pointer ptr_;
+	json_pointer ptr_;
 	json instance_;
 	std::string message_;
 
-	void error(const json::json_pointer &ptr, const json &instance, const std::string &message) override
+	void error(const json_pointer &ptr, const json &instance, const std::string &message) override
 	{
 		if (*this)
 			return;
@@ -396,7 +398,7 @@ class logical_not : public schema
 {
 	std::shared_ptr<schema> subschema_;
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const final
+	void validate(const json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const final
 	{
 		first_error_handler esub;
 		subschema_->validate(ptr, instance, patch, esub);
@@ -405,7 +407,7 @@ class logical_not : public schema
 			e.error(ptr, instance, "the subschema has succeeded, but it is required to not validate");
 	}
 
-	const json &default_value(const json::json_pointer &ptr, const json &instance, error_handler &e) const override
+	const json &default_value(const json_pointer &ptr, const json &instance, error_handler &e) const override
 	{
 		return subschema_->default_value(ptr, instance, e);
 	}
@@ -413,7 +415,7 @@ class logical_not : public schema
 public:
 	logical_not(json &sch,
 	            root_schema *root,
-	            const std::vector<nlohmann::json_uri> &uris)
+	            const std::vector<ryml_schema::json_uri> &uris)
 	    : schema(root)
 	{
 		subschema_ = schema::make(sch, root, {"not"}, uris);
@@ -430,14 +432,14 @@ class logical_combination_error_handler : public error_handler
 {
 public:
 	struct error_entry {
-		json::json_pointer ptr_;
+		json_pointer ptr_;
 		json instance_;
 		std::string message_;
 	};
 
 	std::vector<error_entry> error_entry_list_;
 
-	void error(const json::json_pointer &ptr, const json &instance, const std::string &message) override
+	void error(const json_pointer &ptr, const json &instance, const std::string &message) override
 	{
 		error_entry_list_.push_back(error_entry{ptr, instance, message});
 	}
@@ -456,7 +458,7 @@ class logical_combination : public schema
 {
 	std::vector<std::shared_ptr<schema>> subschemata_;
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const final
+	void validate(const json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const final
 	{
 		size_t count = 0;
 		logical_combination_error_handler error_summary;
@@ -469,7 +471,7 @@ class logical_combination : public schema
 			if (!esub)
 				count++;
 			else {
-				patch.get_json().get_ref<nlohmann::json::array_t &>().resize(oldPatchSize);
+				patch.get_json().get_ref<ryml_schema::json::array_t &>().resize(oldPatchSize);
 				esub.propagate(error_summary, "case#" + std::to_string(index) + "] ");
 			}
 
@@ -485,12 +487,12 @@ class logical_combination : public schema
 
 	// specialized for each of the logical_combination_types
 	static const std::string key;
-	static bool is_validate_complete(const json &, const json::json_pointer &, error_handler &, const logical_combination_error_handler &, size_t, size_t);
+	static bool is_validate_complete(const json &, const json_pointer &, error_handler &, const logical_combination_error_handler &, size_t, size_t);
 
 public:
 	logical_combination(json &sch,
 	                    root_schema *root,
-	                    const std::vector<nlohmann::json_uri> &uris)
+	                    const std::vector<ryml_schema::json_uri> &uris)
 	    : schema(root)
 	{
 		size_t c = 0;
@@ -510,7 +512,7 @@ template <>
 const std::string logical_combination<oneOf>::key = "oneOf";
 
 template <>
-bool logical_combination<allOf>::is_validate_complete(const json &, const json::json_pointer &, error_handler &e, const logical_combination_error_handler &esub, size_t, size_t current_schema_index)
+bool logical_combination<allOf>::is_validate_complete(const json &, const json_pointer &, error_handler &e, const logical_combination_error_handler &esub, size_t, size_t current_schema_index)
 {
 	if (esub) {
 		e.error(esub.error_entry_list_.front().ptr_, esub.error_entry_list_.front().instance_, "at least one subschema has failed, but all of them are required to validate - " + esub.error_entry_list_.front().message_);
@@ -520,13 +522,13 @@ bool logical_combination<allOf>::is_validate_complete(const json &, const json::
 }
 
 template <>
-bool logical_combination<anyOf>::is_validate_complete(const json &, const json::json_pointer &, error_handler &, const logical_combination_error_handler &, size_t count, size_t)
+bool logical_combination<anyOf>::is_validate_complete(const json &, const json_pointer &, error_handler &, const logical_combination_error_handler &, size_t count, size_t)
 {
 	return count == 1;
 }
 
 template <>
-bool logical_combination<oneOf>::is_validate_complete(const json &instance, const json::json_pointer &ptr, error_handler &e, const logical_combination_error_handler &, size_t count, size_t)
+bool logical_combination<oneOf>::is_validate_complete(const json &instance, const json_pointer &ptr, error_handler &e, const logical_combination_error_handler &, size_t count, size_t)
 {
 	if (count > 1)
 		e.error(ptr, instance, "more than one subschema has succeeded, but exactly one of them is required to validate");
@@ -542,12 +544,12 @@ class type_schema : public schema
 	static std::shared_ptr<schema> make(json &schema,
 	                                    json::value_t type,
 	                                    root_schema *,
-	                                    const std::vector<nlohmann::json_uri> &,
+	                                    const std::vector<ryml_schema::json_uri> &,
 	                                    std::set<std::string> &);
 
 	std::shared_ptr<schema> if_, then_, else_;
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const override final
+	void validate(const json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const override final
 	{
 		// depending on the type of instance run the type specific validator - if present
 		auto type = type_[static_cast<uint8_t>(instance.type())];
@@ -589,7 +591,7 @@ class type_schema : public schema
 			}
 		}
 		if (instance.is_null()) {
-			patch.add(nlohmann::json::json_pointer{}, default_value_);
+			patch.add(ryml_schema::json_pointer{}, default_value_);
 		}
 	}
 
@@ -597,8 +599,8 @@ protected:
 	virtual std::shared_ptr<schema> make_for_default_(
 	    std::shared_ptr<::schema> & /* sch */,
 	    root_schema * /* root */,
-	    std::vector<nlohmann::json_uri> & /* uris */,
-	    nlohmann::json &default_value) const override
+	    std::vector<ryml_schema::json_uri> & /* uris */,
+	    ryml_schema::json &default_value) const override
 	{
 		auto result = std::make_shared<type_schema>(*this);
 		result->set_default_value(default_value);
@@ -608,10 +610,10 @@ protected:
 public:
 	type_schema(json &sch,
 	            root_schema *root,
-	            const std::vector<nlohmann::json_uri> &uris)
+	            const std::vector<ryml_schema::json_uri> &uris)
 	    : schema(root), type_(static_cast<uint8_t>(json::value_t::discarded) + 1)
 	{
-		// association between JSON-schema-type and NLohmann-types
+		// association between JSON-schema-type and ryml types
 		static const std::vector<std::pair<std::string, json::value_t>> schema_types = {
 		    {"null", json::value_t::null},
 		    {"object", json::value_t::object},
@@ -663,12 +665,12 @@ public:
 		for (auto &key : known_keywords)
 			sch.erase(key);
 
-		// with nlohmann::json float instance (but number in schema-definition) can be seen as unsigned or integer -
+		// with ryml Tree float instance (but number in schema-definition) can be seen as unsigned or integer -
 		// reuse the number-validator for integer values as well, if they have not been specified explicitly
 		if (type_[static_cast<uint8_t>(json::value_t::number_float)] && !type_[static_cast<uint8_t>(json::value_t::number_integer)])
 			type_[static_cast<uint8_t>(json::value_t::number_integer)] = type_[static_cast<uint8_t>(json::value_t::number_float)];
 
-		// #54: JSON-schema does not differentiate between unsigned and signed integer - nlohmann::json does
+		// #54: JSON-schema does not differentiate between unsigned and signed integer - ryml Tree does
 		// we stick with JSON-schema: use the integer-validator if instance-value is unsigned
 		type_[static_cast<uint8_t>(json::value_t::number_unsigned)] = type_[static_cast<uint8_t>(json::value_t::number_integer)];
 
@@ -758,7 +760,7 @@ class string : public schema
 		return len;
 	}
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override
+	void validate(const json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override
 	{
 		if (minLength_.first) {
 			if (utf8_length(instance.get<std::string>()) < minLength_.second) {
@@ -834,7 +836,7 @@ public:
 			std::get<0>(content_) = true;
 			std::get<1>(content_) = attr.value().get<std::string>();
 
-			// special case for nlohmann::json-binary-types
+			// special case for ryml Tree binary types
 			//
 			// https://github.com/pboettch/json-schema-validator/pull/114
 			//
@@ -905,7 +907,7 @@ class numeric : public schema
 		return std::fabs(res) > std::fabs(eps);
 	}
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override
+	void validate(const json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override
 	{
 		T value = instance; // conversion of json to value_type
 
@@ -977,7 +979,7 @@ public:
 
 class null : public schema
 {
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override
+	void validate(const json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override
 	{
 		if (!instance.is_null())
 			e.error(ptr, instance, "expected to be null");
@@ -990,7 +992,7 @@ public:
 
 class boolean_type : public schema
 {
-	void validate(const json::json_pointer &, const json &, json_patch &, error_handler &) const override {}
+	void validate(const json_pointer &, const json &, json_patch &, error_handler &) const override {}
 
 public:
 	boolean_type(json &, root_schema *root)
@@ -1000,7 +1002,7 @@ public:
 class boolean : public schema
 {
 	bool true_;
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override
+	void validate(const json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override
 	{
 		if (!true_) { // false schema
 			// empty array
@@ -1024,7 +1026,7 @@ class required : public schema
 {
 	const std::vector<std::string> required_;
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override final
+	void validate(const json_pointer &ptr, const json &instance, json_patch &, error_handler &e) const override final
 	{
 		for (auto &r : required_)
 			if (instance.find(r) == instance.end())
@@ -1052,7 +1054,7 @@ class object : public schema
 
 	std::shared_ptr<schema> propertyNames_;
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const override
+	void validate(const json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const override
 	{
 		if (maxProperties_.first && instance.size() > maxProperties_.second)
 			e.error(ptr, instance, "too many properties");
@@ -1116,7 +1118,7 @@ class object : public schema
 public:
 	object(json &sch,
 	       root_schema *root,
-	       const std::vector<nlohmann::json_uri> &uris)
+	       const std::vector<ryml_schema::json_uri> &uris)
 	    : schema(root)
 	{
 		auto attr = sch.find("maxProperties");
@@ -1209,7 +1211,7 @@ class array : public schema
 
 	std::shared_ptr<schema> contains_;
 
-	void validate(const json::json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const override
+	void validate(const json_pointer &ptr, const json &instance, json_patch &patch, error_handler &e) const override
 	{
 		if (maxItems_.first && instance.size() > maxItems_.second)
 			e.error(ptr, instance, "array has too many items");
@@ -1265,7 +1267,7 @@ class array : public schema
 	}
 
 public:
-	array(json &sch, root_schema *root, const std::vector<nlohmann::json_uri> &uris)
+	array(json &sch, root_schema *root, const std::vector<ryml_schema::json_uri> &uris)
 	    : schema(root)
 	{
 		auto attr = sch.find("maxItems");
@@ -1318,7 +1320,7 @@ public:
 std::shared_ptr<schema> type_schema::make(json &schema,
                                           json::value_t type,
                                           root_schema *root,
-                                          const std::vector<nlohmann::json_uri> &uris,
+										  const std::vector<ryml_schema::json_uri> &uris,
                                           std::set<std::string> &kw)
 {
 	switch (type) {
@@ -1355,7 +1357,7 @@ namespace
 std::shared_ptr<schema> schema::make(json &schema,
                                      root_schema *root,
                                      const std::vector<std::string> &keys,
-                                     std::vector<nlohmann::json_uri> uris)
+									 std::vector<ryml_schema::json_uri> uris)
 {
 	// remove URIs which contain plain name identifiers, as sub-schemas cannot be referenced
 	for (auto uri = uris.begin(); uri != uris.end();)
@@ -1441,7 +1443,7 @@ std::shared_ptr<schema> schema::make(json &schema,
 
 class throwing_error_handler : public error_handler
 {
-	void error(const json::json_pointer &ptr, const json &instance, const std::string &message) override
+	void error(const json_pointer &ptr, const json &instance, const std::string &message) override
 	{
 		throw std::invalid_argument(std::string("At ") + ptr.to_string() + " of " + instance.dump() + " - " + message + "\n");
 	}
@@ -1449,9 +1451,7 @@ class throwing_error_handler : public error_handler
 
 } // namespace
 
-namespace nlohmann
-{
-namespace json_schema
+namespace ryml_schema
 {
 
 json_validator::json_validator(schema_loader loader,
@@ -1510,11 +1510,10 @@ json json_validator::validate(const json &instance) const
 
 json json_validator::validate(const json &instance, error_handler &err, const json_uri &initial_uri) const
 {
-	json::json_pointer ptr;
+	json_pointer ptr;
 	json_patch patch;
 	root_->validate(ptr, instance, patch, err, initial_uri);
 	return patch;
 }
 
-} // namespace json_schema
-} // namespace nlohmann
+} // namespace ryml_schema

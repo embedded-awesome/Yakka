@@ -1,6 +1,7 @@
 #pragma once
 
-#include "json.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <filesystem>
 #include <expected>
 #include <string_view>
@@ -8,7 +9,7 @@
 namespace yakka {
 
 // Using declarations for cleaner code
-using json = nlohmann::json;
+using json = ryml::Tree;
 using std::filesystem::path;
 
 class component_database {

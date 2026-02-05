@@ -291,7 +291,7 @@ void component::convert_to_yakka()
           auto name_val = ryml_get_val_as_string(p.find_child("name"));
           
           if (p.has_child("condition")) {
-            // TODO: Handle conditional provides - needs json_pointer equivalent
+            // TODO: Handle conditional provides - needs RymlPointer equivalent
             // For now, just add to features
             auto feat_child = features_node.append_child();
             feat_child << name_val;
@@ -382,7 +382,7 @@ void component::convert_to_yakka()
 }
 
 // Lazy conversion from ryml to json (only when needed)
-const nlohmann::json& component::get_json() const
+const ryml::Tree& component::get_json() const
 {
   if (!json_cache_valid) {
     json = ryml_to_json(tree.rootref());
@@ -391,7 +391,7 @@ const nlohmann::json& component::get_json() const
   return json;
 }
 
-nlohmann::json& component::get_json_mutable()
+ryml::Tree& component::get_json_mutable()
 {
   if (!json_cache_valid) {
     json = ryml_to_json(tree.rootref());

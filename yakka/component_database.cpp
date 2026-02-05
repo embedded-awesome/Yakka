@@ -11,7 +11,7 @@
 
 namespace yakka {
 
-static void process_blueprint(nlohmann::json &database, std::string_view id_string, const c4::yml::ConstNodeRef &blueprint_node);
+static void process_blueprint(ryml::Tree &database, std::string_view id_string, const c4::yml::ConstNodeRef &blueprint_node);
 namespace fs = std::filesystem;
 using error  = std::error_code;
 
@@ -325,7 +325,7 @@ std::expected<void, std::error_code> component_database::parse_slcc_file(const p
           auto feature_node        = f["name"].val();
           std::string feature_name = std::string(feature_node.str, feature_node.len);
           if (f.has_child("condition")) {
-            nlohmann::json node({ { "name", id_string }, { "condition", {} } });
+            ryml::Tree node({ { "name", id_string }, { "condition", {} } });
             for (const auto &c: f["condition"].children()) {
               std::string condition_string = std::string(c.val().str, c.val().len);
               node["condition"].push_back(condition_string);
@@ -350,7 +350,7 @@ std::expected<void, std::error_code> component_database::parse_slcc_file(const p
   }
 }
 
-static void process_blueprint(nlohmann::json &database, std::string_view id_string, const c4::yml::ConstNodeRef &blueprint_node)
+static void process_blueprint(ryml::Tree &database, std::string_view id_string, const c4::yml::ConstNodeRef &blueprint_node)
 {
   // Ignore regex blueprints
   if (blueprint_node.has_child("regex")) {

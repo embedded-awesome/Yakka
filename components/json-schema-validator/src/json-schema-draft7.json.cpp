@@ -6,14 +6,12 @@
  * SPDX-License-Identifier: MIT
  *
  */
-#include <nlohmann/json.hpp>
+#include <ryml/json-schema.hpp>
 
-namespace nlohmann
-{
-namespace json_schema
+namespace ryml_schema
 {
 
-json draft7_schema_builtin = R"( {
+const char *draft7_schema_text = R"( {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "http://json-schema.org/draft-07/schema#",
     "title": "Core schema meta-schema",
@@ -180,6 +178,7 @@ json draft7_schema_builtin = R"( {
         "not": { "$ref": "#" }
     },
     "default": true
-} )"_json;
-}
-} // namespace nlohmann
+} )";
+
+json draft7_schema_builtin = ryml::parse_in_arena(ryml::to_csubstr(draft7_schema_text));
+} // namespace ryml_schema

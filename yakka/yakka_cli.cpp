@@ -333,7 +333,7 @@ int main(int argc, char **argv)
     spdlog::info("Processing additional data: {}", result["data"].as<std::string>());
     const auto additional_data = "{" + result["data"].as<std::string>() + "}";
     ryml::Tree yaml_data       = ryml::parse_in_arena(ryml::to_csubstr(additional_data));
-    nlohmann::json json_data   = ryml_to_json(yaml_data.crootref());
+    ryml::Tree json_data   = ryml_to_json(yaml_data.crootref());
     spdlog::info("Additional data: {}", json_data.dump());
     yakka::json_node_merge(std::vector<std::string>{ "data" }, project.project_summary.rootref(), yaml_data.crootref(), &project.project_schema);
   }

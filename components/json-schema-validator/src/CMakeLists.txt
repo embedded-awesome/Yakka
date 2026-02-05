@@ -50,7 +50,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif ()
 
 target_link_libraries(nlohmann_json_schema_validator PUBLIC
-        nlohmann_json::nlohmann_json)
+        )
 
 if (JSON_VALIDATOR_INSTALL)
     # Normal installation target to system. When using scikit-build check python subdirectory

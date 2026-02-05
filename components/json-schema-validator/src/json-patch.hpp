@@ -1,9 +1,9 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
+#include <ryml/json-schema.hpp>
 #include <string>
 
-namespace nlohmann
+namespace ryml_schema
 {
 class JsonPatchFormatException : public std::exception
 {
@@ -24,9 +24,9 @@ public:
 	json_patch(json &&patch);
 	json_patch(const json &patch);
 
-	json_patch &add(const json::json_pointer &, json value);
-	json_patch &replace(const json::json_pointer &, json value);
-	json_patch &remove(const json::json_pointer &);
+	json_patch &add(const json_pointer &, json value);
+	json_patch &replace(const json_pointer &, json value);
+	json_patch &remove(const json_pointer &);
 
 	json &get_json() { return j_; }
 	const json &get_json() const { return j_; }
@@ -34,8 +34,8 @@ public:
 	operator json() const { return j_; }
 
 private:
-	json j_ = nlohmann::json::array();
+	json j_ = json();
 
 	static void validateJsonPatch(json const &patch);
 };
-} // namespace nlohmann
+} // namespace ryml_schema

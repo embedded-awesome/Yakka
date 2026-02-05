@@ -1,82 +1,62 @@
 #include "yakka_blueprint.hpp"
+#include "utilities.hpp"
 #include <iostream>
 
 namespace yakka {
-blueprint::blueprint(const std::string &target, const nlohmann::json &blueprint, const std::string &parent_path)
+blueprint::blueprint(const std::string &target, ryml::Tree blueprint_data, const std::string &parent_path)
 {
   this->target      = target;
   this->parent_path = parent_path;
+  this->data        = std::move(blueprint_data);
+  this->process     = ryml::ConstNodeRef();
 
-  if (blueprint.contains("regex"))
-    this->regex = blueprint["regex"].get<std::string>();
+  const auto root = data.crootref();
 
-  if (blueprint.contains("requires"))
-    for (auto &d: blueprint["requires"])
-      this->requirements.push_back(d.get<std::string>());
+  if (root.has_child("regex"))
+    this->regex = ryml_get_val_as_string(root["regex"]);
 
-  if (blueprint.contains("depends"))
-    for (auto &d: blueprint["depends"]) {
-      if (d.is_primitive()) {
-        if (d.front() == ':')
-          this->dependencies.push_back({ dependency::DATA_DEPENDENCY, d.get<std::string>() });
-        else
-          this->dependencies.push_back({ dependency::DEFAULT_DEPENDENCY, d.get<std::string>() });
-      }
-      else if (d.is_object()) {
-        if (d.contains("data")) {
-          if (d["data"].is_array())
-            for (auto &i: d["data"])
-              this->dependencies.push_back({ dependency::DATA_DEPENDENCY, i.get<std::string>() });
-          else
-            this->dependencies.push_back({ dependency::DATA_DEPENDENCY, d["data"].get<std::string>() });
-        } else if (d.contains("dependency_file")) {
-          this->dependencies.push_back({ dependency::DEPENDENCY_FILE_DEPENDENCY, d["dependency_file"].get<std::string>() });
-        }
-      }
+  if (root.has_child("requires")) {
+    const auto requires = root["requires"];
+    if (requires.is_seq()) {
+      for (const auto &d: requires.children())
+        this->requirements.push_back(ryml_get_val_as_string(d));
     }
-
-  if (blueprint.contains("process"))
-    process = blueprint["process"];
-
-  if (blueprint.contains("group"))
-    this->task_group = blueprint["group"].get<std::string>();
-}
-
-nlohmann::json blueprint::as_json() const
-{
-  nlohmann::json j;
-  j["target"] = target;
-
-  if (!regex.has_value())
-    j["regex"] = regex.value();
-
-  if (!requirements.empty())
-    j["requires"] = requirements;
-
-  if (!dependencies.empty()) {
-    nlohmann::json deps = nlohmann::json::array();
-    for (const auto &dep: dependencies) {
-      if (dep.type == dependency::DATA_DEPENDENCY) {
-        nlohmann::json d;
-        d["data"] = dep.name;
-        deps.push_back(d);
-      } else if (dep.type == dependency::DEPENDENCY_FILE_DEPENDENCY) {
-        nlohmann::json d;
-        d["dependency_file"] = dep.name;
-        deps.push_back(d);
-      } else {
-        deps.push_back(dep.name);
-      }
-    }
-    j["depends"] = deps;
   }
 
-  if (!process.empty())
-    j["process"] = process;
+  if (root.has_child("depends")) {
+    const auto depends = root["depends"];
+    if (depends.is_seq())
+      for (const auto &d: depends.children()) {
+        if (!d.is_map() && d.has_val()) {
+          const auto dep_value = ryml_get_val_as_string(d);
+          if (!dep_value.empty() && dep_value.front() == ':')
+            this->dependencies.push_back({ dependency::DATA_DEPENDENCY, dep_value });
+          else
+            this->dependencies.push_back({ dependency::DEFAULT_DEPENDENCY, dep_value });
+        } else if (d.is_map()) {
+          if (d.has_child("data")) {
+            const auto data_node = d["data"];
+            if (data_node.is_seq())
+              for (const auto &i: data_node.children())
+                this->dependencies.push_back({ dependency::DATA_DEPENDENCY, ryml_get_val_as_string(i) });
+            else
+              this->dependencies.push_back({ dependency::DATA_DEPENDENCY, ryml_get_val_as_string(data_node) });
+          } else if (d.has_child("dependency_file")) {
+            this->dependencies.push_back({ dependency::DEPENDENCY_FILE_DEPENDENCY, ryml_get_val_as_string(d["dependency_file"]) });
+          }
+        }
+      }
+  }
 
-  if (!task_group.empty())
-    j["group"] = task_group;
+  if (root.has_child("process"))
+    process = root["process"];
 
-  return j;
+  if (root.has_child("group"))
+    this->task_group = ryml_get_val_as_string(root["group"]);
+}
+
+const ryml::Tree &blueprint::as_ryml() const
+{
+  return data;
 }
 } // namespace yakka

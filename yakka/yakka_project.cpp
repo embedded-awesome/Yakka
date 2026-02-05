@@ -118,12 +118,12 @@ void project::init_project()
 
 void project::process_requirements(std::shared_ptr<yakka::component> component, const ryml::ConstNodeRef &child_node)
 {
-  // TODO: Implement ryml version - needs json_node_merge, json_pointer, .contains(), .get<>(), .is_string(), .is_array(), .is_object(), .items()
+  // TODO: Implement ryml version - needs json_node_merge, RymlPointer, .contains(), .get<>(), .is_string(), .is_array(), .is_object(), .items()
   // Merge the feature values into the parent component
-  json_node_merge(""_json_pointer, component->json, child_node, &project_schema);
+  json_node_merge(ryml_pointer(""), component->json, child_node, &project_schema);
 
   // Process required components
-  if (child_node.contains("/requires/components"_json_pointer)) {
+  if (ryml_has_path(child_node, ryml_pointer("/requires/components"))) {
     // Add the item/s to the new_component list
     if (child_node["requires"]["components"].is_string())
       unprocessed_components.insert(child_node["requires"]["components"].get<std::string>());
@@ -135,7 +135,7 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
   }
 
   // Process required features
-  if (child_node.contains("/requires/features"_json_pointer)) {
+  if (ryml_has_path(child_node, ryml_pointer("/requires/features"))) {
     const auto node = child_node["requires"]["features"];
     // Add the item/s to the new_features list
     if (node.is_string()) {
@@ -161,7 +161,7 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
   }
 
   // Process provided features
-  if (child_node.contains("/provides/features"_json_pointer)) {
+  if (ryml_has_path(child_node, ryml_pointer("/provides/features"))) {
     auto child_node_provides = child_node["provides"]["features"];
     if (child_node_provides.is_string()) {
       const auto feature = child_node_provides.get<std::string>();
@@ -189,7 +189,7 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
   }
 
   // Process supported components
-  if (child_node.contains("/supports/components"_json_pointer)) {
+  if (ryml_has_path(child_node, ryml_pointer("/supports/components"))) {
     for (const auto &c: required_components)
       if (child_node["supports"]["components"].contains(c)) {
         spdlog::info("Processing component '{}' in {}", c, component->json["name"].get<std::string>());
@@ -198,7 +198,7 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
   }
 
   // Process supported features
-  if (child_node.contains("/supports/features"_json_pointer)) {
+  if (ryml_has_path(child_node, ryml_pointer("/supports/features"))) {
     for (const auto &f: required_features)
       if (child_node["supports"]["features"].contains(f)) {
         spdlog::info("Processing feature '{}' in {}", f, component->json["name"].get<std::string>());
@@ -315,7 +315,7 @@ bool project::add_component(const std::string &component_name, component_databas
   }
 
   // Add all the required components into the unprocessed list
-  if (new_component->json.contains("/requires/components"_json_pointer))
+  if (new_component->json.contains(ryml_pointer("/requires/components")))
     for (const auto &r: new_component->json["requires"]["components"]) {
       unprocessed_components.insert(r.get<std::string>());
       if (r.contains("instance")) {
@@ -325,7 +325,7 @@ bool project::add_component(const std::string &component_name, component_databas
     }
 
   // Add all the required features into the unprocessed list
-  if (new_component->json.contains("/requires/features"_json_pointer))
+  if (new_component->json.contains(ryml_pointer("/requires/features")))
     for (const auto &f: new_component->json["requires"]["features"]) {
       if (f.is_string())
         unprocessed_features.insert(f.get<std::string>());
@@ -338,7 +338,7 @@ bool project::add_component(const std::string &component_name, component_databas
     }
 
   // Add all the provided features into the unprocessed list
-  if (new_component->json.contains("/provides/features"_json_pointer))
+  if (new_component->json.contains(ryml_pointer("/provides/features")))
     for (const auto &f: new_component->json["provides"]["features"]) {
       // unprocessed_features.insert(f.get<std::string>());
       provided_features.insert(f.get<std::string>());
@@ -354,7 +354,7 @@ bool project::add_component(const std::string &component_name, component_databas
       }
     }
 
-  if (new_component->json.contains("/replaces/component"_json_pointer)) {
+  if (new_component->json.contains(ryml_pointer("/replaces/component"))) {
     const auto &replaced = new_component->json["replaces"]["component"].get<std::string>();
 
     if (replacements.contains(replaced)) {
@@ -370,14 +370,14 @@ bool project::add_component(const std::string &component_name, component_databas
   }
 
   // Process all the currently required features. Note new feature will be processed in the features pass
-  if (new_component->json.contains("/supports/features"_json_pointer)) {
+  if (new_component->json.contains(ryml_pointer("/supports/features"))) {
     for (auto &f: required_features)
       if (new_component->json["supports"]["features"].contains(f)) {
         spdlog::info("Processing required feature '{}' in {}", f, component_id);
         process_requirements(new_component, new_component->json["supports"]["features"][f]);
       }
   }
-  if (new_component->json.contains("/supports/components"_json_pointer)) {
+  if (new_component->json.contains(ryml_pointer("/supports/components"))) {
     // Process the new components support for all the currently required components
     for (auto &c: required_components)
       if (new_component->json["supports"]["components"].contains(c)) {
@@ -396,7 +396,7 @@ bool project::add_component(const std::string &component_name, component_databas
 
   // Process all the existing components support for the new component
   for (auto &c: components)
-    if (c->json.contains("/supports/components"_json_pointer / component_id)) {
+    if (c->json.contains(ryml_pointer("/supports/components") / component_id)) {
       // if (c->json.contains("supports") && c->json["supports"].contains("components") && c->json["supports"]["components"].contains(component_id)) {
       spdlog::info("Processing component '{}' in {}", component_id, c->json["name"].get<std::string>());
       process_requirements(c, c->json["supports"]["components"][component_id]);
@@ -417,7 +417,7 @@ bool project::add_feature(const std::string &feature_name)
 
   // Process the feature "supports" for each existing component
   for (auto &c: components)
-    if (c->json.contains("/supports/features"_json_pointer / feature_name)) {
+    if (c->json.contains(ryml_pointer("/supports/features") / feature_name)) {
       // if (c->json.contains("supports") && c->json["supports"].contains("features") && c->json["supports"]["features"].contains(f)) {
       spdlog::info("Processing feature '{}' in {}", feature_name, c->json["name"].get<std::string>());
       process_requirements(c, c->json["supports"]["features"][feature_name]);
@@ -496,7 +496,7 @@ project::state project::process_choice(const std::string &choice_name)
  * @brief Processes all the @ref unprocessed_components and @ref unprocessed_features, adding items to @ref unknown_components if they are not in the component database
  *        It is assumed the caller will process the @ref unknown_components before adding them back to @ref unprocessed_component and calling this again.
  * @return project::state
- */
+  if (ryml_has_path(child_node, ryml_pointer("/supports/components"))) {
 project::state project::evaluate_dependencies()
 {
   //project_has_slcc = false;
@@ -705,7 +705,7 @@ void project::evaluate_choices()
         });
       } else if (value.contains("components")) {
         option_count = value["components"].size();
-        matches      = std::count_if(value["components"].begin(), value["components"].end(), [&](const auto &j) {
+        if (ryml_has_path(child_node, ryml_pointer("/supports/features"))) {
           return required_components.contains(j.template get<std::string>());
         });
       }
@@ -748,7 +748,7 @@ void project::generate_project_summary()
 
   // TODO: Implement ryml version - needs json::object()
   if (!project_summary.contains("tools"))
-    project_summary["tools"] = nlohmann::json::object();
+    project_summary["tools"] = ryml::Tree::object();
 
   // Put all YAML nodes into the summary
   for (const auto &c: components) {
@@ -776,8 +776,8 @@ void project::generate_project_summary()
     project_summary["initial"]["features"].push_back(i);
 
   // TODO: Implement ryml version - needs json::object()
-  project_summary["data"]         = nlohmann::json::object();
-  project_summary["host"]         = nlohmann::json::object();
+  project_summary["data"]         = ryml::Tree::object();
+  project_summary["host"]         = ryml::Tree::object();
   project_summary["host"]["name"] = host_os_string;
 }
 
@@ -857,8 +857,8 @@ void project::save_summary()
     // Read the content and compare to the current value, only rewrite if content is different
     std::ifstream template_file_stream(template_contribution_filename);
     // TODO: Implement ryml version - needs json::parse() and json::diff()
-    auto existing_template_contribution = nlohmann::json::parse(template_file_stream);
-    auto patch                          = nlohmann::json::diff(template_contributions, existing_template_contribution);
+    auto existing_template_contribution = ryml::Tree::parse(template_file_stream);
+    auto patch                          = ryml::Tree::diff(template_contributions, existing_template_contribution);
     if (patch.size() == 0) {
       return;
     }
@@ -891,7 +891,7 @@ void project::update_project_data()
 
   // Gather all the required data
   for (const auto &c: components)
-    if (c->json.contains("/requires/data"_json_pointer))
+    if (c->json.contains(ryml_pointer("/requires/data")))
       for (const auto &d: c->json["requires"]["data"]) {
         required_data.insert(d.get<std::string>());
       }
@@ -899,17 +899,17 @@ void project::update_project_data()
   // Merge all the component data into the project summary
   for (const auto &c: components) {
     for (const auto &r: required_data) {
-      // TODO: Implement ryml version - needs json_pointer(), json::array(), json::object()
-      const auto pointer = nlohmann::json::json_pointer(r);
+      // TODO: Implement ryml version - needs RymlPointer(), json::array(), json::object()
+      const auto pointer = RymlPointer(r);
       if (!c->json.contains(pointer)) {
         continue;
       }
 
       if (!project_summary["data"].contains(pointer)) {
         if (c->json[pointer].is_array())
-          project_summary["data"][pointer] = nlohmann::json::array();
+          project_summary["data"][pointer] = ryml::Tree::array();
         else
-          project_summary["data"][pointer] = nlohmann::json::object();
+          project_summary["data"][pointer] = ryml::Tree::object();
       }
 
       json_node_merge(pointer, project_summary["data"][pointer], c->json[pointer], &data_schema);
@@ -984,7 +984,7 @@ void project::create_config_file(const std::shared_ptr<yakka::component> compone
 
   // Create blueprints
   // TODO: Implement ryml version - needs json object construction syntax { { "key", value } }
-  nlohmann::json blueprint = { { "depends", nullptr }, { "process", nullptr } };
+  ryml::Tree blueprint = { { "depends", nullptr }, { "process", nullptr } };
   blueprint["depends"].push_back(config_file_path.string());
   blueprint["depends"].push_back("{{project_output}}/template_contributions.json");
   blueprint["process"].push_back({ { "inja", "{% set input = read_file(\"" + config_file_path.string() + "\" )%}{{replace(input, \"\\bINSTANCE\\b\", \"" + instance_name + "\")}}" } });
@@ -1062,7 +1062,7 @@ void project::process_slc_rules()
           continue;
 
         // TODO: Implement ryml version - needs ternary operator with ryml nodes
-        nlohmann::json temp = p.contains("value") ? p : p["name"];
+        ryml::Tree temp = p.contains("value") ? p : p["name"];
         if (instantiable) {
           if (temp.contains("value"))
             temp["name"] = this->inja_environment.render(temp["name"].get<std::string>(), { { "instance", instance_prefix } });
@@ -1150,7 +1150,7 @@ void project::process_slc_rules()
           const auto target = "{{project_output}}/generated/" + target_file.string();
 
           // TODO: Implement ryml version - lambda parameter needs ryml::NodeRef
-          auto add_generated_item = [&](nlohmann::json &node) {
+          auto add_generated_item = [&](ryml::Tree &node) {
             // Create generated items
             if (target_file.extension() == ".c" || target_file.extension() == ".cpp")
               node["generated"]["sources"].push_back(target);
@@ -1166,7 +1166,7 @@ void project::process_slc_rules()
 
           // Create blueprints
           // TODO: Implement ryml version - needs json object construction syntax { { "key", value } }
-          nlohmann::json blueprint = { { "depends", nullptr }, { "process", nullptr } };
+          ryml::Tree blueprint = { { "depends", nullptr }, { "process", nullptr } };
           blueprint["depends"].push_back({ { c->json["directory"].get<std::string>() + "/" + template_file.string() } });
           blueprint["depends"].push_back({ { "{{project_output}}/template_contributions.json" } });
           blueprint["process"].push_back({ { "jinja", "-t " + c->json["directory"].get<std::string>() + "/" + template_file.string() + " -d {{project_output}}/template_contributions.json" } });
@@ -1191,7 +1191,7 @@ void project::process_slc_rules()
 
     // Process toolchain settings
     // TODO: Implement ryml version - needs json::object(), json::array()
-    project_summary["toolchain_settings"] = nlohmann::json::object();
+    project_summary["toolchain_settings"] = ryml::Tree::object();
     for (const auto &c: components) {
       if (c->json.contains("toolchain_settings") == false)
         continue;
@@ -1205,7 +1205,7 @@ void project::process_slc_rules()
           if (project_summary["toolchain_settings"][key].is_array())
             project_summary["toolchain_settings"][key].push_back(s["value"]);
           else
-            project_summary["toolchain_settings"][key] = nlohmann::json::array({ project_summary["toolchain_settings"][key], s["value"] });
+            project_summary["toolchain_settings"][key] = ryml::Tree::array({ project_summary["toolchain_settings"][key], s["value"] });
         else
           project_summary["toolchain_settings"][key] = s["value"];
       }
@@ -1214,7 +1214,7 @@ void project::process_slc_rules()
 
   // Go through the template_contributions and sort via priorities
   // TODO: Implement ryml version - local json variables for sorting
-  nlohmann::json new_contributions;
+  ryml::Tree new_contributions;
   for (auto &item: template_contributions) {
     while (!item.is_null() && item.size() > 0) {
       // Remove the item with the lowest priority
@@ -1227,7 +1227,7 @@ void project::process_slc_rules()
           lowest_priority_index = i;
         }
       }
-      nlohmann::json entry = item[lowest_priority_index];
+      ryml::Tree entry = item[lowest_priority_index];
       spdlog::info("Ordering '{}' at priority {}", entry["name"].get<std::string>(), lowest_priority);
 
       //const std::string value = entry["value"].get<std::string>();
@@ -1248,7 +1248,13 @@ void project::process_blueprints(const std::shared_ptr<component> c)
         continue;
       }
       spdlog::info("Additional blueprint: {}", blueprint_string);
-      blueprint_database.blueprints.insert({ blueprint_string, std::make_shared<blueprint>(blueprint_string, b_value, c->json["directory"].get<std::string>()) });
+      try {
+        const auto json_text = b_value.dump();
+        ryml::Tree blueprint_tree = ryml::parse_in_arena(ryml::to_csubstr(json_text));
+        blueprint_database.blueprints.insert({ blueprint_string, std::make_shared<blueprint>(blueprint_string, std::move(blueprint_tree), c->json["directory"].get<std::string>()) });
+      } catch (const std::exception &e) {
+        spdlog::error("Failed to convert blueprint '{}' to ryml: {}", blueprint_string, e.what());
+      }
     }
   }
 }

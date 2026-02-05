@@ -1,6 +1,8 @@
 #pragma once
 
 #include "yakka_blueprint.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <string>
 #include <vector>
 #include <memory>
@@ -16,7 +18,7 @@ struct blueprint_match {
 
 class blueprint_database {
 public:
-  std::vector<std::shared_ptr<blueprint_match>> find_match(const std::string target, const nlohmann::json &project_summary);
+  std::vector<std::shared_ptr<blueprint_match>> find_match(const std::string target, const ryml::Tree &project_summary);
 
   void load(const std::filesystem::path filename);
   void save(const std::filesystem::path filename);

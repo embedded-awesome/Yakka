@@ -1,5 +1,6 @@
 #pragma once
-#include "nlohmann/json.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include "inja.hpp"
 #include "yakka.hpp"
 #include "yakka_project.hpp"

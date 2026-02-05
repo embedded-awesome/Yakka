@@ -5,26 +5,26 @@
 
 namespace yakka {
 
-class custom_error_handler : public nlohmann::json_schema::basic_error_handler {
+class custom_error_handler : public ryml_schema::basic_error_handler {
 public:
   std::string component_name;
   bool error_triggered = false;
-  void error(const nlohmann::json::json_pointer &ptr, const nlohmann::json &instance, const std::string &message) override
+  void error(const RymlPointer &ptr, const ryml::Tree &instance, const std::string &message) override
   {
-    nlohmann::json_schema::basic_error_handler::error(ptr, instance, message);
+    ryml_schema::basic_error_handler::error(ptr, instance, message);
     spdlog::error("Validation error in '{}': {} - {} :- {}", component_name, ptr.to_string(), instance.dump(3), message);
     error_triggered = true;
   }
 };
 
-void schema::add_schema_data(const nlohmann::json &schema_data)
+void schema::add_schema_data(const ryml::Tree &schema_data)
 {
-  const auto schema_json_pointer = "/properties"_json_pointer;
-  json_node_merge(schema_json_pointer, this->schema_data["properties"], schema_data);
+  const auto schema_ryml_pointer = ryml_pointer("/properties");
+  json_node_merge(schema_ryml_pointer, this->schema_data["properties"], schema_data);
   validator_updated = false;
 }
 
-bool schema::validate(const nlohmann::json &data, std::string id)
+bool schema::validate(const ryml::Tree &data, std::string id)
 {
   custom_error_handler err;
   err.component_name = id;
@@ -45,9 +45,9 @@ bool schema::validate(const nlohmann::json &data, std::string id)
   return !err.error_triggered;
 }
 
-schema::merge_strategy schema::get_merge_strategy(const nlohmann::json::json_pointer &path) const
+schema::merge_strategy schema::get_merge_strategy(const RymlPointer &path) const
 {
-  nlohmann::json temp_schema = this->schema_data;
+  ryml::Tree temp_schema = this->schema_data;
   std::string path_str = path.to_string();
   for (const auto &part_range: std::views::split(path_str, '/')) {
     std::string part(part_range.begin(), part_range.end());
@@ -75,11 +75,11 @@ schema::merge_strategy schema::get_merge_strategy(const nlohmann::json::json_poi
   return schema::merge_strategy::Default;
 }
 
-yakka_schema_validator::yakka_schema_validator() : yakka_validator(nullptr, nlohmann::json_schema::default_string_format_check), slcc_validator(nullptr, nlohmann::json_schema::default_string_format_check)
+yakka_schema_validator::yakka_schema_validator() : yakka_validator(nullptr, ryml_schema::default_string_format_check), slcc_validator(nullptr, ryml_schema::default_string_format_check)
 {
   // This should be straight JSON without conversion
-  yakka_schema = YAML::Load(yakka_component_schema_yaml).as<nlohmann::json>();
-  slcc_schema  = YAML::Load(slcc_schema_yaml).as<nlohmann::json>();
+  yakka_schema = YAML::Load(yakka_component_schema_yaml).as<ryml::Tree>();
+  slcc_schema  = YAML::Load(slcc_schema_yaml).as<ryml::Tree>();
   yakka_validator.set_root_schema(yakka_schema);
   slcc_validator.set_root_schema(slcc_schema);
 }

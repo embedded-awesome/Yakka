@@ -7,7 +7,7 @@
 #include <regex>
 
 namespace yakka {
-std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(const std::string target, const nlohmann::json &project_summary)
+std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(const std::string target, const ryml::Tree &project_summary)
 {
   bool blueprint_match_found = false;
   std::vector<std::shared_ptr<blueprint_match>> result;
@@ -42,9 +42,9 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
     local_inja_env.add_callback("$", 1, [&match](const inja::Arguments &args) {
       const int index = args[0]->get<int>();
       if (index < match->regex_matches.size())
-        return nlohmann::json(match->regex_matches[index]);
+        return ryml::Tree(match->regex_matches[index]);
 
-      return nlohmann::json();
+      return ryml::Tree();
     });
     local_inja_env.add_callback("curdir", 0, [&match](const inja::Arguments &args) {
       return match->blueprint->parent_path;
@@ -53,7 +53,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
       return local_inja_env.render(args[0]->get<std::string>(), project_summary);
     });
     local_inja_env.add_callback("select", 1, [&](const inja::Arguments &args) {
-      nlohmann::json choice;
+      ryml::Tree choice;
       for (const auto &option: args.at(0)->items()) {
         const auto option_type = option.key();
         const auto option_name = option.value();
@@ -65,8 +65,8 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
       return choice;
     });
     local_inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
-      nlohmann::json aggregate;
-      auto path = nlohmann::json::json_pointer{args[0]->get<std::string>()};
+      ryml::Tree aggregate;
+      auto path = RymlPointer{args[0]->get<std::string>()};
       // Loop through components, check if object path exists, if so add it to the aggregate
       for (const auto &[c_key, c_value]: project_summary["components"].items()) {
         // auto v = json_path(c.value(), path);
@@ -161,17 +161,17 @@ void blueprint_database::load(const std::filesystem::path filename)
 
 void blueprint_database::save(const std::filesystem::path filename)
 {
-  nlohmann::json output;
+  ryml::Tree output;
 
   for (const auto &bp: blueprints) {
-    nlohmann::json blueprint;
+    ryml::Tree blueprint;
     blueprint["target"]      = bp.second->target;
     blueprint["regex"]       = bp.second->regex.value_or("");
     blueprint["parent_path"] = bp.second->parent_path;
 
-    nlohmann::json dependencies = nlohmann::json::array();
+    ryml::Tree dependencies = ryml::Tree::array();
     for (const auto &dep: bp.second->dependencies) {
-      nlohmann::json dependency;
+      ryml::Tree dependency;
       dependency["type"] = dep.type;
       dependency["name"] = dep.name;
       dependencies.push_back(dependency);

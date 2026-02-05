@@ -1,4 +1,4 @@
-#include <nlohmann/json-schema.hpp>
+#include <ryml/json-schema.hpp>
 
 #include "smtp-address-validator.hpp"
 
@@ -339,9 +339,7 @@ void rfc3986_uri_check(const std::string &value)
 
 } // namespace
 
-namespace nlohmann
-{
-namespace json_schema
+namespace ryml_schema
 {
 /**
  * Checks validity for built-ins by converting the definitions given as ABNF in the linked RFC from
@@ -350,65 +348,65 @@ namespace json_schema
  *
  * @see https://json-schema.org/latest/json-schema-validation.html
  */
-void default_string_format_check(const std::string &format, const std::string &value)
+void default_string_format_check(const std::string &format, const std::string &value, const json &instance, error_handler &handler)
 {
-	if (format == "date-time") {
-		rfc3339_date_time_check(value);
-	} else if (format == "date") {
-		rfc3339_date_check(value);
-	} else if (format == "time") {
-		rfc3339_time_check(value);
-	} else if (format == "uri") {
-		rfc3986_uri_check(value);
-	} else if (format == "email") {
-		if (!is_ascii(value)) {
-			throw std::invalid_argument(value + " contains non-ASCII values, not RFC 5321 compliant.");
-		}
-		if (!is_address(&*value.begin(), &*value.end())) {
-			throw std::invalid_argument(value + " is not a valid email according to RFC 5321.");
-		}
-	} else if (format == "idn-email") {
-		if (!is_address(&*value.begin(), &*value.end())) {
-			throw std::invalid_argument(value + " is not a valid idn-email according to RFC 6531.");
-		}
-	} else if (format == "hostname") {
-		static const REGEX_NAMESPACE::regex hostRegex{hostname};
-		if (!REGEX_NAMESPACE::regex_match(value, hostRegex)) {
-			throw std::invalid_argument(value + " is not a valid hostname according to RFC 3986 Appendix A.");
-		}
-	} else if (format == "ipv4") {
-		const static REGEX_NAMESPACE::regex ipv4Regex{"^" + ipv4Address + "$"};
-		if (!REGEX_NAMESPACE::regex_match(value, ipv4Regex)) {
-			throw std::invalid_argument(value + " is not an IPv4 string according to RFC 2673.");
-		}
-	} else if (format == "ipv6") {
-		static const REGEX_NAMESPACE::regex ipv6Regex{ipv6Address};
-		if (!REGEX_NAMESPACE::regex_match(value, ipv6Regex)) {
-			throw std::invalid_argument(value + " is not an IPv6 string according to RFC 5954.");
-		}
-	} else if (format == "uuid") {
-		static const REGEX_NAMESPACE::regex uuidRegex{uuid};
-		if (!REGEX_NAMESPACE::regex_match(value, uuidRegex)) {
-			throw std::invalid_argument(value + " is not an uuid string according to RFC 4122.");
-		}
-	} else if (format == "regex") {
-		try {
+	try {
+		if (format == "date-time") {
+			rfc3339_date_time_check(value);
+		} else if (format == "date") {
+			rfc3339_date_check(value);
+		} else if (format == "time") {
+			rfc3339_time_check(value);
+		} else if (format == "uri") {
+			rfc3986_uri_check(value);
+		} else if (format == "email") {
+			if (!is_ascii(value)) {
+				throw std::invalid_argument(value + " contains non-ASCII values, not RFC 5321 compliant.");
+			}
+			if (!is_address(&*value.begin(), &*value.end())) {
+				throw std::invalid_argument(value + " is not a valid email according to RFC 5321.");
+			}
+		} else if (format == "idn-email") {
+			if (!is_address(&*value.begin(), &*value.end())) {
+				throw std::invalid_argument(value + " is not a valid idn-email according to RFC 6531.");
+			}
+		} else if (format == "hostname") {
+			static const REGEX_NAMESPACE::regex hostRegex{hostname};
+			if (!REGEX_NAMESPACE::regex_match(value, hostRegex)) {
+				throw std::invalid_argument(value + " is not a valid hostname according to RFC 3986 Appendix A.");
+			}
+		} else if (format == "ipv4") {
+			const static REGEX_NAMESPACE::regex ipv4Regex{"^" + ipv4Address + "$"};
+			if (!REGEX_NAMESPACE::regex_match(value, ipv4Regex)) {
+				throw std::invalid_argument(value + " is not an IPv4 string according to RFC 2673.");
+			}
+		} else if (format == "ipv6") {
+			static const REGEX_NAMESPACE::regex ipv6Regex{ipv6Address};
+			if (!REGEX_NAMESPACE::regex_match(value, ipv6Regex)) {
+				throw std::invalid_argument(value + " is not an IPv6 string according to RFC 5954.");
+			}
+		} else if (format == "uuid") {
+			static const REGEX_NAMESPACE::regex uuidRegex{uuid};
+			if (!REGEX_NAMESPACE::regex_match(value, uuidRegex)) {
+				throw std::invalid_argument(value + " is not an uuid string according to RFC 4122.");
+			}
+		} else if (format == "regex") {
 			REGEX_NAMESPACE::regex re(value, std::regex::ECMAScript);
-		} catch (std::exception &exception) {
-			throw exception;
-		}
-	} else {
-		/* yet unsupported JSON schema draft 7 built-ins */
-		static const std::vector<std::string> jsonSchemaStringFormatBuiltIns{
-		    "date-time", "time", "date", "email", "idn-email", "hostname", "idn-hostname", "ipv4", "ipv6", "uri",
-		    "uri-reference", "iri", "iri-reference", "uri-template", "json-pointer", "relative-json-pointer", "regex"};
-		if (std::find(jsonSchemaStringFormatBuiltIns.begin(), jsonSchemaStringFormatBuiltIns.end(), format) != jsonSchemaStringFormatBuiltIns.end()) {
-			throw std::logic_error("JSON schema string format built-in " + format + " not yet supported. " +
-			                       "Please open an issue or use a custom format checker.");
-		}
+			(void)re;
+		} else {
+			/* yet unsupported JSON schema draft 7 built-ins */
+			static const std::vector<std::string> jsonSchemaStringFormatBuiltIns{
+			    "date-time", "time", "date", "email", "idn-email", "hostname", "idn-hostname", "ipv4", "ipv6", "uri",
+			    "uri-reference", "iri", "iri-reference", "uri-template", "json-pointer", "relative-json-pointer", "regex"};
+			if (std::find(jsonSchemaStringFormatBuiltIns.begin(), jsonSchemaStringFormatBuiltIns.end(), format) != jsonSchemaStringFormatBuiltIns.end()) {
+				throw std::logic_error("JSON schema string format built-in " + format + " not yet supported. " +
+				                       "Please open an issue or use a custom format checker.");
+			}
 
-		throw std::logic_error("Don't know how to validate " + format);
+			throw std::logic_error("Don't know how to validate " + format);
+		}
+	} catch (const std::exception &e) {
+		handler.error(json_pointer{}, instance, e.what());
 	}
 }
-} // namespace json_schema
-} // namespace nlohmann
+} // namespace ryml_schema

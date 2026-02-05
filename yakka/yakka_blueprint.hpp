@@ -1,7 +1,8 @@
 #pragma once
 
 #include "taskflow.hpp"
-#include "json.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <future>
 #include <optional>
 #include <filesystem>
@@ -17,12 +18,13 @@ struct blueprint {
   std::optional<std::string> regex;
   std::vector<std::string> requirements;
   std::vector<dependency> dependencies; // Unprocessed dependencies. Raw values as found in the YAML.
-  nlohmann::json process;
+  ryml::Tree data;
+  ryml::ConstNodeRef process;
   std::string parent_path;
   std::string task_group;
 
-  blueprint(const std::string &target, const nlohmann::json &blueprint, const std::string &parent_path);
+  blueprint(const std::string &target, ryml::Tree blueprint_data, const std::string &parent_path);
 
-  nlohmann::json as_json() const;
+  const ryml::Tree &as_ryml() const;
 };
 } // namespace yakka

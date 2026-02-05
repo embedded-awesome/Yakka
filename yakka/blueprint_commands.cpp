@@ -171,7 +171,7 @@ process_return template_command(std::string target, const ryml::ConstNodeRef &co
   try {
     std::string template_string;
     std::string template_filename;
-    nlohmann::json data;
+    ryml::Tree data;
     if (command.is_string()) {
       captured_output = try_render(inja_env, command.get<std::string>(), data.is_null() ? project_summary : data);
       return { captured_output, 0 };
@@ -182,7 +182,7 @@ process_return template_command(std::string target, const ryml::ConstNodeRef &co
         if (data_filename.extension() == ".yaml" || data_filename.extension() == ".yml") {
           YAML::Node data_yaml = YAML::LoadFile(data_filename.string());
           if (!data_yaml.IsNull())
-            data = data_yaml.as<nlohmann::json>();
+            data = data_yaml.as<ryml::Tree>();
         } else if (data_filename.extension() == ".json") {
           std::ifstream i(data_filename);
           i >> data;
@@ -191,7 +191,7 @@ process_return template_command(std::string target, const ryml::ConstNodeRef &co
         std::string data_string = try_render(inja_env, command["data"].get<std::string>(), project_summary);
         YAML::Node data_yaml    = YAML::Load(data_string);
         if (!data_yaml.IsNull())
-          data = data_yaml.as<nlohmann::json>();
+          data = data_yaml.as<ryml::Tree>();
       }
 
       if (command.contains("template_file")) {
@@ -240,7 +240,7 @@ process_return save_command(std::string target, const ryml::ConstNodeRef &comman
       spdlog::error("Data dependency pointer must start with '/data'");
       return { "", -1 };
     }
-    auto pointer          = nlohmann::json::json_pointer{ save_filename.substr(6) };
+    auto pointer          = RymlPointer{ save_filename.substr(6) };
     project_data[pointer] = captured_output;
     return { captured_output, 0 };
   }
@@ -417,7 +417,7 @@ process_return copy_command(std::string target, const ryml::ConstNodeRef &comman
 {
   // TODO: Convert to use ryml helper functions when available
   std::string destination;
-  nlohmann::json source;
+  ryml::Tree source;
   try {
 
     destination = try_render(inja_env, command["destination"].get<std::string>(), project_summary);
@@ -431,7 +431,7 @@ process_return copy_command(std::string target, const ryml::ConstNodeRef &comman
           return { "", -1 };
         }
         std::string list_yaml_string = try_render(inja_env, command["yaml_list"].get<std::string>(), project_summary);
-        source                       = YAML::Load(list_yaml_string).as<nlohmann::json>();
+        source                       = YAML::Load(list_yaml_string).as<ryml::Tree>();
       } else {
         spdlog::error("'copy' command does not have 'source' or 'yaml_list'");
         return { "", -1 };
@@ -495,7 +495,7 @@ process_return cat_command(std::string target, const ryml::ConstNodeRef &command
   return { captured_output, 0 };
 }
 
-// blueprint_commands["new_project"] = [this](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
+// blueprint_commands["new_project"] = [this](std::string target, const ryml::Tree &command, std::string captured_output, const ryml::Tree &project_summary, ryml::Tree &project_data, inja::Environment &inja_env) -> yakka::process_return {
 //   const auto project_string = command.get<std::string>();
 //   yakka::project new_project(project_string, workspace);
 //   new_project.init_project(project_string);
@@ -505,7 +505,7 @@ process_return cat_command(std::string target, const ryml::ConstNodeRef &command
 // blueprint_commands["as_json"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
 process_return as_json_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
-  const auto temp_json = nlohmann::json::parse(captured_output);
+  const auto temp_json = ryml::Tree::parse(captured_output);
   return { temp_json.dump(2), 0 };
 }
 
@@ -532,12 +532,12 @@ process_return diff_command(std::string target, const ryml::ConstNodeRef &comman
     spdlog::error("'diff' command invalid");
     return { "", -1 };
   }
-  nlohmann::json left;
-  nlohmann::json right;
+  ryml::Tree left;
+  ryml::Tree right;
   if (command.contains("left_file")) {
     const std::filesystem::path left_file = try_render(inja_env, command["left_file"].get<std::string>(), project_summary);
     std::ifstream ifs(left_file);
-    left = nlohmann::json::parse(ifs);
+    left = ryml::Tree::parse(ifs);
   } else if (command.contains("left")) {
     left = try_render(inja_env, command["left"].get<std::string>(), project_summary);
   }
@@ -545,12 +545,12 @@ process_return diff_command(std::string target, const ryml::ConstNodeRef &comman
   if (command.contains("right_file")) {
     const std::filesystem::path right_file = try_render(inja_env, command["right_file"].get<std::string>(), project_summary);
     std::ifstream ifs(right_file);
-    right = nlohmann::json::parse(ifs);
+    right = ryml::Tree::parse(ifs);
   } else if (command.contains("right")) {
     right = try_render(inja_env, command["right"].get<std::string>(), project_summary);
   }
 
-  nlohmann::json patch = nlohmann::json::diff(left, right);
+  ryml::Tree patch = ryml::Tree::diff(left, right);
   return { patch.dump(), 0 };
 }
 

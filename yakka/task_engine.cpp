@@ -168,7 +168,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
               return;
             }
           }
-        } else if (!construct_task->match->blueprint->process.is_null()) {
+        } else if (construct_task->match->blueprint->process.valid()) {
           auto max_element = todo_list.end();
           for (auto j: construct_task->match->dependencies) {
             auto temp         = todo_list.equal_range(j);
@@ -224,78 +224,78 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
   }
 }
 
-std::pair<std::string, int> task_engine::run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, nlohmann::json &project_data)
+std::pair<std::string, int> task_engine::run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::Tree &project_data)
 {
   std::string captured_output = "";
   inja::Environment inja_env  = inja::Environment();
   std::string curdir_path     = blueprint->blueprint->parent_path;
-  nlohmann::json data_store;
+  ryml::Tree data_store;
 
   add_common_template_commands(inja_env);
 
   inja_env.add_callback("store", 3, [&](const inja::Arguments &args) {
     if (args[0] && args[1]) {
-      nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+      RymlPointer ptr{ args[0]->get<std::string>() };
       auto key = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
       if (key.front() == '/')
-        ptr = ptr / nlohmann::json::json_pointer{ key };
+        ptr = ptr / RymlPointer{ key };
       else
         ptr = ptr / key;
 
       data_store[ptr] = *args[2];
     }
-    return nlohmann::json{};
+    return ryml::Tree{};
   });
   inja_env.add_callback("store", 2, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+    RymlPointer ptr{ args[0]->get<std::string>() };
     data_store[ptr] = *args[1];
-    return nlohmann::json{};
+    return ryml::Tree{};
   });
   inja_env.add_callback("push_back", 2, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+    RymlPointer ptr{ args[0]->get<std::string>() };
     if (!data_store.contains(ptr)) {
-      data_store[ptr] = nlohmann::json::array();
+      data_store[ptr] = ryml::Tree::array();
     }
     data_store[ptr].push_back(*args[1]);
-    return nlohmann::json{};
+    return ryml::Tree{};
   });
   inja_env.add_callback("push_back", 3, [&](const inja::Arguments &args) {
     if (args[0] && args[1]) {
-      nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+      RymlPointer ptr{ args[0]->get<std::string>() };
       auto key = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
       if (key.front() == '/')
-        ptr = ptr / nlohmann::json::json_pointer{ key };
+        ptr = ptr / RymlPointer{ key };
       else
         ptr = ptr / key;
 
       if (!data_store.contains(ptr)) {
-        data_store[ptr] = nlohmann::json::array();
+        data_store[ptr] = ryml::Tree::array();
       }
       data_store[ptr].push_back(*args[2]);
     }
-    return nlohmann::json{};
+    return ryml::Tree{};
   });
   inja_env.add_callback("unique", 1, [&](const inja::Arguments &args) {
-    nlohmann::json filtered;
-    std::copy_if(args[0]->cbegin(), args[0]->cend(), std::back_inserter(filtered), [&](const nlohmann::json &item) {
+    ryml::Tree filtered;
+    std::copy_if(args[0]->cbegin(), args[0]->cend(), std::back_inserter(filtered), [&](const ryml::Tree &item) {
       return std::find(filtered.begin(), filtered.end(), item.get<std::string>()) == filtered.end();
     });
     return filtered;
   });
 
   inja_env.add_callback("fetch", 2, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+    RymlPointer ptr{ args[0]->get<std::string>() };
     auto key = args[1]->get<std::string>();
     return data_store[ptr][key];
   });
   inja_env.add_callback("fetch", 1, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+    RymlPointer ptr{ args[0]->get<std::string>() };
     return data_store[ptr];
   });
   inja_env.add_callback("erase", 1, [&](const inja::Arguments &args) {
-    nlohmann::json::json_pointer ptr{ args[0]->get<std::string>() };
+    RymlPointer ptr{ args[0]->get<std::string>() };
     data_store[ptr].clear();
-    return nlohmann::json{};
+    return ryml::Tree{};
   });
   inja_env.add_callback("$", 1, [&blueprint](const inja::Arguments &args) {
     return blueprint->regex_matches[args[0]->get<int>()];
@@ -315,8 +315,8 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   });
 
   inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
-    nlohmann::json aggregate;
-    auto path = nlohmann::json::json_pointer{ args[0]->get<std::string>() };
+    ryml::Tree aggregate;
+    auto path = RymlPointer{ args[0]->get<std::string>() };
     // Loop through components, check if object path exists, if so add it to the aggregate
     for (const auto &[c_key, c_value]: project.project_summary["components"].items()) {
       // auto v = json_path(c.value(), path);
@@ -356,14 +356,14 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     const auto component_name     = args[0]->get<std::string>();
     const auto component_location = project.workspace.find_component(component_name);
     if (!component_location.has_value()) {
-      return nlohmann::json{};
+      return ryml::Tree{};
     }
     auto [component_path, package_path] = component_location.value();
     yakka::component new_component;
     if (new_component.parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
       return new_component.json;
     } else {
-      return nlohmann::json{};
+      return ryml::Tree{};
     }
   });
   inja_env.set_include_callback([&](const std::filesystem::path &path, const std::string &template_name) {
@@ -382,18 +382,23 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
   // Note: A blueprint process is a sequence of maps
-  for (const auto &command_entry: blueprint->blueprint->process) {
-    assert(command_entry.is_object());
+  if (blueprint->blueprint->process.valid() && blueprint->blueprint->process.is_seq())
+    for (const auto &command_entry: blueprint->blueprint->process.children()) {
+      if (!command_entry.is_map() || command_entry.num_children() != 1) {
+        spdlog::error("Command entry for target '{}' is malformed", target);
+        return { "", -1 };
+      }
 
-    if (command_entry.size() != 1) {
-      spdlog::error("Command '{}' for target '{}' is malformed", command_entry.begin().key(), target);
-      return { "", -1 };
-    }
+      // Take the first entry in the map as the command
+      auto command = command_entry.child(0);
+      if (!command.has_key()) {
+        spdlog::error("Command entry for target '{}' is missing a key", target);
+        return { "", -1 };
+      }
 
-    // Take the first entry in the map as the command
-    auto command                   = command_entry.begin();
-    const std::string command_name = command.key();
-    int retcode                    = 0;
+      std::string command_name;
+      c4::from_chars(command.key(), &command_name);
+      int retcode = 0;
 
     try {
       if (project.project_summary["tools"].contains(command_name)) {
@@ -402,7 +407,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 
         command_text.append(tool);
 
-        std::string arg_text = command.value().get<std::string>();
+        std::string arg_text = ryml_get_val_as_string(command);
 
         // Apply template engine
         arg_text = try_render(inja_env, arg_text, project.project_summary);
@@ -422,7 +427,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       }
       // Else check if it is a built-in command
       else if (blueprint_commands.contains(command_name)) {
-        yakka::process_return test_result = blueprint_commands.at(command_name)(target, command.value(), captured_output, project.project_summary, project_data, inja_env);
+        yakka::process_return test_result = blueprint_commands.at(command_name)(target, command, captured_output, project.project_summary, project_data, inja_env);
         captured_output                   = test_result.result;
         retcode                           = test_result.retcode;
       } else {
@@ -431,12 +436,12 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 
       if (retcode < 0)
         return { captured_output, retcode };
-    } catch (std::exception &e) {
-      spdlog::error("Failed to run command: '{}' as part of {}", command_name, target);
-      spdlog::error("{}", e.what());
-      throw e;
+      } catch (std::exception &e) {
+        spdlog::error("Failed to run command: '{}' as part of {}", command_name, target);
+        spdlog::error("{}", e.what());
+        throw e;
+      }
     }
-  }
 
   std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
   auto duration                                     = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();

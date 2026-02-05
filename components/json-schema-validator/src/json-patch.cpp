@@ -1,13 +1,13 @@
 #include "json-patch.hpp"
 
-#include <nlohmann/json-schema.hpp>
+#include <ryml/json-schema.hpp>
 
 namespace
 {
 
 // originally from http://jsonpatch.com/, http://json.schemastore.org/json-patch
 // with fixes
-const nlohmann::json patch_schema = R"patch({
+const char *patch_schema_text = R"patch({
     "title": "JSON schema for JSONPatch files",
     "$schema": "http://json-schema.org/draft-04/schema#",
     "type": "array",
@@ -65,10 +65,10 @@ const nlohmann::json patch_schema = R"patch({
             "type": "string"
         }
     }
-})patch"_json;
+})patch";
 } // namespace
 
-namespace nlohmann
+namespace ryml_schema
 {
 
 json_patch::json_patch(json &&patch)
@@ -83,33 +83,57 @@ json_patch::json_patch(const json &patch)
 	validateJsonPatch(j_);
 }
 
-json_patch &json_patch::add(const json::json_pointer &ptr, json value)
+json_patch &json_patch::add(const json_pointer &ptr, json value)
 {
-	j_.push_back(json{{"op", "add"}, {"path", ptr.to_string()}, {"value", std::move(value)}});
+    // Minimal patch representation: list of maps
+    ryml::NodeRef root = j_.rootref();
+    if (!root.valid())
+        root = j_.rootref();
+    if (!root.is_seq())
+        root |= ryml::SEQ;
+    ryml::NodeRef entry = root.append_child();
+    entry |= ryml::MAP;
+    entry["op"] << "add";
+    entry["path"] << ptr.to_string();
+    entry["value"] = value.rootref();
 	return *this;
 }
 
-json_patch &json_patch::replace(const json::json_pointer &ptr, json value)
+json_patch &json_patch::replace(const json_pointer &ptr, json value)
 {
-	j_.push_back(json{{"op", "replace"}, {"path", ptr.to_string()}, {"value", std::move(value)}});
+    ryml::NodeRef root = j_.rootref();
+    if (!root.is_seq())
+        root |= ryml::SEQ;
+    ryml::NodeRef entry = root.append_child();
+    entry |= ryml::MAP;
+    entry["op"] << "replace";
+    entry["path"] << ptr.to_string();
+    entry["value"] = value.rootref();
 	return *this;
 }
 
-json_patch &json_patch::remove(const json::json_pointer &ptr)
+json_patch &json_patch::remove(const json_pointer &ptr)
 {
-	j_.push_back(json{{"op", "remove"}, {"path", ptr.to_string()}});
+    ryml::NodeRef root = j_.rootref();
+    if (!root.is_seq())
+        root |= ryml::SEQ;
+    ryml::NodeRef entry = root.append_child();
+    entry |= ryml::MAP;
+    entry["op"] << "remove";
+    entry["path"] << ptr.to_string();
 	return *this;
 }
 
 void json_patch::validateJsonPatch(json const &patch)
 {
 	// static put here to have it created at the first usage of validateJsonPatch
-	static nlohmann::json_schema::json_validator patch_validator(patch_schema);
+    static json patch_schema;
+    if (!patch_schema.rootref().valid()) {
+        patch_schema = ryml::parse_in_arena(ryml::to_csubstr(patch_schema_text));
+    }
+    static ryml_schema::json_validator patch_validator(patch_schema);
 
 	patch_validator.validate(patch);
-
-	for (auto const &op : patch)
-		json::json_pointer(op["path"].get<std::string>());
 }
 
-} // namespace nlohmann
+} // namespace ryml_schema
