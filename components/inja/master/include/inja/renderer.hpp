@@ -17,7 +17,6 @@
 
 #include "config.hpp"
 #include "exceptions.hpp"
-#include "fmt/fmt.h"
 #include "function_storage.hpp"
 #include "node.hpp"
 #include "template.hpp"
@@ -219,7 +218,7 @@ class Renderer : public NodeVisitor {
     } else if (additional_data.contains(node.ptr)) {
       data_eval_stack.push(&(additional_data[node.ptr]));
     } else if (data_input->contains(node.ptr)) {
-      data_eval_stack.push(&(*data_input)[node.ptr]);
+      data_eval_stack.push(&data_input->at(node.ptr));
     } else {
       // Try to evaluate as a no-argument callback
       const auto function_data = function_storage.find_function(node.name, 0);
@@ -351,7 +350,7 @@ class Renderer : public NodeVisitor {
       if (args[0]->is_object()) {
         auto key = args[1]->get<std::string>();
         if (key[0] == '/') {
-          nlohmann::json::json_pointer ptr(key);
+          json::json_pointer ptr(key);
           data_eval_stack.push(&args[0]->at(ptr));
         }
         else
@@ -429,13 +428,23 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Max: {
       const auto args = get_arguments<1>(node);
-      const auto result = std::max_element(args[0]->begin(), args[0]->end());
-      data_eval_stack.push(&(*result));
+      auto values = args[0]->get<std::vector<json>>();
+      if (values.empty()) {
+        make_result(nullptr);
+      } else {
+        const auto result = std::max_element(values.begin(), values.end());
+        make_result(json(*result));
+      }
     } break;
     case Op::Min: {
       const auto args = get_arguments<1>(node);
-      const auto result = std::min_element(args[0]->begin(), args[0]->end());
-      data_eval_stack.push(&(*result));
+      auto values = args[0]->get<std::vector<json>>();
+      if (values.empty()) {
+        make_result(nullptr);
+      } else {
+        const auto result = std::min_element(values.begin(), values.end());
+        make_result(json(*result));
+      }
     } break;
     case Op::Odd: {
       make_result(get_arguments<1>(node)[0]->get<const json::number_integer_t>() % 2 != 0);
@@ -456,10 +465,9 @@ class Renderer : public NodeVisitor {
       }
     } break;
     case Op::Sort: {
-      auto result_ptr = std::make_shared<json>(get_arguments<1>(node)[0]->get<std::vector<json>>());
-      std::sort(result_ptr->begin(), result_ptr->end());
-      data_tmp_stack.push_back(result_ptr);
-      data_eval_stack.push(result_ptr.get());
+      auto values = get_arguments<1>(node)[0]->get<std::vector<json>>();
+      std::sort(values.begin(), values.end());
+      make_result(std::move(values));
     } break;
     case Op::Upper: {
       auto result = get_arguments<1>(node)[0]->get<json::string_t>();
@@ -539,7 +547,7 @@ class Renderer : public NodeVisitor {
     case Op::Hex: {
       const auto args = get_arguments<1>(node);
       if (args[0] != nullptr) {
-        make_result(fmt::format("{:x}", args[0]->get<int>()));
+        make_result(std::format("{:x}", args[0]->get<int>()));
       } else {
         throw_renderer_error("NULL arguments to hex()", node);
       }
