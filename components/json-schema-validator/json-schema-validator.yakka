@@ -14,4 +14,4 @@ includes:
 
 requires:
   components:
-    - json
+    - rapidyaml

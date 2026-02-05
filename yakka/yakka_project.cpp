@@ -4,7 +4,7 @@
 #include "utilities.hpp"
 #include "spdlog/spdlog.h"
 #include "glob/glob.h"
-#include <nlohmann/json-schema.hpp>
+#include <ryml/json-schema.hpp>
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 #include <fstream>

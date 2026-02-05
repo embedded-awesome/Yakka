@@ -69,7 +69,7 @@ public:
   // Add ability to dump the database for debugging
   std::string dump() const
   {
-    return this->database.dump(2);
+    return ryml::emitrs_json<std::string>(this->database);
   }
 
   json database;

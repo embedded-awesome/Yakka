@@ -44,7 +44,7 @@ class schema
 {
 protected:
 	root_schema *root_;
-	json default_value_ = nullptr;
+	json default_value_;
 
 protected:
 	virtual std::shared_ptr<schema> make_for_default_(

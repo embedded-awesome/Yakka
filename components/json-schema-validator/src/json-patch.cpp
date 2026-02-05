@@ -78,49 +78,70 @@ json_patch::json_patch(json &&patch)
 }
 
 json_patch::json_patch(const json &patch)
-    : j_(std::move(patch))
+    : j_(patch)
 {
 	validateJsonPatch(j_);
 }
 
 json_patch &json_patch::add(const json_pointer &ptr, json value)
 {
-    // Minimal patch representation: list of maps
-    ryml::NodeRef root = j_.rootref();
-    if (!root.valid())
-        root = j_.rootref();
+    auto root = j_.rootref();
     if (!root.is_seq())
         root |= ryml::SEQ;
-    ryml::NodeRef entry = root.append_child();
+
+    auto entry = root.append_child();
     entry |= ryml::MAP;
-    entry["op"] << "add";
-    entry["path"] << ptr.to_string();
-    entry["value"] = value.rootref();
+
+    auto op_node = entry.append_child();
+    op_node << ryml::key("op") << "add";
+
+    auto path_node = entry.append_child();
+    const auto path = j_.to_arena(ptr.to_string());
+    path_node << ryml::key("path") << path;
+
+    auto value_node = entry.append_child();
+    value_node << ryml::key("value");
+    value_node.tree()->merge_with(&value, value.root_id(), value_node.id());
 	return *this;
 }
 
 json_patch &json_patch::replace(const json_pointer &ptr, json value)
 {
-    ryml::NodeRef root = j_.rootref();
+    auto root = j_.rootref();
     if (!root.is_seq())
         root |= ryml::SEQ;
-    ryml::NodeRef entry = root.append_child();
+
+    auto entry = root.append_child();
     entry |= ryml::MAP;
-    entry["op"] << "replace";
-    entry["path"] << ptr.to_string();
-    entry["value"] = value.rootref();
+
+    auto op_node = entry.append_child();
+    op_node << ryml::key("op") << "replace";
+
+    auto path_node = entry.append_child();
+    const auto path = j_.to_arena(ptr.to_string());
+    path_node << ryml::key("path") << path;
+
+    auto value_node = entry.append_child();
+    value_node << ryml::key("value");
+    value_node.tree()->merge_with(&value, value.root_id(), value_node.id());
 	return *this;
 }
 
 json_patch &json_patch::remove(const json_pointer &ptr)
 {
-    ryml::NodeRef root = j_.rootref();
+    auto root = j_.rootref();
     if (!root.is_seq())
         root |= ryml::SEQ;
-    ryml::NodeRef entry = root.append_child();
+
+    auto entry = root.append_child();
     entry |= ryml::MAP;
-    entry["op"] << "remove";
-    entry["path"] << ptr.to_string();
+
+    auto op_node = entry.append_child();
+    op_node << ryml::key("op") << "remove";
+
+    auto path_node = entry.append_child();
+    const auto path = j_.to_arena(ptr.to_string());
+    path_node << ryml::key("path") << path;
 	return *this;
 }
 
@@ -128,8 +149,10 @@ void json_patch::validateJsonPatch(json const &patch)
 {
 	// static put here to have it created at the first usage of validateJsonPatch
     static json patch_schema;
-    if (!patch_schema.rootref().valid()) {
+    static bool patch_schema_initialized = false;
+    if (!patch_schema_initialized) {
         patch_schema = ryml::parse_in_arena(ryml::to_csubstr(patch_schema_text));
+        patch_schema_initialized = true;
     }
     static ryml_schema::json_validator patch_validator(patch_schema);
 

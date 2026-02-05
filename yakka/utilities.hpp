@@ -29,6 +29,13 @@ private:
   std::vector<std::string> segments;
 };
 
+RymlPointer operator/(RymlPointer lhs, const RymlPointer &rhs);
+RymlPointer &operator/=(RymlPointer &lhs, const RymlPointer &rhs);
+RymlPointer operator/(RymlPointer lhs, const std::string &segment);
+RymlPointer &operator/=(RymlPointer &lhs, const std::string &segment);
+RymlPointer operator/(RymlPointer lhs, size_t index);
+RymlPointer &operator/=(RymlPointer &lhs, size_t index);
+
 std::pair<std::string, int> exec(const std::string &command_text, const std::string &arg_text);
 int exec(const std::string &command_text, const std::string &arg_text, std::function<void(std::string &)> function);
 bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2);
@@ -48,7 +55,7 @@ std::string try_render(inja::Environment &env, const std::string &input, const r
 std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::ConstNodeRef &data);
 std::pair<std::string, int> download_resource(const std::string url, std::filesystem::path destination);
 RymlPointer create_condition_pointer(const ryml::Tree condition);
-void find_json_keys(const ryml::Tree &j, const std::string &target_key, const std::string &current_path, ryml::Tree& paths);
+void find_json_keys(const inja::json &j, const std::string &target_key, const std::string &current_path, inja::json &paths);
 
 void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept;
 ryml::Tree xml_to_json(const pugi::xml_node& node);
@@ -59,6 +66,7 @@ void add_common_template_commands(inja::Environment &inja_env);
 
 // RapidYAML conversion utilities
 ryml::Tree ryml_to_json(const ryml::ConstNodeRef &node);
+inja::json ryml_to_inja_json(const ryml::ConstNodeRef &node);
 void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, const schema* schema = nullptr);
 void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_target, const ryml::ConstNodeRef &node, const schema* schema = nullptr);
 std::string ryml_get_val_as_string(const ryml::ConstNodeRef &node);

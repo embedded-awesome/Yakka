@@ -35,11 +35,28 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
   for (auto registry: workspace.registries) {
     // Group components by type
     std::multimap<std::string, std::string> components_by_type;
-    for (auto c: registry.second["provides"]["components"])
-      components_by_type.insert({c.second["type"] ? c.second["type"].as<std::string>() : "component", c.first.as<std::string>()});
+    auto registry_root = registry.second.crootref();
+    auto provides_node = ryml_get_child(registry_root, "provides");
+    auto components_node = ryml_get_child(provides_node, "components");
+    if (components_node.valid() && components_node.is_map()) {
+      for (const auto &component : components_node.children()) {
+        if (!component.has_key()) {
+          continue;
+        }
+        std::string component_name;
+        c4::from_chars(component.key(), &component_name);
+        std::string type = "component";
+        auto type_node = ryml_get_child(component, "type");
+        if (type_node.valid() && type_node.has_val()) {
+          type = ryml_get_val_as_string(type_node);
+        }
+        components_by_type.insert({type, component_name});
+      }
+    }
 
     // Print registry name
-    std::cout << registry.second["name"] << "\n";
+    auto registry_name = ryml_get_val_as_string(ryml_get_child(registry_root, "name"));
+    std::cout << registry_name << "\n";
 
     // Print components grouped by type
     for (auto it = components_by_type.begin(); it != components_by_type.end(); ) {
@@ -59,8 +76,16 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
 
   // Print components found locally
   std::cout << "Local components:\n";
-  for (const auto &c: workspace.local_database.database["components"].items()) {
-    std::cout << "  - " << c.key() << "\n";
+  auto local_components = ryml_get_child(workspace.local_database.database.crootref(), "components");
+  if (local_components.valid() && local_components.is_map()) {
+    for (const auto &c: local_components.children()) {
+      if (!c.has_key()) {
+        continue;
+      }
+      std::string component_name;
+      c4::from_chars(c.key(), &component_name);
+      std::cout << "  - " << component_name << "\n";
+    }
   }
   return 0;
 }

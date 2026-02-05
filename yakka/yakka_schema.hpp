@@ -4,7 +4,7 @@
 #include "yaml-cpp/yaml.h"
 #include <ryml.hpp>
 #include <ryml_std.hpp>
-#include <nlohmann/json-schema.hpp>
+#include <ryml/json-schema.hpp>
 #include "spdlog.h"
 #include <ranges>
 

@@ -13,10 +13,10 @@
 #	define JSON_SCHEMA_VALIDATOR_API
 #endif
 
-#include <ryml.hpp>
-#include <ryml_std.hpp>
+#include "ryml.hpp"
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -51,6 +51,22 @@ public:
 
 	const std::vector<std::string> &parts() const { return segments_; }
 
+	bool empty() const noexcept { return segments_.empty(); }
+
+	const std::string &back() const
+	{
+		if (segments_.empty())
+			throw std::out_of_range("json_pointer has no parent");
+		return segments_.back();
+	}
+
+	void pop_back()
+	{
+		if (segments_.empty())
+			throw std::out_of_range("json_pointer has no parent");
+		segments_.pop_back();
+	}
+
 private:
 	void parse(const std::string &path)
 	{
@@ -79,11 +95,38 @@ class json_uri
 public:
 	explicit json_uri(std::string uri = "#") : uri_(std::move(uri)) {}
 	std::string to_string() const { return uri_; }
-	std::string fragment() const { return uri_; }
+	std::string location() const
+	{
+		auto pos = uri_.find('#');
+		if (pos == std::string::npos)
+			return uri_;
+		return uri_.substr(0, pos);
+	}
+	std::string fragment() const
+	{
+		auto pos = uri_.find('#');
+		if (pos == std::string::npos)
+			return "";
+		return uri_.substr(pos + 1);
+	}
+	json_pointer pointer() const
+	{
+		auto frag = fragment();
+		if (frag.empty())
+			return json_pointer{""};
+		if (!frag.empty() && frag.front() != '/')
+			return json_pointer{"/" + frag};
+		return json_pointer{frag};
+	}
 	json_uri append(const std::string &field) const
 	{
 		if (uri_.empty())
-			return json_uri{"/" + field};
+			return json_uri{"#/" + field};
+		if (uri_.back() == '#')
+			return json_uri{uri_ + "/" + field};
+		auto hash = uri_.find('#');
+		if (hash == std::string::npos)
+			return json_uri{uri_ + "#/" + field};
 		return json_uri{uri_ + "/" + field};
 	}
 
@@ -91,6 +134,7 @@ private:
 	std::string uri_;
 };
 
+// using json = nlohmann::json;
 using json = ryml::Tree;
 using schema_loader = std::function<void(const json_uri &, json &)>;
 using format_checker = std::function<void(const std::string &, const std::string &, const json &, class error_handler &)>;

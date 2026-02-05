@@ -180,5 +180,6 @@ const char *draft7_schema_text = R"( {
     "default": true
 } )";
 
-json draft7_schema_builtin = ryml::parse_in_arena(ryml::to_csubstr(draft7_schema_text));
+std::string draft7_schema_buf(draft7_schema_text);
+json draft7_schema_builtin = ryml::parse_in_place(ryml::to_substr(draft7_schema_buf));
 } // namespace ryml_schema

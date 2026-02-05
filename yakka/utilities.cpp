@@ -18,6 +18,7 @@
 #include <chrono>
 #include <algorithm>
 #include <iomanip>
+#include <cctype>
 #include <filesystem>
 
 namespace yakka {
@@ -170,16 +171,9 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path)
 
 ryml::Tree json_path(const ryml::Tree &node, std::string path)
 {
-  RymlPointer temp(path);
-  return node[temp];
-
-  // return node[RymlPointer(path)];
-  // auto temp = node;
-  // std::stringstream ss(path);
-  // std::string s;
-  // while (std::getline(ss, s, '.'))
-  //     temp = temp[s];//.reset(temp[s]);
-  // return temp;
+  RymlPointer temp(std::move(path));
+  auto target = ryml_get_path(node.crootref(), temp);
+  return ryml_to_json(target);
 }
 
 static std::string unescape_ryml_pointer_segment(std::string_view segment)
@@ -251,6 +245,49 @@ const std::vector<std::string> &RymlPointer::parts() const noexcept
 bool RymlPointer::empty() const noexcept
 {
   return segments.empty();
+}
+
+RymlPointer operator/(RymlPointer lhs, const RymlPointer &rhs)
+{
+  std::vector<std::string> combined = lhs.parts();
+  const auto &rhs_parts             = rhs.parts();
+  combined.insert(combined.end(), rhs_parts.begin(), rhs_parts.end());
+  return RymlPointer{ std::move(combined) };
+}
+
+RymlPointer &operator/=(RymlPointer &lhs, const RymlPointer &rhs)
+{
+  lhs = lhs / rhs;
+  return lhs;
+}
+
+RymlPointer operator/(RymlPointer lhs, const std::string &segment)
+{
+  if (segment.empty()) {
+    return lhs;
+  }
+  std::vector<std::string> combined = lhs.parts();
+  combined.push_back(segment);
+  return RymlPointer{ std::move(combined) };
+}
+
+RymlPointer &operator/=(RymlPointer &lhs, const std::string &segment)
+{
+  lhs = lhs / segment;
+  return lhs;
+}
+
+RymlPointer operator/(RymlPointer lhs, size_t index)
+{
+  std::vector<std::string> combined = lhs.parts();
+  combined.push_back(std::to_string(index));
+  return RymlPointer{ std::move(combined) };
+}
+
+RymlPointer &operator/=(RymlPointer &lhs, size_t index)
+{
+  lhs = lhs / index;
+  return lhs;
 }
 
 RymlPointer ryml_pointer(std::string path)
@@ -326,7 +363,11 @@ std::vector<std::string> parse_gcc_dependency_file(const std::string &filename)
       line.pop_back();
     if (line.back() == '\r')
       line.pop_back();
-    dependencies.push_back(line.starts_with("./") ? line.substr(line.find_first_not_of("/", 2)) : line);
+    if (line.rfind("./", 0) == 0) {
+      dependencies.push_back(line.substr(2));
+    } else {
+      dependencies.push_back(line);
+    }
   }
 
   return dependencies;
@@ -337,81 +378,7 @@ std::vector<std::string> parse_gcc_dependency_file(const std::string &filename)
  */
 void json_node_merge(RymlPointer path, ryml::Tree &merge_target, const ryml::Tree &node, const schema* schema)
 {
-  // Check for a strategy for this path
-  schema::merge_strategy strategy = (schema != nullptr) ? schema->get_merge_strategy(path) : schema::merge_strategy::Default;
-
-  switch (node.type()) {
-    case nlohmann::detail::value_t::object:
-      if (merge_target.type() != nlohmann::detail::value_t::object) {
-        spdlog::error("Currently not supported");
-        return;
-      }
-      // Iterate through child nodes
-      for (auto it = node.begin(); it != node.end(); ++it) {
-        // Check if the key is already in merge_target
-        auto it2 = merge_target.find(it.key());
-        if (it2 != merge_target.end()) {
-          json_node_merge(path / it.key(), it2.value(), it.value(), schema);
-        } else {
-          merge_target[it.key()] = it.value();
-        }
-      }
-      break;
-
-    case nlohmann::detail::value_t::array:
-      switch (merge_target.type()) {
-        case nlohmann::detail::value_t::object:
-          spdlog::error("Cannot merge array into an object");
-          break;
-        default:
-          // Convert scalar into an array
-          merge_target = ryml::Tree::array({ merge_target });
-          [[fallthrough]];
-        case nlohmann::detail::value_t::array:
-        case nlohmann::detail::value_t::null:
-          for (auto &i: node)
-            merge_target.push_back(i);
-          break;
-      }
-      break;
-
-    case nlohmann::detail::value_t::null:
-      break;
-
-    default:
-      switch (merge_target.type()) {
-        case nlohmann::detail::value_t::object:
-          spdlog::error("Cannot merge scalar into an object");
-          break;
-        case nlohmann::detail::value_t::array:
-          merge_target.push_back(node);
-          break;
-        default:
-          if (strategy == schema::merge_strategy::Abort) {
-            spdlog::error("Conflict detected while merging scalar values at path {}", path.to_string());
-            return;
-          } else if (strategy == schema::merge_strategy::Overwrite) {
-            merge_target = node;
-          } else if (strategy == schema::merge_strategy::Max && node.is_number() && merge_target.is_number()) {
-            merge_target = std::max(merge_target, node);
-          } else if (strategy == schema::merge_strategy::Min && node.is_number() && merge_target.is_number()) {
-            merge_target = std::min(merge_target, node);
-          } else {
-            merge_target = ryml::Tree::array({ merge_target });
-            merge_target.push_back(node);
-          }
-          break;
-      }
-      break;
-  }
-
-  // Apply addition merge strategy
-  // Check if there is an additional stategy, if not return
-  // if (auto schema = schema_validator::get_schema(path)) {
-  //   spdlog::error("Found schema");
-  // } else {
-  //   spdlog::error("No schema found for path {}", path.to_string());
-  // }
+  json_node_merge(path.parts(), merge_target.rootref(), node.crootref(), schema);
 }
 
 std::string component_dotname_to_id(const std::string dotname)
@@ -422,7 +389,8 @@ std::string component_dotname_to_id(const std::string dotname)
 std::string try_render(inja::Environment &env, const std::string &input, const ryml::Tree &data)
 {
   try {
-    return env.render(input, data);
+    auto json_data = ryml_to_inja_json(data.crootref());
+    return env.render(input, json_data);
   } catch (std::exception &e) {
     spdlog::error("Template error: {}\n{}", input, e.what());
     return "";
@@ -432,7 +400,8 @@ std::string try_render(inja::Environment &env, const std::string &input, const r
 std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::Tree &data)
 {
   try {
-    return env.render_file(filename, data);
+    auto json_data = ryml_to_inja_json(data.crootref());
+    return env.render_file(filename, json_data);
   } catch (std::exception &e) {
     spdlog::error("Template error: {}\n{}", filename, e.what());
     return "";
@@ -443,9 +412,7 @@ std::string try_render_file(inja::Environment &env, const std::string &filename,
 std::string try_render(inja::Environment &env, const std::string &input, const ryml::ConstNodeRef &data)
 {
   try {
-    // TODO: Convert ryml to format inja can consume
-    // For now, convert to ryml::Tree as bridge
-    ryml::Tree json_data = ryml_to_json(data);
+    auto json_data = ryml_to_inja_json(data);
     return env.render(input, json_data);
   } catch (std::exception &e) {
     spdlog::error("Template error: {}\n{}", input, e.what());
@@ -456,15 +423,12 @@ std::string try_render(inja::Environment &env, const std::string &input, const r
 std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::ConstNodeRef &data)
 {
   try {
-    // TODO: Convert ryml to format inja can consume
-    ryml::Tree json_data = ryml_to_json(data);
+    auto json_data = ryml_to_inja_json(data);
     return env.render_file(filename, json_data);
   } catch (std::exception &e) {
     spdlog::error("Template error: {}\n{}", filename, e.what());
     return "";
   }
-}
-#endif
 }
 
 void add_common_template_commands(inja::Environment &inja_env)
@@ -480,7 +444,7 @@ void add_common_template_commands(inja::Environment &inja_env)
     return std::filesystem::path{ args.at(0)->get<std::string>() }.parent_path().string();
   });
   inja_env.add_callback("glob", [](inja::Arguments &args) {
-    ryml::Tree aggregate = ryml::Tree::array();
+    inja::json aggregate = inja::json::array();
     std::vector<std::string> string_args;
     for (const auto &i: args)
       string_args.push_back(i->get<std::string>());
@@ -527,11 +491,12 @@ void add_common_template_commands(inja::Environment &inja_env)
   inja_env.add_callback("load_yaml", 1, [](const inja::Arguments &args) {
     const auto file_path = args[0]->get<std::string>();
     if (std::filesystem::exists(file_path)) {
-      auto yaml_data = YAML::LoadFile(file_path);
-      return yaml_data.as<ryml::Tree>();
-    } else {
-      return ryml::Tree();
+      auto yaml_data = ryml_load_file(file_path);
+      if (yaml_data) {
+        return ryml_to_inja_json(yaml_data->crootref());
+      }
     }
+    return inja::json{};
   });
   inja_env.add_callback("load_xml", 1, [](const inja::Arguments &args) {
     const auto file_path = args[0]->get<std::string>();
@@ -539,23 +504,20 @@ void add_common_template_commands(inja::Environment &inja_env)
       pugi::xml_document doc;
       pugi::xml_parse_result result = doc.load_file(file_path.c_str());
       if (result.status == pugi::xml_parse_status::status_ok) {
-        return xml_to_json(doc.child("device"));
+        return ryml_to_inja_json(xml_to_json(doc.child("device")).crootref());
       }
     }
-    return ryml::Tree();
+    return inja::json{};
   });
   inja_env.add_callback("load_json", 1, [](const inja::Arguments &args) {
     const auto file_path = args[0]->get<std::string>();
     if (std::filesystem::exists(file_path)) {
-      std::ifstream file_stream(file_path);
-      return ryml::Tree::parse(file_stream,
-                                   /* callback */ nullptr,
-                                   /* allow exceptions */ false,
-                                   /* ignore_comments */ true,
-                                   /* ignore_trailing_commas */ true);
-    } else {
-      return ryml::Tree();
+      auto json_data = ryml_load_file(file_path);
+      if (json_data) {
+        return ryml_to_inja_json(json_data->crootref());
+      }
     }
+    return inja::json{};
   });
   inja_env.add_callback("quote", 1, [](const inja::Arguments &args) {
     std::stringstream ss;
@@ -581,15 +543,16 @@ void add_common_template_commands(inja::Environment &inja_env)
   inja_env.add_callback("split", 2, [](const inja::Arguments &args) {
     auto input = args[0]->get<std::string>();
     auto delim = args[1]->get<std::string>();
-    ryml::Tree output;
-    for (auto word: std::views::split(input, delim))
-      output.push_back(std::string_view(word));
+    inja::json output = inja::json::array();
+    for (auto word: std::views::split(input, delim)) {
+      output.push_back(std::string{ word.begin(), word.end() });
+    }
     return output;
   });
   inja_env.add_callback("starts_with", 2, [](const inja::Arguments &args) {
     auto input = args[0]->get<std::string>();
     auto start = args[1]->get<std::string>();
-    return input.starts_with(start);
+    return input.rfind(start, 0) == 0;
   });
   inja_env.add_callback("substring", 2, [](const inja::Arguments &args) {
     auto input = args[0]->get<std::string>();
@@ -611,12 +574,14 @@ void add_common_template_commands(inja::Environment &inja_env)
     return input;
   });
   inja_env.add_callback("filter", 2, [](const inja::Arguments &args) {
-    json output            = ryml::Tree::array();
+    inja::json output      = inja::json::array();
     const auto input       = args[0];
     const auto regex_match = std::regex(args[1]->get<std::string>());
-    std::copy_if(input->begin(), input->end(), std::back_inserter(output), [&](const auto &item) {
-      return std::regex_match(item.template get<std::string>(), regex_match);
-    });
+    for (const auto &item: *input) {
+      if (std::regex_match(item.template get<std::string>(), regex_match)) {
+        output.push_back(item);
+      }
+    }
     return output;
   });
   inja_env.add_callback("join", 2, [](const inja::Arguments &args) {
@@ -638,13 +603,13 @@ void add_common_template_commands(inja::Environment &inja_env)
   inja_env.add_callback("find_json", 2, [](const inja::Arguments &args) {
     const auto input      = args[0];
     const auto search_key = args[1]->get<std::string>();
-    json output;
-    find_json_keys(input->get<ryml::Tree>(), search_key, "", output);
+    inja::json output = inja::json::array();
+    find_json_keys(*input, search_key, "", output);
     return output;
   });
   inja_env.add_callback("merge", 2, [](const inja::Arguments &args) {
-    auto target     = args[0]->get<ryml::Tree>();
-    const auto data = args[1]->get<ryml::Tree>();
+    auto target     = args[0]->get<inja::json>();
+    const auto data = args[1]->get<inja::json>();
     target.update(data, true);
     return target;
   });
@@ -670,9 +635,18 @@ RymlPointer create_condition_pointer(const ryml::Tree condition)
 {
   RymlPointer pointer;
 
-  for (const auto &item: condition) {
+  auto root = condition.crootref();
+  if (!root.valid()) {
+    return pointer;
+  }
+
+  for (const auto &item: root.children()) {
+    auto value = ryml_get_val_as_string(item);
+    if (value.empty()) {
+      continue;
+    }
     pointer /= ryml_pointer("/supports/features");
-    pointer /= item.get<std::string>();
+    pointer /= value;
   }
 
   return pointer;
@@ -695,47 +669,75 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
     return std::unexpected{ "Invalid path format: missing root separator" };
   }
 
+  auto left_root  = left.crootref();
+  auto right_root = right.crootref();
+
   // Early return if left data is missing
-  if (left.is_null() || left["components"].is_null()) {
+  if (!left_root.valid()) {
     return true;
   }
 
-  auto data_paths = std::ranges::views::split(data_path, '/') | std::views::drop(1);
   RymlPointer data_pointer{ data_path.substr(1) };
+  const auto &parts = data_pointer.parts();
 
-  auto iter = data_paths.begin();
-  const std::string first_part{ std::string_view(*iter) };
-  const std::string second_part{ std::string_view(*(++iter)) };
+  if (parts.empty()) {
+    return false;
+  }
+
+  const std::string first_part = parts.size() > 0 ? parts[0] : std::string{};
+  const std::string second_part = parts.size() > 1 ? parts[1] : std::string{};
+
   RymlPointer remaining_pointer;
-  for (const auto &part: data_paths | std::views::drop(2)) {
-    remaining_pointer /= std::string(std::string_view{ part });
+  if (parts.size() > 2) {
+    remaining_pointer = RymlPointer{ std::vector<std::string>(parts.begin() + 2, parts.end()) };
   }
 
   // Define a lambda to process a component name using the captured 'left' and 'right' json objects
   const auto process_component = [&](std::string_view component_name, const RymlPointer &pointer) -> ComparisonResult {
-    if (!left["components"].contains(component_name) || !right["components"].contains(component_name)) {
+    auto left_components  = ryml_get_path(left_root, ryml_pointer("/components"));
+    auto right_components = ryml_get_path(right_root, ryml_pointer("/components"));
+
+    if (!left_components.valid() || !right_components.valid() || !left_components.is_map() || !right_components.is_map()) {
       return { true, "" };
     }
 
-    const auto &left_comp  = left["components"][std::string{ component_name }];
-    const auto &right_comp = right["components"][std::string{ component_name }];
+    c4::csubstr key = c4::to_csubstr(component_name);
+    if (!left_components.has_child(key) || !right_components.has_child(key)) {
+      return { true, "" };
+    }
 
-    auto get_value = [](const auto &json, const auto &ptr) {
-      return json.contains(ptr) ? json[ptr] : ryml::Tree{};
-    };
+    auto left_comp  = left_components.find_child(key);
+    auto right_comp = right_components.find_child(key);
 
-    auto left_value  = get_value(left_comp, pointer);
-    auto right_value = get_value(right_comp, pointer);
+    auto left_value  = pointer.empty() ? left_comp : ryml_get_path(left_comp, pointer);
+    auto right_value = pointer.empty() ? right_comp : ryml_get_path(right_comp, pointer);
 
-    return { left_value != right_value, "" };
+    if (!left_value.valid() && !right_value.valid()) {
+      return { false, "" };
+    }
+    if (!left_value.valid() || !right_value.valid()) {
+      return { true, "" };
+    }
+
+    auto left_serialized  = ryml::emitrs_json(left_value);
+    auto right_serialized = ryml::emitrs_json(right_value);
+    return { left_serialized != right_serialized, "" };
   };
 
   try {
     if (first_part == "components") {
       if (second_part == std::string{ data_wildcard_identifier }) {
+        auto right_components = ryml_get_path(right_root, ryml_pointer("/components"));
+        if (!right_components.valid() || !right_components.is_map()) {
+          return true;
+        }
 
-        // Using C++20 ranges to process components
-        for (const auto &[component_name, _]: right["components"].items()) {
+        for (const auto &child : right_components.children()) {
+          if (!child.has_key()) {
+            continue;
+          }
+          std::string component_name;
+          c4::from_chars(child.key(), &component_name);
           auto result = process_component(component_name, remaining_pointer);
           if (!result.error_message.empty()) {
             return std::unexpected{ std::move(result.error_message) };
@@ -751,14 +753,14 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
         return result.changed;
       }
     } else {
-      if (!left.contains(data_pointer) || !right.contains(data_pointer)) {
+      auto left_value  = ryml_get_path(left_root, data_pointer);
+      auto right_value = ryml_get_path(right_root, data_pointer);
+      if (!left_value.valid() || !right_value.valid()) {
         return true;
       }
-      // auto diff = json::diff(left[data_pointer], right[data_pointer]);
-      // if (!diff.empty()) {
-      //   spdlog::error("Data dependency changed at path: {}", data_pointer.to_string());
-      // }
-      return { left[data_pointer] != right[data_pointer] };
+      auto left_serialized  = ryml::emitrs_json(left_value);
+      auto right_serialized = ryml::emitrs_json(right_value);
+      return { left_serialized != right_serialized };
     }
 
     return false;
@@ -767,7 +769,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
   }
 }
 
-void find_json_keys(const ryml::Tree &j, const std::string &target_key, const std::string &current_path, ryml::Tree &paths)
+void find_json_keys(const inja::json &j, const std::string &target_key, const std::string &current_path, inja::json &paths)
 {
   if (j.is_object()) {
     for (auto it = j.begin(); it != j.end(); ++it) {
@@ -815,22 +817,48 @@ void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept
 
 ryml::Tree xml_to_json(const pugi::xml_node &node)
 {
-  ryml::Tree j;
+  ryml::Tree tree;
+  auto root = tree.rootref();
+  root |= ryml::MAP;
+
   // Add attributes
   for (auto &attr: node.attributes()) {
-    j["_" + std::string(attr.name())] = attr.value();
+    auto child = root.append_child();
+    child << ryml::key("_" + std::string(attr.name()));
+    child << ryml::val(attr.value());
   }
+
   // Add children
   for (auto &child: node.children()) {
-    if (child.name()[0] != 0) {
-      j[child.name()].push_back(xml_to_json(child));
+    if (child.name()[0] == 0) {
+      continue;
     }
+
+    std::string key = child.name();
+    ryml::NodeRef seq_node;
+    if (root.has_child(key)) {
+      seq_node = root.find_child(key);
+    } else {
+      seq_node = root.append_child();
+      seq_node << ryml::key(key);
+      seq_node |= ryml::SEQ;
+    }
+
+    ryml::Tree child_tree = xml_to_json(child);
+    auto new_child        = seq_node.append_child();
+    new_child |= ryml::MAP;
+    new_child.tree()->merge_with(child_tree.tree(), child_tree.root_id(), new_child.id());
   }
+
   // Add text content
-  if (node.text()) {
-    j["_text"] = node.text().get();
+  const char *text_value = node.text().get();
+  if (text_value != nullptr && *text_value != '\0') {
+    auto child = root.append_child();
+    child << ryml::key("_text");
+    child << ryml::val(text_value);
   }
-  return j;
+
+  return tree;
 }
 
 // Load file content and parse using RapidYAML
@@ -848,68 +876,76 @@ std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem:
   }
 }
 
-// RapidYAML to ryml::Tree conversion (only used when interfacing with inja or schema validator)
+// RapidYAML to ryml::Tree conversion (clone subtree)
 ryml::Tree ryml_to_json(const ryml::ConstNodeRef &node)
 {
+  ryml::Tree result;
   if (!node.valid()) {
-    return ryml::Tree();
+    return result;
+  }
+
+  result.merge_with(node.tree(), node.id(), result.root_id());
+  return result;
+}
+
+// RapidYAML to inja::json conversion (for templating)
+inja::json ryml_to_inja_json(const ryml::ConstNodeRef &node)
+{
+  if (!node.valid()) {
+    return inja::json{};
   }
 
   if (node.is_map()) {
-    ryml::Tree j = ryml::Tree::object();
+    inja::json obj = inja::json::object();
     for (const auto &child : node.children()) {
+      if (!child.has_key()) {
+        continue;
+      }
       std::string key;
-      if (child.has_key()) {
-        c4::from_chars(child.key(), &key);
-        j[key] = ryml_to_json(child);
-      }
+      c4::from_chars(child.key(), &key);
+      obj[key] = ryml_to_inja_json(child);
     }
-    return j;
-  } else if (node.is_seq()) {
-    ryml::Tree j = ryml::Tree::array();
-    for (const auto &child : node.children()) {
-      j.push_back(ryml_to_json(child));
-    }
-    return j;
-  } else if (node.has_val()) {
-    // Try to parse as different types
-    std::string val_str;
-    c4::from_chars(node.val(), &val_str);
-    
-    // Check for null
-    if (val_str == "null" || val_str == "~" || val_str.empty()) {
-      return ryml::Tree();
-    }
-    
-    // Check for boolean
-    if (val_str == "true" || val_str == "yes" || val_str == "on") {
-      return ryml::Tree(true);
-    }
-    if (val_str == "false" || val_str == "no" || val_str == "off") {
-      return ryml::Tree(false);
-    }
-    
-    // Try to parse as number
-    if (!val_str.empty() && (std::isdigit(val_str[0]) || val_str[0] == '-' || val_str[0] == '+')) {
-      try {
-        // Try integer first
-        if (val_str.find('.') == std::string::npos && 
-            val_str.find('e') == std::string::npos && 
-            val_str.find('E') == std::string::npos) {
-          return ryml::Tree(std::stoll(val_str));
-        } else {
-          return ryml::Tree(std::stod(val_str));
-        }
-      } catch (...) {
-        // Not a number, treat as string
-      }
-    }
-    
-    // Default to string
-    return ryml::Tree(val_str);
+    return obj;
   }
 
-  return ryml::Tree();
+  if (node.is_seq()) {
+    inja::json arr = inja::json::array();
+    for (const auto &child : node.children()) {
+      arr.push_back(ryml_to_inja_json(child));
+    }
+    return arr;
+  }
+
+  if (node.has_val()) {
+    std::string val_str;
+    c4::from_chars(node.val(), &val_str);
+
+    if (val_str == "null" || val_str == "~" || val_str.empty()) {
+      return nullptr;
+    }
+
+    if (val_str == "true" || val_str == "yes" || val_str == "on") {
+      return true;
+    }
+    if (val_str == "false" || val_str == "no" || val_str == "off") {
+      return false;
+    }
+
+    if (!val_str.empty() && (std::isdigit(val_str[0]) || val_str[0] == '-' || val_str[0] == '+')) {
+      try {
+        if (val_str.find('.') == std::string::npos && val_str.find('e') == std::string::npos && val_str.find('E') == std::string::npos) {
+          return std::stoll(val_str);
+        }
+        return std::stod(val_str);
+      } catch (...) {
+        // fall back to string
+      }
+    }
+
+    return val_str;
+  }
+
+  return inja::json{};
 }
 
 // Helper function to get value as string from ryml node
