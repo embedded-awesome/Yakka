@@ -218,7 +218,17 @@ public:
   string_t dump() const {
     string_t out;
     const size_t target_id = id_;
-    ryml::emitrs_json(*tree_, target_id, &out);
+    if (tree_ && tree_->has_key(target_id)) {
+      ryml::Tree temp;
+      temp.reserve(4);
+      temp.change_type(temp.root_id(), ryml::MAP);
+      const size_t dup_id = temp.duplicate(tree_.get(), target_id, temp.root_id(), ryml::NONE);
+      ryml::NodeRef dup_node(&temp, dup_id);
+      dup_node.clear_key();
+      ryml::emitrs_json(temp, dup_id, &out);
+    } else {
+      ryml::emitrs_json(*tree_, target_id, &out);
+    }
     return out;
   }
 
@@ -353,12 +363,12 @@ public:
     if (child_id == ryml::NONE) {
       child_id = tree_->append_child(id_);
       ryml::NodeRef child(tree_.get(), child_id);
-      child.set_key(c4::to_csubstr(key));
       child.set_type(ryml::VAL);
+      child.set_key_serialized(key);
       child << "null";
     }
     auto& cached = object_cache_[key];
-    cached = ryml_json(tree_, child_id);
+    cached.set_ref(tree_, child_id);
     return cached;
   }
 
@@ -368,7 +378,7 @@ public:
     if (index >= array_cache_.size()) {
       array_cache_.resize(index + 1, ryml_json(tree_, child_id));
     }
-    array_cache_[index] = ryml_json(tree_, child_id);
+    array_cache_[index].set_ref(tree_, child_id);
     return array_cache_[index];
   }
 
@@ -376,7 +386,7 @@ public:
     auto id = find_pointer(ptr, /*create_missing=*/true).value();
     const auto key = pointer_key(ptr);
     auto& cached = pointer_cache_[key];
-    cached = ryml_json(tree_, id);
+    cached.set_ref(tree_, id);
     return cached;
   }
 
@@ -389,7 +399,7 @@ public:
       return null_singleton();
     }
     auto& cached = object_cache_[key];
-    cached = ryml_json(tree_, child_id);
+    cached.set_ref(tree_, child_id);
     return cached;
   }
 
@@ -401,7 +411,7 @@ public:
     if (index >= array_cache_.size()) {
       array_cache_.resize(index + 1, ryml_json(tree_, child_id));
     }
-    array_cache_[index] = ryml_json(tree_, child_id);
+    array_cache_[index].set_ref(tree_, child_id);
     return array_cache_[index];
   }
 
@@ -412,7 +422,7 @@ public:
     }
     const auto key = pointer_key(ptr);
     auto& cached = pointer_cache_[key];
-    cached = ryml_json(tree_, found.value());
+    cached.set_ref(tree_, found.value());
     return cached;
   }
 
@@ -441,12 +451,12 @@ public:
 
   void clear() {
     if (is_object() || is_array()) {
-      tree_->remove_children(id_);
+      tree_->change_type(id_, ryml::VAL);
+      node_ref().set_val_serialized("null");
       return;
     }
-    tree_->remove_children(id_);
-    node_ref().set_type(ryml::VAL);
-    node_ref() << "null";
+    tree_->change_type(id_, ryml::VAL);
+    node_ref().set_val_serialized("null");
   }
 
   class iterator {
@@ -506,7 +516,10 @@ public:
     iterator(std::shared_ptr<ryml::Tree> tree, size_t parent_id, size_t index)
         : tree_(std::move(tree)), parent_id_(parent_id), child_id_(ryml::NONE), index_(index) {
       if (tree_ && parent_id_ != ryml::NONE) {
-        child_id_ = tree_->child(parent_id_, index_);
+        const size_t count = tree_->num_children(parent_id_);
+        if (index_ < count) {
+          child_id_ = tree_->child(parent_id_, index_);
+        }
       }
     }
 
@@ -575,17 +588,9 @@ private:
   static size_t create_root_value(ryml::Tree& tree) {
     tree.reserve(4);
     ryml::NodeRef root = tree.rootref();
-    if (!root.is_stream()) {
-      root.set_type(ryml::STREAM);
-    }
-    size_t doc_id = tree.append_child(tree.root_id());
-    ryml::NodeRef doc(&tree, doc_id);
-    doc.set_type(ryml::DOC);
-    size_t val_id = tree.append_child(doc_id);
-    ryml::NodeRef val(&tree, val_id);
-    val.set_type(ryml::VAL);
-    val << "null";
-    return val_id;
+    root.set_type(ryml::VAL);
+    root << "null";
+    return tree.root_id();
   }
 
   static size_t resolve_parsed_root(ryml::Tree& tree) {
@@ -606,15 +611,13 @@ private:
 
   void ensure_map() {
     if (!node_ref().is_map()) {
-      tree_->remove_children(id_);
-      node_ref().set_type(ryml::MAP);
+      tree_->change_type(id_, ryml::MAP);
     }
   }
 
   void ensure_seq() {
     if (!node_ref().is_seq()) {
-      tree_->remove_children(id_);
-      node_ref().set_type(ryml::SEQ);
+      tree_->change_type(id_, ryml::SEQ);
     }
   }
 
@@ -630,33 +633,28 @@ private:
   }
 
   void set_scalar(bool v) {
-    tree_->remove_children(id_);
-    node_ref().set_type(ryml::VAL);
-    node_ref() << (v ? "true" : "false");
+    tree_->change_type(id_, ryml::VAL);
+    node_ref().set_val_serialized(v ? "true" : "false");
   }
 
   void set_scalar(number_integer_t v) {
-    tree_->remove_children(id_);
-    node_ref().set_type(ryml::VAL);
-    node_ref() << v;
+    tree_->change_type(id_, ryml::VAL);
+    node_ref().set_val_serialized(v);
   }
 
   void set_scalar(number_unsigned_t v) {
-    tree_->remove_children(id_);
-    node_ref().set_type(ryml::VAL);
-    node_ref() << v;
+    tree_->change_type(id_, ryml::VAL);
+    node_ref().set_val_serialized(v);
   }
 
   void set_scalar(number_float_t v) {
-    tree_->remove_children(id_);
-    node_ref().set_type(ryml::VAL);
-    node_ref() << v;
+    tree_->change_type(id_, ryml::VAL);
+    node_ref().set_val_serialized(v);
   }
 
   void set_scalar(const string_t& v) {
-    tree_->remove_children(id_);
-    node_ref().set_type(ryml::VAL);
-    node_ref() << c4::to_csubstr(v);
+    tree_->change_type(id_, ryml::VAL);
+    node_ref().set_val_serialized(v);
   }
 
   void set_scalar(string_t&& v) {
@@ -690,8 +688,52 @@ private:
   }
 
   void assign_from(const ryml_json& other) {
-    const string_t serialized = other.dump();
-    ryml::parse_in_arena(c4::to_csubstr(serialized), node_ref());
+    if (other.is_object()) {
+      ensure_map();
+      tree_->remove_children(id_);
+      const size_t count = other.node_cref().num_children();
+      for (size_t i = 0; i < count; ++i) {
+        const size_t child_id = other.tree_->child(other.id_, i);
+        ryml::ConstNodeRef child(other.tree_.get(), child_id);
+        string_t key(child.key().str, child.key().len);
+        (*this)[key].assign_from(ryml_json(other.tree_, child_id));
+      }
+      return;
+    }
+    if (other.is_array()) {
+      ensure_seq();
+      tree_->remove_children(id_);
+      for (const auto& value : other) {
+        push_back(value);
+      }
+      return;
+    }
+    if (other.is_boolean()) {
+      set_scalar(other.get<bool>());
+      return;
+    }
+    if (other.is_number_integer()) {
+      set_scalar(other.get<number_integer_t>());
+      return;
+    }
+    if (other.is_number_unsigned()) {
+      set_scalar(other.get<number_unsigned_t>());
+      return;
+    }
+    if (other.is_number_float()) {
+      set_scalar(other.get<number_float_t>());
+      return;
+    }
+    if (other.is_string()) {
+      set_scalar(other.get<string_t>());
+      return;
+    }
+    set_scalar("null");
+  }
+
+  void set_ref(std::shared_ptr<ryml::Tree> tree, size_t id) {
+    tree_ = std::move(tree);
+    id_ = id;
   }
 
   static bool has_float_token(c4::csubstr val) {
@@ -754,8 +796,8 @@ private:
           if (child_id == ryml::NONE) {
             child_id = tree_->append_child(current);
             ryml::NodeRef child(tree_.get(), child_id);
-            child.set_key(c4::to_csubstr(token));
             child.set_type(ryml::VAL);
+            child.set_key_serialized(token);
             child << "null";
           }
           current = child_id;
