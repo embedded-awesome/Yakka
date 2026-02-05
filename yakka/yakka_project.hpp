@@ -8,7 +8,8 @@
 #include "blueprint_database.hpp"
 #include "yakka_schema.hpp"
 //#include "yaml-cpp/yaml.h"
-#include "nlohmann/json.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include "inja.hpp"
 #include "spdlog/spdlog.h"
 #include "indicators/progress_bar.hpp"
@@ -49,7 +50,7 @@ public:
   void init_project();
   void process_build_string(const std::string build_string);
   void parse_project_string(const std::vector<std::string> &project_string);
-  void process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node);
+  void process_requirements(std::shared_ptr<yakka::component> component, const ryml::ConstNodeRef &child_node);
   state evaluate_dependencies();
   bool add_component(const std::string &component_name, component_database::flag flags);
   bool add_feature(const std::string &feature_name);
@@ -99,7 +100,7 @@ public:
   std::unordered_set<std::string> required_features;
   std::unordered_set<std::string> provided_features;
   std::unordered_set<std::string> unprovided_features;
-  std::map<std::string, const nlohmann::json> feature_recommendations;
+  std::map<std::string, ryml::Tree> feature_recommendations;
   std::unordered_set<std::string> additional_tools;
   std::unordered_set<std::string> commands;
   std::unordered_set<std::string> unknown_components;
@@ -118,8 +119,8 @@ public:
   yakka::blueprint_database blueprint_database;
   yakka::target_database target_database;
 
-  nlohmann::json previous_summary;
-  nlohmann::json project_summary;
+  ryml::Tree previous_summary;
+  ryml::Tree project_summary;
 
   yakka::schema project_schema;
   yakka::schema data_schema;
@@ -139,16 +140,16 @@ public:
   // std::function<void(std::shared_ptr<task_group> group)> task_complete_handler;
 
   // SLC specific
-  nlohmann::json template_contributions;
+  ryml::Tree template_contributions;
   std::unordered_set<std::string> slc_required;
   std::unordered_set<std::string> slc_provided;
-  std::map<std::string, const nlohmann::json> slc_recommended;
+  std::map<std::string, ryml::Tree> slc_recommended;
   std::multimap<std::string, std::string> instances;
   std::multimap<std::string, const std::shared_ptr<yakka::component>> slc_overrides;
-  bool is_disqualified_by_unless(const nlohmann::json &node);
-  bool condition_is_fulfilled(const nlohmann::json &node);
+  bool is_disqualified_by_unless(const ryml::ConstNodeRef &node);
+  bool condition_is_fulfilled(const ryml::ConstNodeRef &node);
   void process_slc_rules();
-  void create_config_file(const std::shared_ptr<yakka::component> component, const nlohmann::json &config, const std::string &prefix, std::string instance_name);
+  void create_config_file(const std::shared_ptr<yakka::component> component, const ryml::ConstNodeRef &config, const std::string &prefix, std::string instance_name);
 };
 
 } /* namespace yakka */

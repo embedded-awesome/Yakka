@@ -332,10 +332,10 @@ int main(int argc, char **argv)
   if (result["data"].count() != 0) {
     spdlog::info("Processing additional data: {}", result["data"].as<std::string>());
     const auto additional_data = "{" + result["data"].as<std::string>() + "}";
-    YAML::Node yaml_data       = YAML::Load(additional_data);
-    nlohmann::json json_data   = yaml_data.as<nlohmann::json>();
+    ryml::Tree yaml_data       = ryml::parse_in_arena(ryml::to_csubstr(additional_data));
+    nlohmann::json json_data   = ryml_to_json(yaml_data.crootref());
     spdlog::info("Additional data: {}", json_data.dump());
-    yakka::json_node_merge("/data"_json_pointer, project.project_summary["data"], json_data, &project.project_schema);
+    yakka::json_node_merge(std::vector<std::string>{ "data" }, project.project_summary.rootref(), yaml_data.crootref(), &project.project_schema);
   }
 
   t1 = std::chrono::high_resolution_clock::now();
@@ -352,7 +352,7 @@ int main(int argc, char **argv)
     // Find a component that has that blueprint
     auto result = workspace.find_blueprint(c);
     if (result) {
-      const auto blueprint_options = result.value();
+      const auto blueprint_options = ryml_to_json(result.value().crootref());
       if (blueprint_options.size() == 1) {
         const auto &component_name = blueprint_options[0].get<std::string>();
         auto component_paths       = workspace.find_component(component_name);

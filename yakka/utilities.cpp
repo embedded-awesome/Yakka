@@ -363,6 +363,34 @@ std::string try_render_file(inja::Environment &env, const std::string &filename,
   }
 }
 
+// RapidYAML overloads
+std::string try_render(inja::Environment &env, const std::string &input, const ryml::ConstNodeRef &data)
+{
+  try {
+    // TODO: Convert ryml to format inja can consume
+    // For now, convert to nlohmann::json as bridge
+    nlohmann::json json_data = ryml_to_json(data);
+    return env.render(input, json_data);
+  } catch (std::exception &e) {
+    spdlog::error("Template error: {}\n{}", input, e.what());
+    return "";
+  }
+}
+
+std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::ConstNodeRef &data)
+{
+  try {
+    // TODO: Convert ryml to format inja can consume
+    nlohmann::json json_data = ryml_to_json(data);
+    return env.render_file(filename, json_data);
+  } catch (std::exception &e) {
+    spdlog::error("Template error: {}\n{}", filename, e.what());
+    return "";
+  }
+}
+#endif
+}
+
 void add_common_template_commands(inja::Environment &inja_env)
 {
   inja_env.add_callback("dir", 1, [](inja::Arguments &args) {
@@ -729,6 +757,21 @@ nlohmann::json xml_to_json(const pugi::xml_node &node)
   return j;
 }
 
+// Load file content and parse using RapidYAML
+std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem::path &path)
+{
+  auto file_content = yakka::get_file_contents<std::string>(path);
+  if (!file_content) {
+    return std::unexpected(file_content.error());
+  }
+
+  try {
+    return ryml::parse_in_arena(ryml::to_csubstr(*file_content));
+  } catch (...) {
+    return std::unexpected(std::make_error_code(std::errc::invalid_argument));
+  }
+}
+
 // RapidYAML to nlohmann::json conversion (only used when interfacing with inja or schema validator)
 nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node)
 {
@@ -862,6 +905,196 @@ void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, con
       if (child.has_val()) {
         ryml::NodeRef new_child = target.append_child();
         new_child.set_val(child.val());
+      }
+    }
+  }
+}
+
+/**
+ * Navigate to a specific path in a ryml tree, creating nodes if needed
+ * @param node The root node to navigate from
+ * @param path Vector of path segments (e.g., {"data", "settings"})
+ * @param create_if_missing If true, create missing nodes along the path
+ * @return NodeRef to the node at the specified path, or invalid NodeRef if not found and not created
+ */
+ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const std::vector<std::string> &path, bool create_if_missing)
+{
+  if (!node.valid()) {
+    return node;
+  }
+
+  ryml::NodeRef current = node;
+  for (const auto &segment : path) {
+    if (segment.empty()) continue; // Skip empty segments (e.g., from leading "/")
+    
+    c4::csubstr key = c4::to_csubstr(segment);
+    
+    if (current.has_child(key)) {
+      current = current.find_child(key);
+    } else if (create_if_missing) {
+      // Ensure current node is a map
+      if (!current.is_map()) {
+        if (current.is_seed()) {
+          current |= ryml::MAP;
+        } else {
+          spdlog::error("Cannot navigate through non-map node at path segment '{}'", segment);
+          return ryml::NodeRef(); // Return invalid node
+        }
+      }
+      
+      // Create new child
+      ryml::NodeRef new_child = current.append_child();
+      new_child << ryml::key(key);
+      new_child |= ryml::MAP; // Default to map type
+      current = new_child;
+    } else {
+      spdlog::warn("Path segment '{}' not found", segment);
+      return ryml::NodeRef(); // Return invalid node
+    }
+  }
+  
+  return current;
+}
+
+/**
+ * Merge ryml nodes at a specific path (overload of json_node_merge for ryml)
+ * @param path Vector of path segments relative to merge_target (e.g., {"data", "settings"})
+ * @param merge_target The target node to merge into
+ * @param node The source node to merge from
+ * @param schema Optional schema for merge strategy
+ */
+void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_target, const ryml::ConstNodeRef &node, const schema* schema)
+{
+  if (!merge_target.valid() || !node.valid()) {
+    spdlog::error("Invalid nodes in json_node_merge (ryml version)");
+    return;
+  }
+
+  // Navigate to the target location, creating nodes if necessary
+  ryml::NodeRef target = ryml_navigate_path(merge_target, path, true);
+  
+  if (!target.valid()) {
+    spdlog::error("Failed to navigate to path in json_node_merge (ryml version)");
+    return;
+  }
+
+  // Get merge strategy from schema if available
+  // Note: This requires converting path to json_pointer format for schema lookup
+  schema::merge_strategy strategy = schema::merge_strategy::Default;
+  if (schema != nullptr) {
+    // Build json_pointer from path vector
+    std::string pointer_str;
+    for (const auto &segment : path) {
+      if (!segment.empty()) {
+        pointer_str += "/" + segment;
+      }
+    }
+    if (pointer_str.empty()) {
+      pointer_str = "";
+    }
+    try {
+      nlohmann::json::json_pointer json_ptr(pointer_str);
+      strategy = schema->get_merge_strategy(json_ptr);
+    } catch (...) {
+      // If pointer construction fails, use default strategy
+      strategy = schema::merge_strategy::Default;
+    }
+  }
+
+  // Perform the merge based on node types
+  if (node.is_map()) {
+    if (!target.is_map()) {
+      spdlog::error("Cannot merge map into non-map node");
+      return;
+    }
+    
+    // Merge map nodes
+    for (const auto &child : node.children()) {
+      if (!child.has_key()) continue;
+      
+      c4::csubstr key = child.key();
+      std::string key_str(key.data(), key.size());
+      
+      if (target.has_child(key)) {
+        ryml::NodeRef target_child = target.find_child(key);
+        
+        // Build new path for recursive merge
+        std::vector<std::string> child_path = path;
+        child_path.push_back(key_str);
+        
+        // Recursively merge
+        json_node_merge(child_path, merge_target, child, schema);
+      } else {
+        // Add new key-value pair
+        // TODO: Implement full subtree copy for complex nodes
+        if (child.has_val()) {
+          ryml::NodeRef new_child = target.append_child();
+          new_child << ryml::key(key);
+          new_child.set_val(child.val());
+        }
+      }
+    }
+  } else if (node.is_seq()) {
+    // Handle sequence merging
+    if (target.is_map()) {
+      spdlog::error("Cannot merge sequence into map node");
+      return;
+    }
+    
+    // Convert target to sequence if it's not already
+    if (!target.is_seq()) {
+      if (target.is_seed() || !target.has_val()) {
+        target |= ryml::SEQ;
+      } else {
+        // Target has a scalar value, convert to array with that value
+        c4::csubstr existing_val = target.val();
+        target |= ryml::SEQ;
+        ryml::NodeRef first = target.append_child();
+        first.set_val(existing_val);
+      }
+    }
+    
+    // Append all sequence elements
+    for (const auto &child : node.children()) {
+      if (child.has_val()) {
+        ryml::NodeRef new_child = target.append_child();
+        new_child.set_val(child.val());
+      }
+    }
+  } else if (node.has_val()) {
+    // Handle scalar values
+    if (target.is_map()) {
+      spdlog::error("Cannot merge scalar into map node");
+      return;
+    } else if (target.is_seq()) {
+      // Append to sequence
+      ryml::NodeRef new_child = target.append_child();
+      new_child.set_val(node.val());
+    } else {
+      // Merge scalar into scalar based on strategy
+      if (strategy == schema::merge_strategy::Abort) {
+        std::string path_str;
+        for (const auto &seg : path) {
+          path_str += "/" + seg;
+        }
+        spdlog::error("Conflict detected while merging scalar values at path {}", path_str);
+        return;
+      } else if (strategy == schema::merge_strategy::Overwrite) {
+        target.set_val(node.val());
+      } else if (strategy == schema::merge_strategy::Max || strategy == schema::merge_strategy::Min) {
+        // For numeric comparisons, convert to numbers
+        // TODO: Implement numeric comparison logic
+        target.set_val(node.val()); // Default to overwrite for now
+      } else {
+        // Default: convert to array
+        c4::csubstr existing_val = target.has_val() ? target.val() : c4::csubstr("");
+        target |= ryml::SEQ;
+        if (!existing_val.empty()) {
+          ryml::NodeRef first = target.append_child();
+          first.set_val(existing_val);
+        }
+        ryml::NodeRef second = target.append_child();
+        second.set_val(node.val());
       }
     }
   }

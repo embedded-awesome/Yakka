@@ -123,9 +123,16 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       nlohmann::json project_summary = nlohmann::json::parse(project_summary_stream);
       const auto project_file        = project_summary["project_name"].get<std::string>() + ".yakka";
       if (fs::exists(project_file)) {
-        YAML::Node node = YAML::LoadFile(project_file);
+        auto file_content = yakka::get_file_contents<std::string>(project_file);
+        if (!file_content) {
+          spdlog::error("Failed to read project file: {}", project_file);
+          res.status = 500;
+          return;
+        }
+        ryml::Tree node = ryml::parse_in_arena(ryml::to_csubstr(*file_content));
         // Merge data from the project file
-        json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>());
+        const auto project_json = ryml_to_json(node.crootref());
+        json_node_merge("/data"_json_pointer, project_summary, project_json);
       }
 
       // std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

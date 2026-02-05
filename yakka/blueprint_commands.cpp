@@ -7,23 +7,23 @@
 
 namespace yakka {
 
-process_return echo_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+process_return echo_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
-  if (!command.is_null())
-    captured_output = try_render(inja_env, command.get<std::string>(), project_summary);
+  if (command.valid() && !command.is_seed())
+    captured_output = try_render(inja_env, ryml_get_val_as_string(command), project_summary);
 
   spdlog::get("console")->info("{}", captured_output);
   return { captured_output, 0 };
 }
 
-// blueprint_commands["execute"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return execute_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["execute"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return execute_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
-  if (command.is_null())
+  if (!command.valid() || command.is_seed())
     return { "", -1 };
-  std::string temp = command.get<std::string>();
+  std::string temp = ryml_get_val_as_string(command);
   try {
-    captured_output = inja_env.render(temp, project_summary);
+    captured_output = try_render(inja_env, temp, project_summary);
     //std::replace( captured_output.begin( ), captured_output.end( ), '/', '\\' );
     spdlog::debug("Executing '{}'", captured_output);
     auto [temp_output, retcode] = exec(captured_output, std::string(""));
@@ -38,19 +38,19 @@ process_return execute_command(std::string target, const nlohmann::json &command
     captured_output = "";
     return { "", -1 };
   }
-};
+}
 
-// blueprint_commands["shell"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return shell_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["shell"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return shell_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
-  if (command.is_null())
+  if (!command.valid() || command.is_seed())
     return { "", -1 };
-  std::string temp = command.get<std::string>();
+  std::string temp = ryml_get_val_as_string(command);
   try {
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
-    captured_output = "cmd /k \"" + inja_env.render(temp, project_summary) + "\"";
+    captured_output = "cmd /k \"" + try_render(inja_env, temp, project_summary) + "\"";
 #else
-    captured_output = inja_env.render(temp, project_summary);
+    captured_output = try_render(inja_env, temp, project_summary);
 #endif
     spdlog::debug("Executing '{}' in a shell", captured_output);
     auto [temp_output, retcode] = exec(captured_output, std::string(""));
@@ -67,14 +67,11 @@ process_return shell_command(std::string target, const nlohmann::json &command, 
   }
 };
 
-// blueprint_commands["fix_slashes"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-//   std::replace(captured_output.begin(), captured_output.end(), '\\', '/');
-//   return { captured_output, 0 };
-// };
 
-// blueprint_commands["regex"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return regex_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["regex"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return regex_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   assert(command.contains("search"));
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
   std::regex regex_search(command["search"].get<std::string>());
@@ -167,9 +164,10 @@ process_return regex_command(std::string target, const nlohmann::json &command, 
   return { captured_output, 0 };
 };
 
-// blueprint_commands["template"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return template_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["template"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return template_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   try {
     std::string template_string;
     std::string template_filename;
@@ -219,15 +217,16 @@ process_return template_command(std::string target, const nlohmann::json &comman
 };
 
 // Backwards compatibility with old 'inja' command
-// blueprint_commands["inja"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return inja_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["inja"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return inja_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
   return template_command(target, command, captured_output, project_summary, project_data, inja_env);
 };
 
-// blueprint_commands["save"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return save_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["save"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return save_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   std::string save_filename;
 
   if (command.is_null())
@@ -266,9 +265,10 @@ process_return save_command(std::string target, const nlohmann::json &command, s
   return { captured_output, 0 };
 };
 
-// blueprint_commands["create_directory"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return create_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["create_directory"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return create_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   if (!command.is_null()) {
     std::string filename = "";
     try {
@@ -284,11 +284,12 @@ process_return create_command(std::string target, const nlohmann::json &command,
     }
   }
   return { "", 0 };
-};
+}
 
-// blueprint_commands["verify"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return verify_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["verify"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return verify_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   std::string filename = command.get<std::string>();
   filename             = try_render(inja_env, filename, project_summary);
   if (fs::exists(filename)) {
@@ -300,9 +301,10 @@ process_return verify_command(std::string target, const nlohmann::json &command,
   return { "", -1 };
 };
 
-// blueprint_commands["rm"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return rm_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["rm"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return rm_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   std::string filename = command.get<std::string>();
   filename             = try_render(inja_env, filename, project_summary);
   // Check if the input was a YAML array construct
@@ -323,9 +325,10 @@ process_return rm_command(std::string target, const nlohmann::json &command, std
   return { captured_output, 0 };
 };
 
-// blueprint_commands["rmdir"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return rmdir_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["rmdir"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return rmdir_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   std::string path = command.get<std::string>();
   path             = try_render(inja_env, path, project_summary);
   // Put some checks here
@@ -337,9 +340,10 @@ process_return rmdir_command(std::string target, const nlohmann::json &command, 
   return { captured_output, 0 };
 };
 
-// blueprint_commands["pack"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return pack_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["pack"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return pack_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   std::vector<std::byte> data_output;
 
   if (!command.contains("data")) {
@@ -408,9 +412,10 @@ process_return pack_command(std::string target, const nlohmann::json &command, s
   return { captured_output, 0 };
 };
 
-// blueprint_commands["copy"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return copy_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["copy"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return copy_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   std::string destination;
   nlohmann::json source;
   try {
@@ -474,11 +479,12 @@ process_return copy_command(std::string target, const nlohmann::json &command, s
     return { "", -1 };
   }
   return { "", 0 };
-};
+}
 
-// blueprint_commands["cat"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return cat_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["cat"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return cat_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   std::string filename = try_render(inja_env, command.get<std::string>(), project_summary);
   std::ifstream datafile;
   datafile.open(filename, std::ios_base::in | std::ios_base::binary);
@@ -487,7 +493,7 @@ process_return cat_command(std::string target, const nlohmann::json &command, st
   captured_output = string_stream.str();
   datafile.close();
   return { captured_output, 0 };
-};
+}
 
 // blueprint_commands["new_project"] = [this](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
 //   const auto project_string = command.get<std::string>();
@@ -496,22 +502,32 @@ process_return cat_command(std::string target, const nlohmann::json &command, st
 //   return { "", 0 };
 // };
 
-// blueprint_commands["as_json"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return as_json_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["as_json"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return as_json_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
   const auto temp_json = nlohmann::json::parse(captured_output);
   return { temp_json.dump(2), 0 };
-};
+}
 
-// blueprint_commands["as_yaml"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return as_yaml_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+// blueprint_commands["as_yaml"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return as_yaml_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
-  const auto temp_yaml = YAML::Load(captured_output);
-  return { YAML::Dump(temp_yaml), 0 };
-};
-// blueprint_commands["diff"] = [](std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env) -> yakka::process_return {
-process_return diff_command(std::string target, const nlohmann::json &command, std::string captured_output, const nlohmann::json &project_summary, nlohmann::json &project_data, inja::Environment &inja_env)
+  try {
+    // parse_in_place requires a mutable buffer
+    std::string buf = captured_output;
+    auto cs = ryml::to_csubstr(buf);
+    ryml::Tree t = ryml::parse_in_place(cs);
+    std::string out = ryml::emitrs(t.rootref());
+    return { out, 0 };
+  } catch (std::exception &e) {
+    spdlog::error("Failed to parse/emit YAML: {}", e.what());
+    return { "", -1 };
+  }
+}
+// blueprint_commands["diff"] = [](std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env) -> yakka::process_return {
+process_return diff_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
+  // TODO: Convert to use ryml helper functions when available
   if (!command.is_object()) {
     spdlog::error("'diff' command invalid");
     return { "", -1 };
@@ -536,7 +552,7 @@ process_return diff_command(std::string target, const nlohmann::json &command, s
 
   nlohmann::json patch = nlohmann::json::diff(left, right);
   return { patch.dump(), 0 };
-};
+}
 
 const std::map<const std::string, const blueprint_command> blueprint_commands = {
   // clang-format off

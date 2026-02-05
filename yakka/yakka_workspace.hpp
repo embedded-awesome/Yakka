@@ -1,9 +1,10 @@
 #pragma once
 
-#include "yaml-cpp/yaml.h"
 #include "spdlog/spdlog.h"
 #include "inja.hpp"
 #include "component_database.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <string>
 #include <future>
 #include <expected>
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <functional>
 #include <system_error>
+#include <map>
 
 namespace fs = std::filesystem;
 
@@ -43,11 +45,11 @@ public:
   /**
    * @brief Asynchronously fetches a component from a remote source
    * @param name Name of the component to fetch
-   * @param node YAML node containing component configuration
+    * @param node ryml node containing component configuration
    * @param progress_handler Function to report progress during fetch
    * @return Future containing the path where component was fetched
    */
-  std::future<std::filesystem::path> fetch_component(std::string_view name, const YAML::Node &node, std::function<void(std::string_view, size_t)> progress_handler);
+  std::future<std::filesystem::path> fetch_component(std::string_view name, const ryml::ConstNodeRef &node, std::function<void(std::string_view, size_t)> progress_handler);
 
   /**
    * @brief Loads all component registries from the workspace
@@ -68,9 +70,9 @@ public:
   /**
    * @brief Finds a component in the loaded registries
    * @param name Name of the component to find
-   * @return Optional YAML node containing the component details if found
+    * @return Optional ryml node containing the component details if found
    */
-  std::optional<YAML::Node> find_registry_component(std::string_view name) const;
+  std::optional<ryml::ConstNodeRef> find_registry_component(std::string_view name) const;
 
   /**
    * @brief Finds a component in local, shared or package databases
@@ -88,14 +90,14 @@ public:
    * @param feature Name of the feature to find
    * @return Optional JSON containing feature provider info
    */
-  std::optional<nlohmann::json> find_feature(std::string_view feature) const;
+  std::optional<ryml::Tree> find_feature(std::string_view feature) const;
 
   /**
    * @brief Finds a blueprint provider in the workspace
    * @param blueprint Name of the blueprint to find
    * @return Optional JSON containing blueprint provider info
    */
-  std::optional<nlohmann::json> find_blueprint(std::string_view blueprint) const;
+  std::optional<ryml::Tree> find_blueprint(std::string_view blueprint) const;
 
   /**
    * @brief Loads the workspace configuration file
@@ -171,16 +173,16 @@ public:
   std::shared_ptr<spdlog::logger> log;
 
   /** @brief Collection of loaded component registries */
-  YAML::Node registries;
+  std::map<std::string, ryml::Tree> registries;
 
   /** @brief Summary information about the workspace */
-  nlohmann::json summary;
+  ryml::Tree summary;
 
   /** @brief Projects configuration and information */
-  nlohmann::json projects;
+  ryml::Tree projects;
 
   /** @brief Workspace version information */
-  nlohmann::json versions;
+  ryml::Tree versions;
 
   /** @brief List of ongoing component fetch operations */
   std::map<std::string, std::future<void>> fetching_list;

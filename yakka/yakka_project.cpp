@@ -5,6 +5,8 @@
 #include "spdlog/spdlog.h"
 #include "glob/glob.h"
 #include <nlohmann/json-schema.hpp>
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <fstream>
 #include <chrono>
 #include <thread>
@@ -104,14 +106,19 @@ void project::init_project()
 
   // Check if there is a project file
   if (fs::exists(project_file)) {
-    YAML::Node node = YAML::LoadFile(project_file.generic_string());
-    // Merge data from the project file
-    json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>(), &data_schema);
+    auto node = ryml_load_file(project_file);
+    if (!node) {
+      spdlog::error("Failed to load project file: {}", project_file.generic_string());
+    } else {
+      // Merge data from the project file
+      json_node_merge(std::vector<std::string>{ "data" }, project_summary.rootref(), node->crootref(), &data_schema);
+    }
   }
 }
 
-void project::process_requirements(std::shared_ptr<yakka::component> component, nlohmann::json child_node)
+void project::process_requirements(std::shared_ptr<yakka::component> component, const ryml::ConstNodeRef &child_node)
 {
+  // TODO: Implement ryml version - needs json_node_merge, json_pointer, .contains(), .get<>(), .is_string(), .is_array(), .is_object(), .items()
   // Merge the feature values into the parent component
   json_node_merge(""_json_pointer, component->json, child_node, &project_schema);
 
@@ -451,7 +458,8 @@ project::state project::process_choice(const std::string &choice_name)
     spdlog::info("Selecting default choice for {}", choice_name);
 
     // Lambda to contain logic for adding default choice
-    const auto add_default_choice = [&](const nlohmann::json &choice_data) -> project::state {
+    const auto add_default_choice = [&](const ryml::ConstNodeRef &choice_data) -> project::state {
+      // TODO: Implement ryml version - needs .contains(), .get<>()
       if (choice_data.contains("feature")) {
         unprocessed_features.insert(choice_data["feature"].get<std::string>());
       } else if (choice_data.contains("component")) {
@@ -591,7 +599,7 @@ project::state project::evaluate_dependencies()
           continue;
         }
 
-        auto feature_node = f.value();
+        auto feature_node = ryml_to_json(f.value().crootref());
         std::unordered_set<std::string> recommended_options;
         std::unordered_set<std::string> other_options;
 
@@ -666,8 +674,10 @@ project::state project::evaluate_dependencies()
 
   for (const auto &r: slc_required) {
     auto f = workspace.find_feature(r);
-    if (f.has_value())
-      spdlog::error("Found a possible provider for feature '{}' but there are multiple options:\n{}", r, f.value().dump(2));
+    if (f.has_value()) {
+      const auto feature_json = ryml_to_json(f.value().crootref());
+      spdlog::error("Found a possible provider for feature '{}' but there are multiple options:\n{}", r, feature_json.dump(2));
+    }
     else
       spdlog::error("Failed to find provider for feature '{}'", r);
   }
@@ -736,6 +746,7 @@ void project::generate_project_summary()
   project_summary["project_output"] = default_output_directory + project_name;
   project_summary["configuration"]  = workspace.summary["configuration"];
 
+  // TODO: Implement ryml version - needs json::object()
   if (!project_summary.contains("tools"))
     project_summary["tools"] = nlohmann::json::object();
 
@@ -764,6 +775,7 @@ void project::generate_project_summary()
   for (const auto &i: this->initial_features)
     project_summary["initial"]["features"].push_back(i);
 
+  // TODO: Implement ryml version - needs json::object()
   project_summary["data"]         = nlohmann::json::object();
   project_summary["host"]         = nlohmann::json::object();
   project_summary["host"]["name"] = host_os_string;
@@ -844,6 +856,7 @@ void project::save_summary()
   if (fs::exists(template_contribution_filename)) {
     // Read the content and compare to the current value, only rewrite if content is different
     std::ifstream template_file_stream(template_contribution_filename);
+    // TODO: Implement ryml version - needs json::parse() and json::diff()
     auto existing_template_contribution = nlohmann::json::parse(template_file_stream);
     auto patch                          = nlohmann::json::diff(template_contributions, existing_template_contribution);
     if (patch.size() == 0) {
@@ -886,6 +899,7 @@ void project::update_project_data()
   // Merge all the component data into the project summary
   for (const auto &c: components) {
     for (const auto &r: required_data) {
+      // TODO: Implement ryml version - needs json_pointer(), json::array(), json::object()
       const auto pointer = nlohmann::json::json_pointer(r);
       if (!c->json.contains(pointer)) {
         continue;
@@ -905,8 +919,9 @@ void project::update_project_data()
   // Apply schema with default values
 }
 
-bool project::is_disqualified_by_unless(const nlohmann::json &node)
+bool project::is_disqualified_by_unless(const ryml::ConstNodeRef &node)
 {
+  // TODO: Implement ryml version - needs .contains(), array iteration, .get<>()
   if (node.contains("unless"))
     for (const auto &u: node["unless"])
       if (required_features.contains(u.get<std::string>()))
@@ -915,8 +930,9 @@ bool project::is_disqualified_by_unless(const nlohmann::json &node)
   return false;
 }
 
-bool project::condition_is_fulfilled(const nlohmann::json &node)
+bool project::condition_is_fulfilled(const ryml::ConstNodeRef &node)
 {
+  // TODO: Implement ryml version - needs .contains(), array iteration, .get<>()
   if (node.contains("condition"))
     for (const auto &condition: node["condition"])
       if (!required_features.contains(condition.get<std::string>()))
@@ -925,8 +941,9 @@ bool project::condition_is_fulfilled(const nlohmann::json &node)
   return true;
 }
 
-void project::create_config_file(const std::shared_ptr<yakka::component> component, const nlohmann::json &config, const std::string &prefix, std::string instance_name)
+void project::create_config_file(const std::shared_ptr<yakka::component> component, const ryml::ConstNodeRef &config, const std::string &prefix, std::string instance_name)
 {
+  // TODO: Implement ryml version - needs .contains(), .get<>(), array iteration
   std::string config_filename            = config["path"].get<std::string>();
   std::filesystem::path config_file_path = component->component_path / config_filename;
 
@@ -966,6 +983,7 @@ void project::create_config_file(const std::shared_ptr<yakka::component> compone
   }
 
   // Create blueprints
+  // TODO: Implement ryml version - needs json object construction syntax { { "key", value } }
   nlohmann::json blueprint = { { "depends", nullptr }, { "process", nullptr } };
   blueprint["depends"].push_back(config_file_path.string());
   blueprint["depends"].push_back("{{project_output}}/template_contributions.json");
@@ -1043,6 +1061,7 @@ void project::process_slc_rules()
         if (is_disqualified_by_unless(p) || !condition_is_fulfilled(p))
           continue;
 
+        // TODO: Implement ryml version - needs ternary operator with ryml nodes
         nlohmann::json temp = p.contains("value") ? p : p["name"];
         if (instantiable) {
           if (temp.contains("value"))
@@ -1130,6 +1149,7 @@ void project::process_slc_rules()
 
           const auto target = "{{project_output}}/generated/" + target_file.string();
 
+          // TODO: Implement ryml version - lambda parameter needs ryml::NodeRef
           auto add_generated_item = [&](nlohmann::json &node) {
             // Create generated items
             if (target_file.extension() == ".c" || target_file.extension() == ".cpp")
@@ -1145,6 +1165,7 @@ void project::process_slc_rules()
           add_generated_item(c->json);
 
           // Create blueprints
+          // TODO: Implement ryml version - needs json object construction syntax { { "key", value } }
           nlohmann::json blueprint = { { "depends", nullptr }, { "process", nullptr } };
           blueprint["depends"].push_back({ { c->json["directory"].get<std::string>() + "/" + template_file.string() } });
           blueprint["depends"].push_back({ { "{{project_output}}/template_contributions.json" } });
@@ -1169,6 +1190,7 @@ void project::process_slc_rules()
     }
 
     // Process toolchain settings
+    // TODO: Implement ryml version - needs json::object(), json::array()
     project_summary["toolchain_settings"] = nlohmann::json::object();
     for (const auto &c: components) {
       if (c->json.contains("toolchain_settings") == false)
@@ -1191,6 +1213,7 @@ void project::process_slc_rules()
   }
 
   // Go through the template_contributions and sort via priorities
+  // TODO: Implement ryml version - local json variables for sorting
   nlohmann::json new_contributions;
   for (auto &item: template_contributions) {
     while (!item.is_null() && item.size() > 0) {

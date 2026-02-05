@@ -30,6 +30,8 @@ std::string component_dotname_to_id(const std::string dotname);
 std::filesystem::path get_yakka_shared_home();
 std::string try_render(inja::Environment &env, const std::string &input, const nlohmann::json &data);
 std::string try_render_file(inja::Environment &env, const std::string &filename, const nlohmann::json &data);
+std::string try_render(inja::Environment &env, const std::string &input, const ryml::ConstNodeRef &data);
+std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::ConstNodeRef &data);
 std::pair<std::string, int> download_resource(const std::string url, std::filesystem::path destination);
 nlohmann::json::json_pointer create_condition_pointer(const nlohmann::json condition);
 void find_json_keys(const nlohmann::json &j, const std::string &target_key, const std::string &current_path, nlohmann::json& paths);
@@ -44,9 +46,12 @@ void add_common_template_commands(inja::Environment &inja_env);
 // RapidYAML conversion utilities
 nlohmann::json ryml_to_json(const ryml::ConstNodeRef &node);
 void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, const schema* schema = nullptr);
+void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_target, const ryml::ConstNodeRef &node, const schema* schema = nullptr);
 std::string ryml_get_val_as_string(const ryml::ConstNodeRef &node);
 bool ryml_has_child(const ryml::ConstNodeRef &node, c4::csubstr key);
 ryml::ConstNodeRef ryml_get_child(const ryml::ConstNodeRef &node, c4::csubstr key);
+ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const std::vector<std::string> &path, bool create_if_missing = true);
+std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem::path &path);
 
 template <class CharContainer>
 static std::expected<size_t, std::error_code> get_file_contents(std::filesystem::path filename, CharContainer *container)
