@@ -7,6 +7,7 @@
 #include <cstddef>
 
 #include "c4/yml/tree.hpp"
+#include "c4/yml/pointer.hpp"
 #include "c4/base64.hpp"
 
 #ifdef __clang__
@@ -352,6 +353,81 @@ public:
         _C4RV();
         size_t ch = tree__->child(id__, pos);
         return ch != NONE ? Impl(tree__, ch) : NodeRef(tree__, id__, pos);
+    }
+
+    /** Navigate to a node using a Pointer path. O(num_segments * num_children).
+     * For const version, requires that all segments exist. */
+    C4_ALWAYS_INLINE C4_PURE ConstImpl operator[] (Pointer const& ptr) const noexcept
+    {
+        _C4RV();
+        ConstImpl curr = *((ConstImpl const*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            size_t ch = curr.tree_->find_child(curr.id_, ptr[i]);
+            _RYML_CB_ASSERT(curr.tree_->m_callbacks, ch != NONE);
+            curr = ConstImpl(curr.tree_, ch);
+        }
+        return curr;
+    }
+
+    /** Navigate to a node using a Pointer path. O(num_segments * num_children).
+     * Returns a seed node if any segment in the path is not found. */
+    template<class U=Impl>
+    C4_ALWAYS_INLINE C4_PURE auto operator[] (Pointer const& ptr) noexcept -> _C4_IF_MUTABLE(Impl)
+    {
+        _C4RV();
+        Impl curr = *((Impl*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            size_t ch = curr.m_tree->find_child(curr.m_id, ptr[i]);
+            if(ch != NONE)
+            {
+                curr = Impl(curr.m_tree, ch);
+            }
+            else
+            {
+                // Return a seed node for the missing path segment
+                return NodeRef(curr.m_tree, curr.m_id, ptr[i]);
+            }
+        }
+        return curr;
+    }
+
+    /** Navigate to a node using a Pointer path. O(num_segments * num_children).
+     * Throws an error if any segment in the path is not found. */
+    C4_ALWAYS_INLINE C4_PURE ConstImpl at(Pointer const& ptr) const
+    {
+        _C4RV();
+        ConstImpl curr = *((ConstImpl const*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            size_t ch = curr.tree_->find_child(curr.id_, ptr[i]);
+            if(ch == NONE)
+            {
+                _RYML_CB_ERR(curr.tree_->m_callbacks, "pointer path segment not found");
+            }
+            curr = ConstImpl(curr.tree_, ch);
+        }
+        return curr;
+    }
+
+    /** Navigate to a node using a Pointer path. O(num_segments * num_children).
+     * Throws an error if any segment in the path is not found. */
+    template<class U=Impl>
+    C4_ALWAYS_INLINE C4_PURE auto at(Pointer const& ptr) -> _C4_IF_MUTABLE(Impl)
+    {
+        _C4RV();
+        Impl curr = *((Impl*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            size_t ch = curr.m_tree->find_child(curr.m_id, ptr[i]);
+            if(ch == NONE)
+            {
+                _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment not found");
+            }
+            curr = Impl(curr.m_tree, ch);
+        }
+        return curr;
     }
 
     /** @} */
