@@ -82,7 +82,7 @@ std::expected<void, error> component_database::load(const path &workspace_path)
     }
     database = std::move(*loaded);
 
-    if (!ryml_has_child(database.crootref(), "components")) {
+    if (!database.crootref().has_child("components")) {
       initialize_database(database);
       scan_for_components(this->workspace_path);
       return save();
@@ -131,15 +131,15 @@ std::expected<bool, error> component_database::add_component(std::string_view co
   const auto id_str      = std::string{ component_id };
 
   auto components_node = ryml_get_child(database.crootref(), "components");
-  if (components_node.valid() && ryml_has_child(components_node, c4::to_csubstr(id_str))) {
+  if (components_node.valid() && components_node.has_child(c4::to_csubstr(id_str))) {
     auto entries = ryml_get_child(components_node, c4::to_csubstr(id_str));
     if (entries.is_seq()) {
       for (const auto &entry : entries.children()) {
-        if (ryml_get_val_as_string(entry) == path_string) {
+        if (ryml_val_string(entry) == path_string) {
           return false;
         }
       }
-    } else if (entries.has_val() && ryml_get_val_as_string(entries) == path_string) {
+    } else if (entries.has_val() && ryml_val_string(entries) == path_string) {
       return false;
     }
   }
@@ -206,13 +206,13 @@ const path &component_database::get_path() const noexcept
 std::expected<path, error> component_database::get_component(std::string_view id, flag flags) const
 {
   auto components_node = ryml_get_child(database.crootref(), "components");
-  if (!components_node.valid() || !ryml_has_child(components_node, c4::to_csubstr(std::string{ id }))) {
+  if (!components_node.valid() || !components_node.has_child(c4::to_csubstr(std::string{ id }))) {
     return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
 
   const auto node = ryml_get_child(components_node, c4::to_csubstr(std::string{ id }));
   auto iterate_node = [&](const ryml::ConstNodeRef &entry) -> std::optional<path> {
-    const auto path = this->workspace_path / std::filesystem::path{ ryml_get_val_as_string(entry) };
+    const auto path = this->workspace_path / std::filesystem::path{ ryml_val_string(entry) };
     const auto extension = path.extension();
     if (flags == flag::IGNORE_ALL_SLC && ((extension == slcc_component_extension) || (extension == slce_component_extension) || (extension == slcp_component_extension)))
       return std::nullopt;
@@ -260,12 +260,12 @@ std::expected<std::string, error> component_database::get_component_id(const pat
     }
     std::string name;
     c4::from_chars(entry.key(), &name);
-    if (entry.has_val() && std::filesystem::path{ ryml_get_val_as_string(entry) } == path) {
+    if (entry.has_val() && std::filesystem::path{ ryml_val_string(entry) } == path) {
       return name;
     }
     if (entry.is_seq()) {
       for (const auto &n : entry.children()) {
-        if (std::filesystem::path{ ryml_get_val_as_string(n) } == path) {
+        if (std::filesystem::path{ ryml_val_string(n) } == path) {
           return name;
         }
       }
@@ -278,7 +278,7 @@ std::optional<const json> component_database::get_blueprint_provider(std::string
 {
   const auto blueprint_str = std::string{ blueprint };
   auto blueprints_node = ryml_get_child(database.crootref(), "blueprints");
-  if (blueprints_node.valid() && ryml_has_child(blueprints_node, c4::to_csubstr(blueprint_str))) {
+  if (blueprints_node.valid() && blueprints_node.has_child(c4::to_csubstr(blueprint_str))) {
     return std::optional<const json>(std::in_place, ryml_to_json(ryml_get_child(blueprints_node, c4::to_csubstr(blueprint_str))));
   }
 
@@ -289,7 +289,7 @@ std::optional<const json> component_database::get_serve_endpoint_provider(std::s
 {
   const auto endpoint_str = std::string{ endpoint };
   auto serve_node = ryml_get_child(database.crootref(), "serve");
-  if (serve_node.valid() && ryml_has_child(serve_node, c4::to_csubstr(endpoint_str))) {
+  if (serve_node.valid() && serve_node.has_child(c4::to_csubstr(endpoint_str))) {
     return std::optional<const json>(std::in_place, ryml_to_json(ryml_get_child(serve_node, c4::to_csubstr(endpoint_str))));
   }
   return std::nullopt;
@@ -353,7 +353,7 @@ std::optional<const json> component_database::get_feature_provider(std::string_v
 {
   const auto feature_str = std::string{ feature };
   auto features_node = ryml_get_child(database.crootref(), "features");
-  if (features_node.valid() && ryml_has_child(features_node, c4::to_csubstr(feature_str))) {
+  if (features_node.valid() && features_node.has_child(c4::to_csubstr(feature_str))) {
     return std::optional<const json>(std::in_place, ryml_to_json(ryml_get_child(features_node, c4::to_csubstr(feature_str))));
   }
   return std::nullopt;

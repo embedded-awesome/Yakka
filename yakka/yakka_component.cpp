@@ -1,5 +1,5 @@
 #include "yakka_component.hpp"
-#include "yakka_schema.hpp"
+// #include "yakka_schema.hpp"
 #include "utilities.hpp"
 #include "spdlog/spdlog.h"
 #include "semver/semver.hpp"
@@ -94,12 +94,12 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
     dir_node << path_string;
 
     // Set version
-    if (ryml_has_child(root_node, "version")) {
+    if (root_node.has_child("version")) {
       auto version_node = ryml_get_child(root_node, "version");
       try {
-        this->version = semver::version::parse(ryml_get_val_as_string(version_node));
+        this->version = semver::version::parse(ryml_val_string(version_node));
       } catch (std::exception &e) {
-        spdlog::error("Failed to parse version: '{}'\n{}\n", ryml_get_val_as_string(version_node), e.what());
+        spdlog::error("Failed to parse version: '{}'\n{}\n", ryml_val_string(version_node), e.what());
         this->version = "0.0.0"_v;
       }
     } else {
@@ -107,14 +107,14 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
     }
 
     // Ensure certain nodes are sequences
-    if (ryml_has_child(root_node, "requires")) {
+    if (root_node.has_child("requires")) {
       auto requires_node = root_node.find_child("requires");
       
       if (requires_node.has_child("components")) {
         auto components_node = requires_node.find_child("components");
         // If it's a scalar, convert to sequence
         if (components_node.is_val()) {
-          std::string value = ryml_get_val_as_string(components_node);
+          std::string value = ryml_val_string(components_node);
           components_node |= ryml::SEQ;
           auto child = components_node.append_child();
           child << value;
@@ -125,7 +125,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
         auto features_node = requires_node.find_child("features");
         // If it's a scalar, convert to sequence
         if (features_node.is_val()) {
-          std::string value = ryml_get_val_as_string(features_node);
+          std::string value = ryml_val_string(features_node);
           features_node |= ryml::SEQ;
           auto child = features_node.append_child();
           child << value;
@@ -138,7 +138,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
         if (components_node.is_seq()) {
           for (auto comp : components_node.children()) {
             if (comp.has_val()) {
-              std::string comp_str = ryml_get_val_as_string(comp);
+              std::string comp_str = ryml_val_string(comp);
               if (!comp_str.empty() && comp_str.front() == '.') {
                 comp << (path_string + comp_str);
               }
@@ -149,7 +149,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
     }
 
     // Handle supports section similarly
-    if (ryml_has_child(root_node, "supports")) {
+    if (root_node.has_child("supports")) {
       auto supports_node = root_node.find_child("supports");
       
       if (supports_node.has_child("features")) {
@@ -161,7 +161,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
               if (components_node.is_seq()) {
                 for (auto comp : components_node.children()) {
                   if (comp.has_val()) {
-                    std::string comp_str = ryml_get_val_as_string(comp);
+                    std::string comp_str = ryml_val_string(comp);
                     if (!comp_str.empty() && comp_str.front() == '.') {
                       comp << (path_string + comp_str);
                     }
@@ -182,7 +182,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
               if (req_components_node.is_seq()) {
                 for (auto comp : req_components_node.children()) {
                   if (comp.has_val()) {
-                    std::string comp_str = ryml_get_val_as_string(comp);
+                    std::string comp_str = ryml_val_string(comp);
                     if (!comp_str.empty() && comp_str.front() == '.') {
                       comp << (path_string + comp_str);
                     }
@@ -215,9 +215,9 @@ void component::convert_to_yakka()
   auto root_node = tree.rootref();
   
   // Set basic data such as directory and name
-  if (ryml_has_child(root_node, "id")) {
+  if (root_node.has_child("id")) {
     auto id_node = ryml_get_child(root_node, "id");
-    std::string id_val = ryml_get_val_as_string(id_node);
+    std::string id_val = ryml_val_string(id_node);
     
     // Set name
     if (!root_node.has_child("name")) {
@@ -238,18 +238,18 @@ void component::convert_to_yakka()
     name_node << this->id;
   }
 
-  if (ryml_has_child(root_node, "component_root_path")) {
+  if (root_node.has_child("component_root_path")) {
     std::string temp_path;
     if (!package_path.empty())
       temp_path = package_path.string() + "/";
     auto root_path_node = ryml_get_child(root_node, "component_root_path");
-    component_path = temp_path + ryml_get_val_as_string(root_path_node);
-  } else if (ryml_has_child(root_node, "root_path")) {
+    component_path = temp_path + ryml_val_string(root_path_node);
+  } else if (root_node.has_child("root_path")) {
     std::string temp_path;
     if (!package_path.empty())
       temp_path = package_path.string() + "/";
     auto root_path_node = ryml_get_child(root_node, "root_path");
-    component_path = temp_path + ryml_get_val_as_string(root_path_node);
+    component_path = temp_path + ryml_val_string(root_path_node);
   } else {
     if (package_path.empty())
       if (this->type == SLCP_FILE)
@@ -275,7 +275,7 @@ void component::convert_to_yakka()
   }
 
   // Process 'provides' - convert from array format to features format
-  if (ryml_has_child(root_node, "provides")) {
+  if (root_node.has_child("provides")) {
     auto provides_node = root_node.find_child("provides");
     if (provides_node.is_seq()) {
       // Create new provides structure
@@ -288,10 +288,10 @@ void component::convert_to_yakka()
       
       for (const auto &p : provides_node.children()) {
         if (p.is_map() && p.has_child("name")) {
-          auto name_val = ryml_get_val_as_string(p.find_child("name"));
+          auto name_val = ryml_val_string(p.find_child("name"));
           
           if (p.has_child("condition")) {
-            // TODO: Handle conditional provides - needs RymlPointer equivalent
+            // TODO: Handle conditional provides - needs ryml::Pointer equivalent
             // For now, just add to features
             auto feat_child = features_node.append_child();
             feat_child << name_val;
@@ -308,7 +308,7 @@ void component::convert_to_yakka()
   }
 
   // Process 'requires' - convert from array format to features format
-  if (ryml_has_child(root_node, "requires")) {
+  if (root_node.has_child("requires")) {
     auto requires_node = root_node.find_child("requires");
     if (requires_node.is_seq()) {
       // Create new requires structure
@@ -321,7 +321,7 @@ void component::convert_to_yakka()
       
       for (const auto &p : requires_node.children()) {
         if (p.is_map() && p.has_child("name")) {
-          auto name_val = ryml_get_val_as_string(p.find_child("name"));
+          auto name_val = ryml_val_string(p.find_child("name"));
           
           if (p.has_child("condition")) {
             // TODO: Handle conditional requires
@@ -340,7 +340,7 @@ void component::convert_to_yakka()
   }
 
   // Process 'component' (only available for slcp)
-  if (ryml_has_child(root_node, "component")) {
+  if (root_node.has_child("component")) {
     auto component_node = root_node.find_child("component");
     if (component_node.is_seq()) {
       // Ensure requires/components exists
@@ -360,7 +360,7 @@ void component::convert_to_yakka()
       
       for (const auto &p : component_node.children()) {
         if (p.is_map() && p.has_child("id")) {
-          auto id_val = ryml_get_val_as_string(p.find_child("id"));
+          auto id_val = ryml_val_string(p.find_child("id"));
           
           // Add to requires/components
           auto comp_child = req_components_node.append_child();

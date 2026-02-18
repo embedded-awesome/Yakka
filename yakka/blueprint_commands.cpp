@@ -10,7 +10,7 @@ namespace yakka {
 process_return echo_command(std::string target, const ryml::ConstNodeRef &command, std::string captured_output, const ryml::ConstNodeRef &project_summary, ryml::NodeRef &project_data, inja::Environment &inja_env)
 {
   if (command.valid() && command.has_val())
-    captured_output = try_render(inja_env, ryml_get_val_as_string(command), project_summary);
+    captured_output = try_render(inja_env, ryml_val_string(command), project_summary);
 
   spdlog::get("console")->info("{}", captured_output);
   return { captured_output, 0 };
@@ -21,7 +21,7 @@ process_return execute_command(std::string target, const ryml::ConstNodeRef &com
 {
   if (!command.valid() || !command.has_val())
     return { "", -1 };
-  std::string temp = ryml_get_val_as_string(command);
+  std::string temp = ryml_val_string(command);
   try {
     captured_output = try_render(inja_env, temp, project_summary);
     //std::replace( captured_output.begin( ), captured_output.end( ), '/', '\\' );
@@ -45,7 +45,7 @@ process_return shell_command(std::string target, const ryml::ConstNodeRef &comma
 {
   if (!command.valid() || !command.has_val())
     return { "", -1 };
-  std::string temp = ryml_get_val_as_string(command);
+  std::string temp = ryml_val_string(command);
   try {
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
     captured_output = "cmd /k \"" + try_render(inja_env, temp, project_summary) + "\"";
@@ -77,30 +77,30 @@ process_return regex_command(std::string target, const ryml::ConstNodeRef &comma
     return { "", -1 };
   }
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
-  std::regex regex_search(ryml_get_val_as_string(search_node));
+  std::regex regex_search(ryml_val_string(search_node));
 #else
-  std::regex regex_search(ryml_get_val_as_string(search_node), std::regex::multiline);
+  std::regex regex_search(ryml_val_string(search_node), std::regex::multiline);
 #endif
   const auto prefix_node = ryml_get_child(command, "prefix");
   const auto suffix_node = ryml_get_child(command, "suffix");
-  std::string prefix = prefix_node.valid() ? try_render(inja_env, ryml_get_val_as_string(prefix_node), project_summary) : "";
-  std::string suffix = suffix_node.valid() ? try_render(inja_env, ryml_get_val_as_string(suffix_node), project_summary) : "";
+  std::string prefix = prefix_node.valid() ? try_render(inja_env, ryml_val_string(prefix_node), project_summary) : "";
+  std::string suffix = suffix_node.valid() ? try_render(inja_env, ryml_val_string(suffix_node), project_summary) : "";
 
-  if (ryml_has_child(command, "split")) {
+  if (command.has_child("split")) {
     std::istringstream ss(captured_output);
     std::string line;
     captured_output = "";
 
     while (std::getline(ss, line)) {
-      if (ryml_has_child(command, "replace")) {
+      if (command.has_child("replace")) {
         const auto replace_node = ryml_get_child(command, "replace");
-        std::string r = std::regex_replace(line, regex_search, ryml_get_val_as_string(replace_node), std::regex_constants::format_no_copy);
+        std::string r = std::regex_replace(line, regex_search, ryml_val_string(replace_node), std::regex_constants::format_no_copy);
         captured_output.append(r);
-      } else if (ryml_has_child(command, "match")) {
+      } else if (command.has_child("match")) {
         std::smatch sm;
-        std::string new_output      = prefix_node.valid() ? ryml_get_val_as_string(prefix_node) : "";
+        std::string new_output      = prefix_node.valid() ? ryml_val_string(prefix_node) : "";
         inja::Environment local_env = inja_env; // Create copy and override `$()` function
-        const auto match_string     = ryml_get_val_as_string(ryml_get_child(command, "match"));
+        const auto match_string     = ryml_val_string(ryml_get_child(command, "match"));
         local_env.add_callback("reg", 1, [&](const inja::Arguments &args) {
           return sm[args[0]->get<int>()].str();
         });
@@ -110,9 +110,9 @@ process_return regex_command(std::string target, const ryml::ConstNodeRef &comma
           captured_output = sm.suffix();
         }
         if (suffix_node.valid())
-          new_output += ryml_get_val_as_string(suffix_node);
+          new_output += ryml_val_string(suffix_node);
         captured_output = new_output;
-      } else if (ryml_has_child(command, "to_yaml")) {
+      } else if (command.has_child("to_yaml")) {
         std::smatch s;
         if (!std::regex_match(line, s, regex_search))
           continue;
@@ -121,25 +121,25 @@ process_return regex_command(std::string target, const ryml::ConstNodeRef &comma
         int i   = 1;
         const auto to_yaml_node = ryml_get_child(command, "to_yaml");
         for (const auto &v: to_yaml_node.children()) {
-          node[0][ryml_get_val_as_string(v)] = s[i++].str();
+          node[0][ryml_val_string(v)] = s[i++].str();
         }
 
         if (prefix_node.valid())
-          captured_output.append(try_render(inja_env, ryml_get_val_as_string(prefix_node), project_summary));
+          captured_output.append(try_render(inja_env, ryml_val_string(prefix_node), project_summary));
         captured_output.append(YAML::Dump(node));
         captured_output.append("\n");
         if (suffix_node.valid())
-          captured_output.append(try_render(inja_env, ryml_get_val_as_string(suffix_node), project_summary));
+          captured_output.append(try_render(inja_env, ryml_val_string(suffix_node), project_summary));
       }
     }
-  } else if (ryml_has_child(command, "to_yaml")) {
+  } else if (command.has_child("to_yaml")) {
     YAML::Node yaml;
     for (std::smatch sm; std::regex_search(captured_output, sm, regex_search);) {
       YAML::Node new_node;
       int i = 1;
       const auto to_yaml_node = ryml_get_child(command, "to_yaml");
       for (const auto &v: to_yaml_node.children()) {
-        new_node[ryml_get_val_as_string(v)] = sm[i++].str();
+        new_node[ryml_val_string(v)] = sm[i++].str();
       }
       yaml.push_back(new_node);
       captured_output = sm.suffix();
@@ -151,14 +151,14 @@ process_return regex_command(std::string target, const ryml::ConstNodeRef &comma
     // captured_output.append(YAML::Dump(yaml));
     // captured_output.append("\n");
     // captured_output.append(suffix);
-  } else if (ryml_has_child(command, "replace")) {
+  } else if (command.has_child("replace")) {
     const auto replace_node = ryml_get_child(command, "replace");
-    captured_output = prefix + std::regex_replace(captured_output, regex_search, ryml_get_val_as_string(replace_node)) + suffix;
-  } else if (ryml_has_child(command, "match")) {
+    captured_output = prefix + std::regex_replace(captured_output, regex_search, ryml_val_string(replace_node)) + suffix;
+  } else if (command.has_child("match")) {
     std::smatch sm;
     std::string new_output      = prefix;
     inja::Environment local_env = inja_env; // Create copy and override `$()` function
-    const auto match_string     = ryml_get_val_as_string(ryml_get_child(command, "match"));
+    const auto match_string     = ryml_val_string(ryml_get_child(command, "match"));
     local_env.add_callback("reg", 1, [&](const inja::Arguments &args) {
       return sm[args[0]->get<int>()].str();
     });
@@ -193,19 +193,19 @@ process_return template_command(std::string target, const ryml::ConstNodeRef &co
     };
 
     if (command.valid() && command.has_val() && !command.is_map() && !command.is_seq()) {
-      captured_output = try_render(inja_env, ryml_get_val_as_string(command), project_summary);
+      captured_output = try_render(inja_env, ryml_val_string(command), project_summary);
       return { captured_output, 0 };
     }
 
     if (command.valid() && command.is_map()) {
-      if (ryml_has_child(command, "data_file")) {
-        std::filesystem::path data_filename = try_render(inja_env, ryml_get_val_as_string(ryml_get_child(command, "data_file")), project_summary);
+      if (command.has_child("data_file")) {
+        std::filesystem::path data_filename = try_render(inja_env, ryml_val_string(ryml_get_child(command, "data_file")), project_summary);
         auto loaded = ryml_load_file(data_filename);
         if (loaded) {
           data = std::move(*loaded);
         }
-      } else if (ryml_has_child(command, "data")) {
-        std::string data_string = try_render(inja_env, ryml_get_val_as_string(ryml_get_child(command, "data")), project_summary);
+      } else if (command.has_child("data")) {
+        std::string data_string = try_render(inja_env, ryml_val_string(ryml_get_child(command, "data")), project_summary);
         try {
           data = ryml::parse_in_arena(ryml::to_csubstr(data_string));
         } catch (...) {
@@ -213,14 +213,14 @@ process_return template_command(std::string target, const ryml::ConstNodeRef &co
         }
       }
 
-      if (ryml_has_child(command, "template_file")) {
-        template_filename = try_render(inja_env, ryml_get_val_as_string(ryml_get_child(command, "template_file")), project_summary);
+      if (command.has_child("template_file")) {
+        template_filename = try_render(inja_env, ryml_val_string(ryml_get_child(command, "template_file")), project_summary);
         captured_output   = try_render_file(inja_env, template_filename, render_data());
         return { captured_output, 0 };
       }
 
-      if (ryml_has_child(command, "template")) {
-        template_string = ryml_get_val_as_string(ryml_get_child(command, "template"));
+      if (command.has_child("template")) {
+        template_string = ryml_val_string(ryml_get_child(command, "template"));
         captured_output = try_render(inja_env, template_string, render_data());
         return { captured_output, 0 };
       }
@@ -250,7 +250,7 @@ process_return save_command(std::string target, const ryml::ConstNodeRef &comman
   if (!command.valid() || (!command.has_val() && command.num_children() == 0))
     save_filename = target;
   else
-    save_filename = try_render(inja_env, ryml_get_val_as_string(command), project_summary);
+    save_filename = try_render(inja_env, ryml_val_string(command), project_summary);
 
   // Special case to save data depenencies
   if (!save_filename.empty() && save_filename[0] == data_dependency_identifier) {
@@ -258,7 +258,7 @@ process_return save_command(std::string target, const ryml::ConstNodeRef &comman
       spdlog::error("Data dependency pointer must start with '/data'");
       return { "", -1 };
     }
-    auto pointer          = RymlPointer{ save_filename.substr(6) };
+    auto pointer          = ryml::Pointer{ save_filename.substr(6) };
     auto target_node = ryml_navigate_path(project_data, pointer, true);
     if (target_node.valid()) {
       target_node.set_val(c4::to_csubstr(captured_output));
@@ -292,7 +292,7 @@ process_return create_command(std::string target, const ryml::ConstNodeRef &comm
   if (command.valid() && command.has_val()) {
     std::string filename = "";
     try {
-      filename = ryml_get_val_as_string(command);
+      filename = ryml_val_string(command);
       filename = try_render(inja_env, filename, project_summary);
       if (!filename.empty()) {
         std::filesystem::path p(filename);
@@ -312,7 +312,7 @@ process_return verify_command(std::string target, const ryml::ConstNodeRef &comm
   if (!command.valid() || !command.has_val()) {
     return { "", -1 };
   }
-  std::string filename = ryml_get_val_as_string(command);
+  std::string filename = ryml_val_string(command);
   filename             = try_render(inja_env, filename, project_summary);
   if (fs::exists(filename)) {
     spdlog::info("{} exists", filename);
@@ -329,7 +329,7 @@ process_return rm_command(std::string target, const ryml::ConstNodeRef &command,
   if (!command.valid() || !command.has_val()) {
     return { "", -1 };
   }
-  std::string filename = ryml_get_val_as_string(command);
+  std::string filename = ryml_val_string(command);
   filename             = try_render(inja_env, filename, project_summary);
   // Check if the input was a YAML array construct
   if (filename.front() == '[' && filename.back() == ']') {
@@ -355,7 +355,7 @@ process_return rmdir_command(std::string target, const ryml::ConstNodeRef &comma
   if (!command.valid() || !command.has_val()) {
     return { "", -1 };
   }
-  std::string path = ryml_get_val_as_string(command);
+  std::string path = ryml_val_string(command);
   path             = try_render(inja_env, path, project_summary);
   // Put some checks here
   std::error_code ec;
@@ -382,12 +382,12 @@ process_return pack_command(std::string target, const ryml::ConstNodeRef &comman
     return { "", -1 };
   }
 
-  std::string format = ryml_get_val_as_string(format_node);
+  std::string format = ryml_val_string(format_node);
   format             = try_render(inja_env, format, project_summary);
 
   auto i = format.begin();
   for (const auto &d: data_node.children()) {
-    auto v       = try_render(inja_env, ryml_get_val_as_string(d), project_summary);
+    auto v       = try_render(inja_env, ryml_val_string(d), project_summary);
     const char c = *i++;
     union {
       int8_t s8;
@@ -450,17 +450,17 @@ process_return copy_command(std::string target, const ryml::ConstNodeRef &comman
       spdlog::error("'copy' command missing 'destination'");
       return { "", -1 };
     }
-    destination = try_render(inja_env, ryml_get_val_as_string(destination_node), project_summary);
+    destination = try_render(inja_env, ryml_val_string(destination_node), project_summary);
 
-    if (ryml_has_child(command, "source")) {
+    if (command.has_child("source")) {
       source = ryml_get_child(command, "source");
-    } else if (ryml_has_child(command, "yaml_list")) {
+    } else if (command.has_child("yaml_list")) {
       auto yaml_list_node = ryml_get_child(command, "yaml_list");
       if (!yaml_list_node.has_val()) {
         spdlog::error("'copy' command 'yaml_list' is not a string");
         return { "", -1 };
       }
-      std::string list_yaml_string = try_render(inja_env, ryml_get_val_as_string(yaml_list_node), project_summary);
+      std::string list_yaml_string = try_render(inja_env, ryml_val_string(yaml_list_node), project_summary);
       try {
         source_tree = ryml::parse_in_arena(ryml::to_csubstr(list_yaml_string));
         source      = source_tree.crootref();
@@ -479,36 +479,36 @@ process_return copy_command(std::string target, const ryml::ConstNodeRef &comman
     }
 
     if (source.has_val() && !source.is_map() && !source.is_seq()) {
-      auto source_string = try_render(inja_env, ryml_get_val_as_string(source), project_summary);
+      auto source_string = try_render(inja_env, ryml_val_string(source), project_summary);
       std::filesystem::copy(source_string, destination, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
     } else if (source.is_seq()) {
       for (const auto &f: source.children()) {
-        auto source_string = try_render(inja_env, ryml_get_val_as_string(f), project_summary);
+        auto source_string = try_render(inja_env, ryml_val_string(f), project_summary);
         std::filesystem::copy(source_string, destination, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
       }
     } else if (source.is_map()) {
-      if (ryml_has_child(source, "folder_paths"))
+      if (source.has_child("folder_paths"))
         for (const auto &f: ryml_get_child(source, "folder_paths").children()) {
-          auto source_string = try_render(inja_env, ryml_get_val_as_string(f), project_summary);
+          auto source_string = try_render(inja_env, ryml_val_string(f), project_summary);
           auto dest          = destination + "/" + source_string;
           std::filesystem::create_directories(dest);
           std::filesystem::copy(source_string, dest, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
         }
-      if (ryml_has_child(source, "folders"))
+      if (source.has_child("folders"))
         for (const auto &f: ryml_get_child(source, "folders").children()) {
-          auto source_string = try_render(inja_env, ryml_get_val_as_string(f), project_summary);
+          auto source_string = try_render(inja_env, ryml_val_string(f), project_summary);
           std::filesystem::copy(source_string, destination, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
         }
-      if (ryml_has_child(source, "file_paths"))
+      if (source.has_child("file_paths"))
         for (const auto &f: ryml_get_child(source, "file_paths").children()) {
-          auto source_string         = try_render(inja_env, ryml_get_val_as_string(f), project_summary);
+          auto source_string         = try_render(inja_env, ryml_val_string(f), project_summary);
           std::filesystem::path dest = destination + "/" + source_string;
           std::filesystem::create_directories(dest.parent_path());
           std::filesystem::copy(source_string, dest, std::filesystem::copy_options::update_existing);
         }
-      if (ryml_has_child(source, "files"))
+      if (source.has_child("files"))
         for (const auto &f: ryml_get_child(source, "files").children()) {
-          auto source_string = try_render(inja_env, ryml_get_val_as_string(f), project_summary);
+          auto source_string = try_render(inja_env, ryml_val_string(f), project_summary);
           std::filesystem::copy(source_string, destination, std::filesystem::copy_options::update_existing);
         }
     } else {
@@ -528,7 +528,7 @@ process_return cat_command(std::string target, const ryml::ConstNodeRef &command
   if (!command.valid() || !command.has_val()) {
     return { "", -1 };
   }
-  std::string filename = try_render(inja_env, ryml_get_val_as_string(command), project_summary);
+  std::string filename = try_render(inja_env, ryml_val_string(command), project_summary);
   std::ifstream datafile;
   datafile.open(filename, std::ios_base::in | std::ios_base::binary);
   std::stringstream string_stream;
@@ -585,15 +585,15 @@ process_return diff_command(std::string target, const ryml::ConstNodeRef &comman
   bool has_left = false;
   bool has_right = false;
 
-  if (ryml_has_child(command, "left_file")) {
-    const std::filesystem::path left_file = try_render(inja_env, ryml_get_val_as_string(ryml_get_child(command, "left_file")), project_summary);
+  if (command.has_child("left_file")) {
+    const std::filesystem::path left_file = try_render(inja_env, ryml_val_string(ryml_get_child(command, "left_file")), project_summary);
     auto loaded = ryml_load_file(left_file);
     if (loaded) {
       left = std::move(*loaded);
       has_left = true;
     }
-  } else if (ryml_has_child(command, "left")) {
-    std::string left_string = try_render(inja_env, ryml_get_val_as_string(ryml_get_child(command, "left")), project_summary);
+  } else if (command.has_child("left")) {
+    std::string left_string = try_render(inja_env, ryml_val_string(ryml_get_child(command, "left")), project_summary);
     try {
       left = ryml::parse_in_arena(ryml::to_csubstr(left_string));
       has_left = true;
@@ -602,15 +602,15 @@ process_return diff_command(std::string target, const ryml::ConstNodeRef &comman
     }
   }
 
-  if (ryml_has_child(command, "right_file")) {
-    const std::filesystem::path right_file = try_render(inja_env, ryml_get_val_as_string(ryml_get_child(command, "right_file")), project_summary);
+  if (command.has_child("right_file")) {
+    const std::filesystem::path right_file = try_render(inja_env, ryml_val_string(ryml_get_child(command, "right_file")), project_summary);
     auto loaded = ryml_load_file(right_file);
     if (loaded) {
       right = std::move(*loaded);
       has_right = true;
     }
-  } else if (ryml_has_child(command, "right")) {
-    std::string right_string = try_render(inja_env, ryml_get_val_as_string(ryml_get_child(command, "right")), project_summary);
+  } else if (command.has_child("right")) {
+    std::string right_string = try_render(inja_env, ryml_val_string(ryml_get_child(command, "right")), project_summary);
     try {
       right = ryml::parse_in_arena(ryml::to_csubstr(right_string));
       has_right = true;

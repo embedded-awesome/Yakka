@@ -6,6 +6,7 @@
 #include "yakka_schema.hpp"
 #include "blake3.h"
 #include "pugixml.hpp"
+#include "rapidyaml_json.hpp"
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 #include <concepts>
@@ -160,18 +161,18 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path)
   return temp;
 }
 
-// RymlPointer ryml_pointer(std::string path)
+// ryml_pointer ryml_pointer(std::string path)
 // {
 //   if (path.front() != '/') {
 //     path = "/" + path;
 //     std::replace(path.begin(), path.end(), '.', '/');
 //   }
-//   return RymlPointer{ path };
+//   return ryml_pointer{ path };
 // }
 
 ryml::Tree json_path(const ryml::Tree &node, std::string path)
 {
-  RymlPointer temp(std::move(path));
+  ryml_pointer temp(std::move(path));
   auto target = ryml_get_path(node.crootref(), temp);
   return ryml_to_json(target);
 }
@@ -229,71 +230,71 @@ static std::vector<std::string> parse_ryml_pointer_segments(std::string path)
   return segments;
 }
 
-RymlPointer::RymlPointer(std::string path) : segments(parse_ryml_pointer_segments(std::move(path)))
-{
-}
+// ryml_pointer::ryml_pointer(std::string path) : segments(parse_ryml_pointer_segments(std::move(path)))
+// {
+// }
 
-RymlPointer::RymlPointer(std::vector<std::string> segments_in) : segments(std::move(segments_in))
-{
-}
+// ryml_pointer::ryml_pointer(std::vector<std::string> segments_in) : segments(std::move(segments_in))
+// {
+// }
 
-const std::vector<std::string> &RymlPointer::parts() const noexcept
-{
-  return segments;
-}
+// const std::vector<std::string> &ryml_pointer::parts() const noexcept
+// {
+//   return segments;
+// }
 
-bool RymlPointer::empty() const noexcept
-{
-  return segments.empty();
-}
+// bool ryml_pointer::empty() const noexcept
+// {
+//   return segments.empty();
+// }
 
-RymlPointer operator/(RymlPointer lhs, const RymlPointer &rhs)
-{
-  std::vector<std::string> combined = lhs.parts();
-  const auto &rhs_parts             = rhs.parts();
-  combined.insert(combined.end(), rhs_parts.begin(), rhs_parts.end());
-  return RymlPointer{ std::move(combined) };
-}
+// ryml_pointer operator/(ryml_pointer lhs, const ryml_pointer &rhs)
+// {
+//   std::vector<std::string> combined = lhs.parts();
+//   const auto &rhs_parts             = rhs.parts();
+//   combined.insert(combined.end(), rhs_parts.begin(), rhs_parts.end());
+//   return ryml_pointer{ std::move(combined) };
+// }
 
-RymlPointer &operator/=(RymlPointer &lhs, const RymlPointer &rhs)
-{
-  lhs = lhs / rhs;
-  return lhs;
-}
+// ryml_pointer &operator/=(ryml_pointer &lhs, const ryml_pointer &rhs)
+// {
+//   lhs = lhs / rhs;
+//   return lhs;
+// }
 
-RymlPointer operator/(RymlPointer lhs, const std::string &segment)
-{
-  if (segment.empty()) {
-    return lhs;
-  }
-  std::vector<std::string> combined = lhs.parts();
-  combined.push_back(segment);
-  return RymlPointer{ std::move(combined) };
-}
+// ryml_pointer operator/(ryml_pointer lhs, const std::string &segment)
+// {
+//   if (segment.empty()) {
+//     return lhs;
+//   }
+//   std::vector<std::string> combined = lhs.parts();
+//   combined.push_back(segment);
+//   return ryml_pointer{ std::move(combined) };
+// }
 
-RymlPointer &operator/=(RymlPointer &lhs, const std::string &segment)
-{
-  lhs = lhs / segment;
-  return lhs;
-}
+// ryml_pointer &operator/=(ryml_pointer &lhs, const std::string &segment)
+// {
+//   lhs = lhs / segment;
+//   return lhs;
+// }
 
-RymlPointer operator/(RymlPointer lhs, size_t index)
-{
-  std::vector<std::string> combined = lhs.parts();
-  combined.push_back(std::to_string(index));
-  return RymlPointer{ std::move(combined) };
-}
+// ryml_pointer operator/(ryml_pointer lhs, size_t index)
+// {
+//   std::vector<std::string> combined = lhs.parts();
+//   combined.push_back(std::to_string(index));
+//   return ryml_pointer{ std::move(combined) };
+// }
 
-RymlPointer &operator/=(RymlPointer &lhs, size_t index)
-{
-  lhs = lhs / index;
-  return lhs;
-}
+// ryml_pointer &operator/=(ryml_pointer &lhs, size_t index)
+// {
+//   lhs = lhs / index;
+//   return lhs;
+// }
 
-RymlPointer ryml_pointer(std::string path)
-{
-  return RymlPointer{ std::move(path) };
-}
+// ryml_pointer ryml_pointer(std::string path)
+// {
+//   return ryml_pointer{ std::move(path) };
+// }
 
 std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(const std::vector<std::string> &argument_string)
 {
@@ -376,7 +377,7 @@ std::vector<std::string> parse_gcc_dependency_file(const std::string &filename)
 /**
  * @param path  Path relative to Yakka component schema
  */
-void json_node_merge(RymlPointer path, ryml::Tree &merge_target, const ryml::Tree &node, const schema* schema)
+void json_node_merge(ryml_pointer path, ryml::Tree &merge_target, const ryml::Tree &node, const schema* schema)
 {
   json_node_merge(path.parts(), merge_target.rootref(), node.crootref(), schema);
 }
@@ -586,7 +587,7 @@ void add_common_template_commands(inja::Environment &inja_env)
   });
   inja_env.add_callback("join", 2, [](const inja::Arguments &args) {
     const auto input = args[0];
-    if (input->empty() || !input->is_array()) {
+    if (input->empty() || !input->is_seq()) {
       spdlog::error("join() expects an array as the first argument");
       return std::string{};
     }
@@ -631,9 +632,9 @@ std::pair<std::string, int> download_resource(const std::string url, std::filesy
 #endif
 }
 
-RymlPointer create_condition_pointer(const ryml::Tree condition)
+ryml_pointer create_condition_pointer(const ryml::Tree condition)
 {
-  RymlPointer pointer;
+  ryml_pointer pointer;
 
   auto root = condition.crootref();
   if (!root.valid()) {
@@ -641,7 +642,7 @@ RymlPointer create_condition_pointer(const ryml::Tree condition)
   }
 
   for (const auto &item: root.children()) {
-    auto value = ryml_get_val_as_string(item);
+    auto value = ryml_val_string(item);
     if (value.empty()) {
       continue;
     }
@@ -677,7 +678,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
     return true;
   }
 
-  RymlPointer data_pointer{ data_path.substr(1) };
+  ryml_pointer data_pointer{ data_path.substr(1) };
   const auto &parts = data_pointer.parts();
 
   if (parts.empty()) {
@@ -687,13 +688,13 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
   const std::string first_part = parts.size() > 0 ? parts[0] : std::string{};
   const std::string second_part = parts.size() > 1 ? parts[1] : std::string{};
 
-  RymlPointer remaining_pointer;
+  ryml_pointer remaining_pointer;
   if (parts.size() > 2) {
-    remaining_pointer = RymlPointer{ std::vector<std::string>(parts.begin() + 2, parts.end()) };
+    remaining_pointer = ryml_pointer{ std::vector<std::string>(parts.begin() + 2, parts.end()) };
   }
 
   // Define a lambda to process a component name using the captured 'left' and 'right' json objects
-  const auto process_component = [&](std::string_view component_name, const RymlPointer &pointer) -> ComparisonResult {
+  const auto process_component = [&](std::string_view component_name, const ryml_pointer &pointer) -> ComparisonResult {
     auto left_components  = ryml_get_path(left_root, ryml_pointer("/components"));
     auto right_components = ryml_get_path(right_root, ryml_pointer("/components"));
 
@@ -949,7 +950,7 @@ inja::json ryml_to_inja_json(const ryml::ConstNodeRef &node)
 }
 
 // Helper function to get value as string from ryml node
-std::string ryml_get_val_as_string(const ryml::ConstNodeRef &node)
+std::string ryml_val_string(const ryml::ConstNodeRef &node)
 {
   if (!node.valid() || !node.has_val()) {
     return "";
@@ -977,7 +978,7 @@ ryml::ConstNodeRef ryml_get_child(const ryml::ConstNodeRef &node, c4::csubstr ke
   return node.find_child(key);
 }
 
-ryml::ConstNodeRef ryml_get_path(const ryml::ConstNodeRef &node, const RymlPointer &path)
+ryml::ConstNodeRef ryml_get_path(const ryml::ConstNodeRef &node, const ryml_pointer &path)
 {
   if (!node.valid()) {
     return ryml::ConstNodeRef();
@@ -1020,9 +1021,16 @@ ryml::ConstNodeRef ryml_get_path(const ryml::ConstNodeRef &node, const RymlPoint
   return current;
 }
 
-bool ryml_has_path(const ryml::ConstNodeRef &node, const RymlPointer &path)
+bool ryml_has_path(const ryml::ConstNodeRef &node, const ryml_pointer &path)
 {
   return ryml_get_path(node, path).valid();
+}
+
+std::filesystem::path ryml_path(c4::csubstr path)
+{
+  std::string path_str;
+  c4::from_chars(path, &path_str);
+  return fs::path{ path_str };
 }
 
 // Merge two ryml nodes
@@ -1143,9 +1151,24 @@ ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const std::vector<std::stri
   return current;
 }
 
-ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const RymlPointer &path, bool create_if_missing)
+ryml::NodeRef ryml_navigate_path(ryml::NodeRef node, const ryml_pointer &path, bool create_if_missing)
 {
   return ryml_navigate_path(node, path.parts(), create_if_missing);
+}
+
+void ryml_save_file(const std::filesystem::path &path, const ryml::Tree &tree)
+{
+  try {
+    std::ofstream file(path);
+    if (!file.is_open()) {
+      spdlog::error("Failed to open file for writing: {}", path.generic_string());
+      return;
+    }
+    file << tree.emit();
+    spdlog::info("Successfully saved ryml tree to file: {}", path.generic_string());
+  } catch (const std::exception &e) {
+    spdlog::error("Error saving ryml tree to file {}: {}", path.generic_string(), e.what());
+  }
 }
 
 /**
@@ -1171,10 +1194,10 @@ void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_t
   }
 
   // Get merge strategy from schema if available
-  // Note: This requires converting path to RymlPointer format for schema lookup
+  // Note: This requires converting path to ryml_pointer format for schema lookup
   schema::merge_strategy strategy = schema::merge_strategy::Default;
   if (schema != nullptr) {
-    // Build RymlPointer from path vector
+    // Build ryml_pointer from path vector
     std::string pointer_str;
     for (const auto &segment : path) {
       if (!segment.empty()) {
@@ -1185,7 +1208,7 @@ void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_t
       pointer_str = "";
     }
     try {
-      RymlPointer json_ptr(pointer_str);
+      ryml_pointer json_ptr(pointer_str);
       strategy = schema->get_merge_strategy(json_ptr);
     } catch (...) {
       // If pointer construction fails, use default strategy

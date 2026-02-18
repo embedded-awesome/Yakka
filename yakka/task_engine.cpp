@@ -224,7 +224,7 @@ void task_engine::create_tasks(const std::string target_name, tf::Task &parent, 
   }
 }
 
-std::pair<std::string, int> task_engine::run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::Tree &project_data)
+std::pair<std::string, int> task_engine::run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::ConstNodeRef project_data)
 {
   std::string captured_output = "";
   inja::Environment inja_env  = inja::Environment();
@@ -235,10 +235,10 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 
   inja_env.add_callback("store", 3, [&](const inja::Arguments &args) {
     if (args[0] && args[1]) {
-      RymlPointer ptr{ args[0]->get<std::string>() };
+      ryml::Pointer ptr{ args[0]->get<std::string>() };
       auto key = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
       if (key.front() == '/')
-        ptr = ptr / RymlPointer{ key };
+        ptr = ptr / ryml::Pointer{ key };
       else
         ptr = ptr / key;
 
@@ -247,12 +247,12 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     return ryml::Tree{};
   });
   inja_env.add_callback("store", 2, [&](const inja::Arguments &args) {
-    RymlPointer ptr{ args[0]->get<std::string>() };
+    ryml::Pointer ptr{ args[0]->get<std::string>() };
     data_store[ptr] = *args[1];
     return ryml::Tree{};
   });
   inja_env.add_callback("push_back", 2, [&](const inja::Arguments &args) {
-    RymlPointer ptr{ args[0]->get<std::string>() };
+    ryml::Pointer ptr{ args[0]->get<std::string>() };
     if (!data_store.contains(ptr)) {
       data_store[ptr] = ryml::Tree::array();
     }
@@ -261,10 +261,10 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   });
   inja_env.add_callback("push_back", 3, [&](const inja::Arguments &args) {
     if (args[0] && args[1]) {
-      RymlPointer ptr{ args[0]->get<std::string>() };
+      ryml::Pointer ptr{ args[0]->get<std::string>() };
       auto key = args[1]->is_number() ? std::to_string(args[1]->get<int>()) : args[1]->get<std::string>();
       if (key.front() == '/')
-        ptr = ptr / RymlPointer{ key };
+        ptr = ptr / ryml::Pointer{ key };
       else
         ptr = ptr / key;
 
@@ -284,16 +284,16 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   });
 
   inja_env.add_callback("fetch", 2, [&](const inja::Arguments &args) {
-    RymlPointer ptr{ args[0]->get<std::string>() };
+    ryml::Pointer ptr{ args[0]->get<std::string>() };
     auto key = args[1]->get<std::string>();
     return data_store[ptr][key];
   });
   inja_env.add_callback("fetch", 1, [&](const inja::Arguments &args) {
-    RymlPointer ptr{ args[0]->get<std::string>() };
+    ryml::Pointer ptr{ args[0]->get<std::string>() };
     return data_store[ptr];
   });
   inja_env.add_callback("erase", 1, [&](const inja::Arguments &args) {
-    RymlPointer ptr{ args[0]->get<std::string>() };
+    ryml::Pointer ptr{ args[0]->get<std::string>() };
     data_store[ptr].clear();
     return ryml::Tree{};
   });
@@ -316,21 +316,21 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 
   inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
     ryml::Tree aggregate;
-    auto path = RymlPointer{ args[0]->get<std::string>() };
+    auto path = ryml::Pointer{ args[0]->get<std::string>() };
     // Loop through components, check if object path exists, if so add it to the aggregate
-    for (const auto &[c_key, c_value]: project.project_summary["components"].items()) {
+    for (const auto node: project.project_summary["components"].children()) {
       // auto v = json_path(c.value(), path);
-      if (!c_value.contains(path) || c_value[path].is_null())
+      if (!node.has_child(path) || !node[path].valid())
         continue;
 
-      auto v = c_value[path];
-      if (v.is_object())
-        for (const auto &[i_key, i_value]: v.items()) {
+      auto v = node[path];
+      if (v.is_map())
+        for (const auto &[i_key, i_value]: v.children()) {
           aggregate[i_key] = i_value; //try_render(inja_env, i.second.as<std::string>(), project->project_summary, log);
         }
-      else if (v.is_array())
-        for (const auto &[i_key, i_value]: v.items())
-          if (i_value.is_object())
+      else if (v.is_seq())
+        for (const auto &[i_key, i_value]: v.children())
+          if (i_value.is_map())
             aggregate.push_back(i_value);
           else
             aggregate.push_back(try_render(inja_env, i_value.get<std::string>(), project.project_summary));
@@ -341,10 +341,10 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     // Check project data
     if (project.project_summary["data"].contains(path)) {
       auto v = project.project_summary["data"][path];
-      if (v.is_object())
+      if (v.is_map())
         for (const auto &[i_key, i_value]: v.items())
           aggregate[i_key] = i_value;
-      else if (v.is_array())
+      else if (v.is_seq())
         for (const auto &i: v)
           aggregate.push_back(inja_env.render(i.get<std::string>(), project.project_summary));
       else
@@ -400,42 +400,42 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       c4::from_chars(command.key(), &command_name);
       int retcode = 0;
 
-    try {
-      if (project.project_summary["tools"].contains(command_name)) {
-        auto tool                = project.project_summary["tools"][command_name];
-        std::string command_text = "";
+      try {
+        if (project.project_summary["tools"].contains(command_name)) {
+          auto tool                = project.project_summary["tools"][command_name];
+          std::string command_text = "";
 
-        command_text.append(tool);
+          command_text.append(tool);
 
-        std::string arg_text = ryml_get_val_as_string(command);
+          std::string arg_text = ryml_val_string(command);
 
-        // Apply template engine
-        arg_text = try_render(inja_env, arg_text, project.project_summary);
+          // Apply template engine
+          arg_text = try_render(inja_env, arg_text, project.project_summary);
 
-        auto [temp_output, temp_retcode] = exec(command_text, arg_text);
-        retcode                          = temp_retcode;
+          auto [temp_output, temp_retcode] = exec(command_text, arg_text);
+          retcode                          = temp_retcode;
 
-        if (retcode != 0)
-          spdlog::error("Returned {}\n{}", retcode, temp_output);
+          if (retcode != 0)
+            spdlog::error("Returned {}\n{}", retcode, temp_output);
+          if (retcode < 0)
+            return { temp_output, retcode };
+
+          captured_output = temp_output;
+          // Echo the output of the command
+          // TODO: Note this should be done by the main thread to ensure the outputs from multiple run_command instances don't overlap
+          spdlog::info(captured_output);
+        }
+        // Else check if it is a built-in command
+        else if (blueprint_commands.contains(command_name)) {
+          yakka::process_return test_result = blueprint_commands.at(command_name)(target, command, captured_output, project.project_summary, project_data, inja_env);
+          captured_output                   = test_result.result;
+          retcode                           = test_result.retcode;
+        } else {
+          spdlog::error("{} tool doesn't exist", command_name);
+        }
+
         if (retcode < 0)
-          return { temp_output, retcode };
-
-        captured_output = temp_output;
-        // Echo the output of the command
-        // TODO: Note this should be done by the main thread to ensure the outputs from multiple run_command instances don't overlap
-        spdlog::info(captured_output);
-      }
-      // Else check if it is a built-in command
-      else if (blueprint_commands.contains(command_name)) {
-        yakka::process_return test_result = blueprint_commands.at(command_name)(target, command, captured_output, project.project_summary, project_data, inja_env);
-        captured_output                   = test_result.result;
-        retcode                           = test_result.retcode;
-      } else {
-        spdlog::error("{} tool doesn't exist", command_name);
-      }
-
-      if (retcode < 0)
-        return { captured_output, retcode };
+          return { captured_output, retcode };
       } catch (std::exception &e) {
         spdlog::error("Failed to run command: '{}' as part of {}", command_name, target);
         spdlog::error("{}", e.what());

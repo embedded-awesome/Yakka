@@ -48,14 +48,14 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
         std::string type = "component";
         auto type_node = ryml_get_child(component, "type");
         if (type_node.valid() && type_node.has_val()) {
-          type = ryml_get_val_as_string(type_node);
+          type = ryml_val_string(type_node);
         }
         components_by_type.insert({type, component_name});
       }
     }
 
     // Print registry name
-    auto registry_name = ryml_get_val_as_string(ryml_get_child(registry_root, "name"));
+    auto registry_name = ryml_val_string(ryml_get_child(registry_root, "name"));
     std::cout << registry_name << "\n";
 
     // Print components grouped by type

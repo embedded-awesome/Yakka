@@ -4,13 +4,11 @@
 #include "yaml-cpp/yaml.h"
 #include <ryml.hpp>
 #include <ryml_std.hpp>
-#include <ryml/json-schema.hpp>
+// #include <ryml/json-schema.hpp>
 #include "spdlog.h"
 #include <ranges>
 
 namespace yakka {
-
-struct RymlPointer;
 
 class schema {
 public:
@@ -26,25 +24,25 @@ public:
   };
 
 public:
-  schema() : schema_data(ryml::Tree()), validator(nullptr, ryml_schema::default_string_format_check)
+  schema() : schema_data(ryml::Tree())
   {
   }
 
   void add_schema_data(const ryml::Tree &schema_data);
   bool validate(const ryml::Tree &data, std::string id = "");
-  schema::merge_strategy get_merge_strategy(const RymlPointer &path) const;
+  schema::merge_strategy get_merge_strategy(const ryml::Pointer &path) const;
 
 private:
   ryml::Tree schema_data;
-  ryml_schema::json_validator validator;
+  // ryml_schema::json_validator validator;
   bool validator_updated = false;
 };
 
 class yakka_schema_validator {
   ryml::Tree yakka_schema;
   ryml::Tree slcc_schema;
-  ryml_schema::json_validator yakka_validator;
-  ryml_schema::json_validator slcc_validator;
+  // ryml_schema::json_validator yakka_validator;
+  // ryml_schema::json_validator slcc_validator;
 
   // clang-format off
   const std::string yakka_component_schema_yaml = R"(
@@ -176,15 +174,15 @@ class yakka_schema_validator {
   )";
   // clang-format on
 
-  class custom_error_handler : public ryml_schema::basic_error_handler {
-  public:
-    yakka::component *component;
-    void error(const RymlPointer &ptr, const ryml::Tree &instance, const std::string &message) override
-    {
-      ryml_schema::basic_error_handler::error(ptr, instance, message);
-      spdlog::error("Validation error in '{}': {} - {} : - {}", component->file_path.generic_string(), ptr.to_string(), instance.dump(3), message);
-    }
-  };
+  // class custom_error_handler : public ryml_schema::basic_error_handler {
+  // public:
+  //   yakka::component *component;
+  //   void error(const ryml::Pointer &ptr, const ryml::Tree &instance, const std::string &message) override
+  //   {
+  //     ryml_schema::basic_error_handler::error(ptr, instance, message);
+  //     spdlog::error("Validation error in '{}': {} - {} : - {}", component->file_path.generic_string(), ptr.to_string(), instance.dump(3), message);
+  //   }
+  // };
 
 public:
   static yakka_schema_validator &get()

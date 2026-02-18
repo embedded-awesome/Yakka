@@ -7,7 +7,7 @@
 #include <regex>
 
 namespace yakka {
-std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(const std::string target, const ryml::Tree &project_summary)
+std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(const std::string target, const inja::ryml_json &project_summary)
 {
   bool blueprint_match_found = false;
   std::vector<std::shared_ptr<blueprint_match>> result;
@@ -42,9 +42,9 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
     local_inja_env.add_callback("$", 1, [&match](const inja::Arguments &args) {
       const int index = args[0]->get<int>();
       if (index < match->regex_matches.size())
-        return ryml::Tree(match->regex_matches[index]);
+        return inja::ryml_json(match->regex_matches[index]);
 
-      return ryml::Tree();
+      return inja::ryml_json();
     });
     local_inja_env.add_callback("curdir", 0, [&match](const inja::Arguments &args) {
       return match->blueprint->parent_path;
@@ -53,11 +53,11 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
       return local_inja_env.render(args[0]->get<std::string>(), project_summary);
     });
     local_inja_env.add_callback("select", 1, [&](const inja::Arguments &args) {
-      ryml::Tree choice;
+      inja::ryml_json choice;
       for (const auto &option: args.at(0)->items()) {
         const auto option_type = option.key();
         const auto option_name = option.value();
-        if ((option_type == "feature" && project_summary["features"].contains(option_name)) || (option_type == "component" && project_summary["components"].contains(option_name))) {
+        if ((option_type == "feature" && project_summary["features"].has_child(option_name)) || (option_type == "component" && project_summary["components"].has_child(option_name))) {
           assert(choice.is_null());
           choice = option_name;
         }
@@ -65,19 +65,20 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
       return choice;
     });
     local_inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
-      ryml::Tree aggregate;
-      auto path = RymlPointer{args[0]->get<std::string>()};
+      inja::ryml_json aggregate;
+      auto path = inja::ryml_json::json_pointer{args[0]->get<std::string>()};
       // Loop through components, check if object path exists, if so add it to the aggregate
-      for (const auto &[c_key, c_value]: project_summary["components"].items()) {
+      for (const auto &child: project_summary["components"].children()) {
         // auto v = json_path(c.value(), path);
-        if (!c_value.contains(path))
+        auto c_value = child.val();
+        if (!c_value.has_child(path))
           continue;
 
         auto v = c_value[path];
-        if (v.is_object())
+        if (v.is_map())
           for (const auto &[i_key, i_value]: v.items())
             aggregate[i_key] = i_value; //local_inja_env.render(i.second.as<std::string>(), this->project_summary);
-        else if (v.is_array())
+        else if (v.is_seq())
           for (const auto &i: v)
             aggregate.push_back(local_inja_env.render(i.get<std::string>(), project_summary));
         else
@@ -85,12 +86,12 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
       }
 
       // Check project data
-      if (project_summary["data"].contains(path)) {
+      if (project_summary["data"].has_child(path)) {
         auto v = project_summary["data"][path];
-        if (v.is_object())
+        if (v.is_map())
           for (const auto &[i_key, i_value]: v.items())
             aggregate[i_key] = i_value;
-        else if (v.is_array())
+        else if (v.is_seq())
           for (const auto &i: v)
             aggregate.push_back(local_inja_env.render(i.get<std::string>(), project_summary));
         else

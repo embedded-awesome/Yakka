@@ -59,7 +59,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       const auto &endpoint_tree = endpoint.value();
       auto endpoint_root = endpoint_tree.crootref();
       if (endpoint_root.is_seq() && endpoint_root.num_children() > 0) {
-        auto component_name = ryml_get_val_as_string(endpoint_root.child(0));
+        auto component_name = ryml_val_string(endpoint_root.child(0));
         auto component_path = workspace.local_database.get_component(component_name);
         if (component_path.has_value()) {
         // Check if the request is for an endpoint or a file
@@ -98,7 +98,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       if (!child.is_seq() || child.num_children() == 0) {
         continue;
       }
-      const auto component_id = ryml_get_val_as_string(child.child(0));
+      const auto component_id = ryml_val_string(child.child(0));
       auto component_path     = workspace.local_database.get_component(component_id);
     if (!component_path.has_value())
       continue;
@@ -140,13 +140,13 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     spdlog::info("GET /api/project/{}\n", req.path_params.at("id"));
     res.set_header("Access-Control-Allow-Origin", "*");
     auto project = req.path_params.at("id");
-    if (!ryml_has_child(workspace.projects.crootref(), c4::to_csubstr(project))) {
+    if (!workspace.projects.crootref().has_child(c4::to_csubstr(project))) {
       res.status = 404;
       return;
     }
     auto project_node = ryml_get_child(workspace.projects.crootref(), c4::to_csubstr(project));
     auto path_node = ryml_get_child(project_node, "path");
-    auto project_summary_file = std::filesystem::path{ ryml_get_val_as_string(path_node) } / project_summary_filename;
+    auto project_summary_file = std::filesystem::path{ ryml_val_string(path_node) } / project_summary_filename;
     if (fs::exists(project_summary_file)) {
       auto summary_loaded = ryml_load_file(project_summary_file);
       if (!summary_loaded) {
@@ -155,7 +155,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       }
       ryml::Tree project_summary = std::move(*summary_loaded);
       auto project_name_node = ryml_get_child(project_summary.crootref(), "project_name");
-      const auto project_file = ryml_get_val_as_string(project_name_node) + ".yakka";
+      const auto project_file = ryml_val_string(project_name_node) + ".yakka";
       if (fs::exists(project_file)) {
         auto file_content = yakka::get_file_contents<std::string>(project_file);
         if (!file_content) {

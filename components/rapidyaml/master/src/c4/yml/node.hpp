@@ -360,14 +360,13 @@ public:
     C4_ALWAYS_INLINE C4_PURE ConstImpl operator[] (Pointer const& ptr) const noexcept
     {
         _C4RV();
-        ConstImpl curr = *((ConstImpl const*)this);
+        ConstImpl* curr = ((ConstImpl const*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            size_t ch = curr.tree_->find_child(curr.id_, ptr[i]);
-            _RYML_CB_ASSERT(curr.tree_->m_callbacks, ch != NONE);
-            curr = ConstImpl(curr.tree_, ch);
+            curr = curr->find_child(ptr[i]);
+            _RYML_CB_ASSERT(tree__->m_callbacks, curr->valid());
         }
-        return curr;
+        return *curr;
     }
 
     /** Navigate to a node using a Pointer path. O(num_segments * num_children).
@@ -379,12 +378,8 @@ public:
         Impl curr = *((Impl*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            size_t ch = curr.m_tree->find_child(curr.m_id, ptr[i]);
-            if(ch != NONE)
-            {
-                curr = Impl(curr.m_tree, ch);
-            }
-            else
+            curr = curr.find_child(ptr[i]);
+            if(!curr.valid())
             {
                 // Return a seed node for the missing path segment
                 return NodeRef(curr.m_tree, curr.m_id, ptr[i]);
@@ -398,17 +393,16 @@ public:
     C4_ALWAYS_INLINE C4_PURE ConstImpl at(Pointer const& ptr) const
     {
         _C4RV();
-        ConstImpl curr = *((ConstImpl const*)this);
+        ConstImpl* curr = ((ConstImpl const*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            size_t ch = curr.tree_->find_child(curr.id_, ptr[i]);
-            if(ch == NONE)
+            curr = curr->find_child(ptr[i]);
+            if(!curr->valid())
             {
-                _RYML_CB_ERR(curr.tree_->m_callbacks, "pointer path segment not found");
+                _RYML_CB_ERR(tree__->m_callbacks, "pointer path segment not found");
             }
-            curr = ConstImpl(curr.tree_, ch);
         }
-        return curr;
+        return *curr;
     }
 
     /** Navigate to a node using a Pointer path. O(num_segments * num_children).

@@ -5,6 +5,8 @@
  * @see Pointer */
 
 #include <cstddef>
+#include <string>
+#include <string_view>
 #include <vector>
 #include "c4/yml/export.hpp"
 #include "c4/substr.hpp"
@@ -55,6 +57,12 @@ public:
      * @param path A string in the format "/segment1/segment2/..."
      * The leading slash is optional. */
     explicit Pointer(csubstr path);
+
+    /** Construct from a std::string path. The string is copied internally. */
+    explicit Pointer(std::string const& path);
+
+    /** Construct from a std::string_view path. The view is copied internally. */
+    explicit Pointer(std::string_view path);
 
     /** @} */
 
@@ -116,6 +124,9 @@ public:
      * @return a const reference to the vector of path fragments */
     C4_ALWAYS_INLINE C4_PURE std::vector<csubstr> const& path() const noexcept { return m_path; }
 
+    /** Alias for path(), matching JSON pointer naming in some integrations */
+    C4_ALWAYS_INLINE C4_PURE std::vector<csubstr> const& tokens() const noexcept { return m_path; }
+
     /** @} */
 
 public:
@@ -134,6 +145,7 @@ private:
      * @param path The path string to parse */
     void _parse(csubstr path);
 
+    std::string m_storage;
     std::vector<csubstr> m_path;
 };
 

@@ -343,10 +343,10 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
       const auto path_node = configuration["path"];
       if (path_node.is_seq()) {
         for (const auto &p: path_node.children()) {
-          path += std::format("{}{}", ryml_get_val_as_string(p), host_os_path_seperator);
+          path += std::format("{}{}", ryml_val_string(p), host_os_path_seperator);
         }
       } else if (path_node.has_val()) {
-        path += std::format("{}{}", ryml_get_val_as_string(path_node), host_os_path_seperator);
+        path += std::format("{}{}", ryml_val_string(path_node), host_os_path_seperator);
       }
       path += std::getenv("PATH");
 
@@ -363,7 +363,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
       const auto packages_node = configuration["packages"];
       if (packages_node.is_seq()) {
         for (const auto &p: packages_node.children()) {
-          auto path = ryml_get_val_as_string(p);
+          auto path = ryml_val_string(p);
         if (path.starts_with('~')) {
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
           std::string homepath = std::getenv("HOMEPATH");
@@ -381,7 +381,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
     }
 
     if (configuration.has_child("home")) {
-      yakka_shared_home                 = std::filesystem::path(ryml_get_val_as_string(configuration["home"]));
+      yakka_shared_home                 = std::filesystem::path(ryml_val_string(configuration["home"]));
       ensure_child_scalar(config_node, "home", c4::to_csubstr(yakka_shared_home.string()));
     }
 
@@ -396,15 +396,15 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
 std::future<std::filesystem::path> workspace::fetch_component(std::string_view name, const ryml::ConstNodeRef &node, std::function<void(std::string_view, size_t)> progress_handler)
 {
   const auto url_node = node["packages"]["default"]["url"];
-  const auto url      = try_render(inja_environment, ryml_get_val_as_string(url_node), summary.crootref());
+  const auto url      = try_render(inja_environment, ryml_val_string(url_node), summary.crootref());
 
   const auto branch_node = node["packages"]["default"]["branch"];
-  const auto branch      = try_render(inja_environment, ryml_get_val_as_string(branch_node), summary.crootref());
+  const auto branch      = try_render(inja_environment, ryml_val_string(branch_node), summary.crootref());
 
   const bool shared_components_write_access = (fs::status(shared_components_path).permissions() & fs::perms::owner_write) != fs::perms::none;
 
   const auto type_node = node.has_child("type") ? node["type"] : ryml::ConstNodeRef();
-  const bool is_tool   = type_node.valid() && ryml_get_val_as_string(type_node) == "tool";
+  const bool is_tool   = type_node.valid() && ryml_val_string(type_node) == "tool";
 
   const auto git_location = (is_tool && shared_components_write_access) ? shared_components_path / "repos" : workspace_path / ".yakka/repos";
 

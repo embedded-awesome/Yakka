@@ -29,8 +29,9 @@ requires:
     - spdlog
     - taskflow
     - glob
-    - json-schema-validator
+#    - json-schema-validator
     - rapidyaml
+    - rapidyaml_json
     - blake3
     - pugixml
 

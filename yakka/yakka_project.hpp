@@ -14,6 +14,7 @@
 #include "spdlog/spdlog.h"
 #include "indicators/progress_bar.hpp"
 #include "taskflow.hpp"
+#include "utilities.hpp"
 #include <filesystem>
 #include <regex>
 #include <map>
@@ -138,6 +139,13 @@ public:
   // std::atomic<bool> abort_build;
 
   // std::function<void(std::shared_ptr<task_group> group)> task_complete_handler;
+
+  // Internal helper objects
+  const ryml::Pointer _requires_components_pointer = ryml_pointer("/requires/components");
+  const ryml::Pointer _requires_features_pointer = ryml_pointer("/requires/features");
+  const ryml::Pointer _provides_features_pointer = ryml_pointer("/provides/features");
+  const ryml::Pointer _supports_components_pointer = ryml_pointer("/supports/components");
+  const ryml::Pointer _supports_features_pointer = ryml_pointer("/supports/features");
 
   // SLC specific
   ryml::Tree template_contributions;

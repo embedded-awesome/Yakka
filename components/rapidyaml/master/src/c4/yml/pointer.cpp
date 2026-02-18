@@ -6,9 +6,24 @@ namespace c4 {
 namespace yml {
 
 Pointer::Pointer(csubstr path)
-    : m_path()
+    : m_storage()
+    , m_path()
 {
     _parse(path);
+}
+
+Pointer::Pointer(std::string const& path)
+    : m_storage(path)
+    , m_path()
+{
+    _parse(csubstr(m_storage.data(), m_storage.size()));
+}
+
+Pointer::Pointer(std::string_view path)
+    : m_storage(path)
+    , m_path()
+{
+    _parse(csubstr(m_storage.data(), m_storage.size()));
 }
 
 void Pointer::push(csubstr fragment)

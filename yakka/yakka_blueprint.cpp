@@ -13,13 +13,13 @@ blueprint::blueprint(const std::string &target, ryml::Tree blueprint_data, const
   const auto root = data.crootref();
 
   if (root.has_child("regex"))
-    this->regex = ryml_get_val_as_string(root["regex"]);
+    this->regex = ryml_val_string(root["regex"]);
 
   if (root.has_child("requires")) {
     const auto requires = root["requires"];
     if (requires.is_seq()) {
       for (const auto &d: requires.children())
-        this->requirements.push_back(ryml_get_val_as_string(d));
+        this->requirements.push_back(ryml_val_string(d));
     }
   }
 
@@ -28,7 +28,7 @@ blueprint::blueprint(const std::string &target, ryml::Tree blueprint_data, const
     if (depends.is_seq())
       for (const auto &d: depends.children()) {
         if (!d.is_map() && d.has_val()) {
-          const auto dep_value = ryml_get_val_as_string(d);
+          const auto dep_value = ryml_val_string(d);
           if (!dep_value.empty() && dep_value.front() == ':')
             this->dependencies.push_back({ dependency::DATA_DEPENDENCY, dep_value });
           else
@@ -38,11 +38,11 @@ blueprint::blueprint(const std::string &target, ryml::Tree blueprint_data, const
             const auto data_node = d["data"];
             if (data_node.is_seq())
               for (const auto &i: data_node.children())
-                this->dependencies.push_back({ dependency::DATA_DEPENDENCY, ryml_get_val_as_string(i) });
+                this->dependencies.push_back({ dependency::DATA_DEPENDENCY, ryml_val_string(i) });
             else
-              this->dependencies.push_back({ dependency::DATA_DEPENDENCY, ryml_get_val_as_string(data_node) });
+              this->dependencies.push_back({ dependency::DATA_DEPENDENCY, ryml_val_string(data_node) });
           } else if (d.has_child("dependency_file")) {
-            this->dependencies.push_back({ dependency::DEPENDENCY_FILE_DEPENDENCY, ryml_get_val_as_string(d["dependency_file"]) });
+            this->dependencies.push_back({ dependency::DEPENDENCY_FILE_DEPENDENCY, ryml_val_string(d["dependency_file"]) });
           }
         }
       }
@@ -52,7 +52,7 @@ blueprint::blueprint(const std::string &target, ryml::Tree blueprint_data, const
     process = root["process"];
 
   if (root.has_child("group"))
-    this->task_group = ryml_get_val_as_string(root["group"]);
+    this->task_group = ryml_val_string(root["group"]);
 }
 
 const ryml::Tree &blueprint::as_ryml() const
