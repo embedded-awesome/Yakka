@@ -12,8 +12,8 @@
 
 namespace inja {
 
-using Arguments = std::vector<const json*>;
-using CallbackFunction = std::function<json(Arguments& args)>;
+using Arguments = std::vector<ryml::NodeRef>;
+using CallbackFunction = std::function<json::node(Arguments& args)>;
 using VoidCallbackFunction = std::function<void(Arguments& args)>;
 
 /*!

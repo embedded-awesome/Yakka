@@ -100,9 +100,9 @@ public:
 
 class LiteralNode : public ExpressionNode {
 public:
-  const json value;
+  const std::string_view value;
 
-  explicit LiteralNode(std::string_view data_text, size_t pos): ExpressionNode(pos), value(json::parse(data_text)) {}
+  explicit LiteralNode(std::string_view data_text, size_t pos): ExpressionNode(pos), value(data_text) {}
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);
@@ -112,7 +112,7 @@ public:
 class DataNode : public ExpressionNode {
 public:
   const std::string name;
-  const json::json_pointer ptr;
+  const json::pointer ptr;
 
   static std::string convert_dot_to_ptr(std::string_view ptr_name) {
     std::string result;
@@ -125,7 +125,7 @@ public:
     return result;
   }
 
-  explicit DataNode(std::string_view ptr_name, size_t pos): ExpressionNode(pos), name(ptr_name), ptr(json::json_pointer(convert_dot_to_ptr(ptr_name))) {}
+  explicit DataNode(std::string_view ptr_name, size_t pos): ExpressionNode(pos), name(ptr_name), ptr(json::pointer(convert_dot_to_ptr(ptr_name))) {}
 
   void accept(NodeVisitor& v) const {
     v.visit(*this);

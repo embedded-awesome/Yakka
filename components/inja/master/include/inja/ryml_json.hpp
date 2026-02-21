@@ -27,63 +27,7 @@ public:
   using number_integer_t = int64_t;
   using number_unsigned_t = uint64_t;
   using number_float_t = double;
-
-  class json_pointer {
-  public:
-    explicit json_pointer(std::string_view pointer) {
-      if (pointer.empty()) {
-        return;
-      }
-      size_t start = 0;
-      if (pointer.front() == '/') {
-        start = 1;
-      }
-      while (start <= pointer.size()) {
-        const size_t slash = pointer.find('/', start);
-        const size_t end = (slash == std::string_view::npos) ? pointer.size() : slash;
-        if (end >= start) {
-          tokens_.push_back(unescape(pointer.substr(start, end - start)));
-        }
-        if (slash == std::string_view::npos) {
-          break;
-        }
-        start = slash + 1;
-      }
-    }
-
-    const std::vector<string_t>& tokens() const {
-      return tokens_;
-    }
-
-    bool empty() const {
-      return tokens_.empty();
-    }
-
-  private:
-    std::vector<string_t> tokens_;
-
-    static string_t unescape(std::string_view token) {
-      string_t out;
-      out.reserve(token.size());
-      for (size_t i = 0; i < token.size(); ++i) {
-        if (token[i] == '~' && (i + 1) < token.size()) {
-          const char next = token[i + 1];
-          if (next == '0') {
-            out.push_back('~');
-            ++i;
-            continue;
-          }
-          if (next == '1') {
-            out.push_back('/');
-            ++i;
-            continue;
-          }
-        }
-        out.push_back(token[i]);
-      }
-      return out;
-    }
-  };
+  using json_pointer = c4::yml::Pointer;
 
   ryml_json(): tree_(std::make_shared<ryml::Tree>()), id_(create_root_value(*tree_)) {}
   ryml_json(std::nullptr_t): ryml_json() {}
@@ -746,23 +690,28 @@ private:
     return false;
   }
 
-  static bool is_integer_token(const string_t& token) {
-    if (token.empty()) {
+  static bool is_integer_token(c4::csubstr token) {
+    if (token.len == 0) {
       return false;
     }
     size_t start = 0;
-    if (token[0] == '-') {
-      if (token.size() == 1) {
+    if (token.str[0] == '-') {
+      if (token.len == 1) {
         return false;
       }
       start = 1;
     }
-    for (size_t i = start; i < token.size(); ++i) {
-      if (token[i] < '0' || token[i] > '9') {
+    for (size_t i = start; i < token.len; ++i) {
+      if (token.str[i] < '0' || token.str[i] > '9') {
         return false;
       }
     }
     return true;
+  }
+
+  static size_t token_to_index(c4::csubstr token) {
+    string_t tmp(token.str, token.len);
+    return static_cast<size_t>(std::stoll(tmp));
   }
 
   std::optional<size_t> find_pointer(const json_pointer& ptr, bool create_missing) const {
@@ -770,10 +719,10 @@ private:
       return std::nullopt;
     }
     size_t current = id_;
-    for (const auto& token : ptr.tokens()) {
+    for (const auto& token : ptr.path()) {
       ryml::NodeRef node(tree_.get(), current);
       if (node.is_seq() || is_integer_token(token)) {
-        const size_t index = static_cast<size_t>(std::stoll(token));
+        const size_t index = token_to_index(token);
         if (create_missing) {
           if (!node.is_seq()) {
             tree_->remove_children(current);
@@ -792,7 +741,7 @@ private:
             tree_->remove_children(current);
             node.set_type(ryml::MAP);
           }
-          size_t child_id = tree_->find_child(current, c4::to_csubstr(token));
+          size_t child_id = tree_->find_child(current, token);
           if (child_id == ryml::NONE) {
             child_id = tree_->append_child(current);
             ryml::NodeRef child(tree_.get(), child_id);
@@ -805,7 +754,7 @@ private:
           if (!node.is_map()) {
             return std::nullopt;
           }
-          size_t child_id = tree_->find_child(current, c4::to_csubstr(token));
+          size_t child_id = tree_->find_child(current, token);
           if (child_id == ryml::NONE) {
             return std::nullopt;
           }
@@ -818,16 +767,17 @@ private:
 
   static string_t pointer_key(const json_pointer& ptr) {
     string_t key;
-    for (const auto& token : ptr.tokens()) {
+    for (const auto& token : ptr.path()) {
       key.push_back('/');
-      key.append(token);
+      key.append(token.str, token.len);
     }
     return key;
   }
 };
 
+#if 0
 struct ryml_item_proxy {
-  using string_t = ryml_json::string_t;
+  using string_t = c4::csubstr;
 
   string_t key;
   std::shared_ptr<ryml::Tree> tree;
@@ -861,6 +811,7 @@ inline std::vector<ryml_item_proxy> ryml_json::items() const {
   }
   return result;
 }
+#endif
 
 } // namespace inja
 

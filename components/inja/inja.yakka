@@ -6,6 +6,6 @@ includes:
 
 defines:
   global:
-    - INJA_DATA_TYPE=inja::ryml_json
-    - INJA_DATA_TYPE_HEADER=ryml_json.hpp
+    # - INJA_DATA_TYPE=inja::ryml_json
+    - INJA_DATA_TYPE_HEADER="rapidyaml_json.hpp"
 #    - INJA_NOEXCEPTION

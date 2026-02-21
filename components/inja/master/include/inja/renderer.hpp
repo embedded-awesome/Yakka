@@ -25,6 +25,12 @@
 
 namespace inja {
 
+class RenderResult {
+public:
+  std::string result; // Optional for storing the rendered result
+  c4::csubstr value; // Points to result or other data
+};
+
 /*!
 @brief Escapes HTML
 */
@@ -59,49 +65,50 @@ class Renderer : public NodeVisitor {
   std::vector<const Template*> template_stack;
   std::vector<const BlockStatementNode*> block_statement_stack;
 
-  const json* data_input;
+  ryml::Tree* data_input;
   std::ostream* output_stream;
+  ryml::Tree result_tree;
 
-  json additional_data;
-  json* current_loop_data = &additional_data["loop"];
+  ryml::Tree additional_data;
+  json::node current_loop_data = additional_data.rootref()["loop"];
 
-  std::vector<std::shared_ptr<json>> data_tmp_stack;
-  std::stack<const json*> data_eval_stack;
+  std::vector<ryml::NodeRef> data_tmp_stack;
+  std::stack<ryml::NodeRef> data_eval_stack;
   std::stack<const DataNode*> not_found_stack;
 
   bool break_rendering {false};
 
-  static bool truthy(const json* data) {
+  static bool truthy(const json::node* data) {
     if (data == nullptr) {
       return false;
-    } else if (data->is_boolean()) {
-      return data->get<bool>();
-    } else if (data->is_number()) {
-      return (*data != 0);
-    } else if (data->is_null()) {
+    } else if (auto r = data->val<bool>(); r.has_value()) {
+      return r.value();
+    } else if (auto r = data->val<int>(); r.has_value()) {
+      return r.value() != 0;
+    } else if (!data->valid()) {
       return false;
     }
     return !data->empty();
   }
 
-  void print_data(const std::shared_ptr<json>& value) {
-    if (value->is_string()) {
+  void print_data(const std::shared_ptr<json::node>& value) {
+    if (auto r = value->val<std::string>(); r.has_value()) {
       if (config.html_autoescape) {
-        *output_stream << htmlescape(value->get_ref<const json::string_t&>());
+        *output_stream << htmlescape(r.value());
       } else {
-        *output_stream << value->get_ref<const json::string_t&>();
+        *output_stream << r.value();
       }
-    } else if (value->is_number_unsigned()) {
-      *output_stream << value->get<const json::number_unsigned_t>();
-    } else if (value->is_number_integer()) {
-      *output_stream << value->get<const json::number_integer_t>();
-    } else if (value->is_null()) {
+    } else if (auto r = value->val<uint64_t>(); r.has_value()) {
+      *output_stream << r.value();
+    } else if (auto r = value->val<int64_t>(); r.has_value()) {
+      *output_stream << r.value();
+    } else if (!value->valid()) {
     } else {
-      *output_stream << value->dump();
+      *output_stream << ryml::as_json(*value) << std::flush;
     }
   }
 
-  const std::shared_ptr<json> eval_expression_list(const ExpressionListNode& expression_list) {
+  const ryml::NodeRef eval_expression_list(const ExpressionListNode& expression_list) {
     if (!expression_list.root) {
       throw_renderer_error("empty expression", expression_list);
     }
@@ -117,10 +124,10 @@ class Renderer : public NodeVisitor {
     const auto result = data_eval_stack.top();
     data_eval_stack.pop();
 
-    if (!result)
-      return std::make_shared<json>();
+    if (!result.valid())
+      return ryml::NodeRef();
     else
-      return std::make_shared<json>(*result);
+      return result;
   }
 
   void throw_renderer_error(const std::string& message, const AstNode& node) {
@@ -128,13 +135,21 @@ class Renderer : public NodeVisitor {
     INJA_THROW(RenderError(message, loc));
   }
 
-  void make_result(const json&& result) {
-    auto result_ptr = std::make_shared<json>(result);
-    data_tmp_stack.push_back(result_ptr);
-    data_eval_stack.push(result_ptr.get());
+  template <typename T>
+  void make_result(const T result) {
+    auto node = result_tree.rootref().append_child() << result;
+    // auto result_ptr = std::make_shared<json::node>(result);
+    data_tmp_stack.push_back(node);
+    data_eval_stack.push(node);
   }
 
-  template <size_t N, size_t N_start = 0, bool throw_not_found = true> std::array<const json*, N> get_arguments(const FunctionNode& node) {
+  // void make_result(const std::string&& result) {
+  //   auto result_ptr = std::make_shared<json::node>(result);
+  //   data_tmp_stack.push_back(result_ptr);
+  //   data_eval_stack.push(result_ptr.get());
+  // }
+
+  template <size_t N, size_t N_start = 0, bool throw_not_found = true> std::array<const json::node*, N> get_arguments(const FunctionNode& node) {
     if (node.arguments.size() < N_start + N) {
       throw_renderer_error("function needs " + std::to_string(N_start + N) + " variables, but has only found " + std::to_string(node.arguments.size()), node);
     }
@@ -147,7 +162,7 @@ class Renderer : public NodeVisitor {
       throw_renderer_error("function needs " + std::to_string(N) + " variables, but has only found " + std::to_string(data_eval_stack.size()), node);
     }
 
-    std::array<const json*, N> result;
+    std::array<const json::node*, N> result;
     for (size_t i = 0; i < N; i += 1) {
       result[N - i - 1] = data_eval_stack.top();
       data_eval_stack.pop();
@@ -179,7 +194,7 @@ class Renderer : public NodeVisitor {
       result[N - i - 1] = data_eval_stack.top();
       data_eval_stack.pop();
 
-      if (!result[N - i - 1]) {
+      if (!result[N - i - 1].valid()) {
         const auto data_node = not_found_stack.top();
         not_found_stack.pop();
 
@@ -208,27 +223,30 @@ class Renderer : public NodeVisitor {
   void visit(const ExpressionNode&) {}
 
   void visit(const LiteralNode& node) {
-    data_eval_stack.push(&node.value);
+    data_eval_stack.push(result_tree.rootref().append_child() << node.value);
   }
 
   void visit(const DataNode& node) {
+    // root document
+    ryml::NodeRef root = data_input->rootref();
     if (node.ptr.empty()) {
-      // root document
-      data_eval_stack.push(data_input);
-    } else if (additional_data.contains(node.ptr)) {
-      data_eval_stack.push(&(additional_data[node.ptr]));
-    } else if (data_input->contains(node.ptr)) {
-      data_eval_stack.push(&data_input->at(node.ptr));
+      data_eval_stack.push(root);
+    } else if (additional_data.rootref().contains(node.ptr)) {
+      data_eval_stack.push((additional_data.rootref()[node.ptr]));
+    } else if (root.contains(node.ptr)) {
+      data_eval_stack.push((root[node.ptr]));
     } else {
       // Try to evaluate as a no-argument callback
       const auto function_data = function_storage.find_function(node.name, 0);
       if (function_data.operation == FunctionStorage::Operation::Callback) {
         Arguments empty_args {};
-        const auto value = std::make_shared<json>(function_data.callback(empty_args));
+        // make_result(function_data.callback(empty_args));
+        auto value = result_tree.rootref().append_child() << function_data.callback(empty_args);
+        // const auto value = std::make_shared<json::node>(function_data.callback(empty_args));
         data_tmp_stack.push_back(value);
-        data_eval_stack.push(value.get());
+        data_eval_stack.push(value);
       } else {
-        data_eval_stack.push(nullptr);
+        data_eval_stack.push({});
         not_found_stack.emplace(&node);
       }
     }
@@ -269,70 +287,97 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Greater: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] > *args[1]);
+      auto r0 = args[0]->val<json::number_integer_t>();
+      auto r1 = args[1]->val<json::number_integer_t>();
+      if (r0.has_value() && r1.has_value())
+        make_result(r0.value() > r1.value());
     } break;
     case Op::GreaterEqual: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] >= *args[1]);
+      auto r0 = args[0]->val<json::number_integer_t>();
+      auto r1 = args[1]->val<json::number_integer_t>();
+      if (r0.has_value() && r1.has_value()) {
+        make_result(r0.value() >= r1.value());
+      } 
     } break;
     case Op::Less: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] < *args[1]);
+      auto r0 = args[0]->val<json::number_integer_t>();
+      auto r1 = args[1]->val<json::number_integer_t>();
+      if (r0.has_value() && r1.has_value())
+        make_result(r0.value() < r1.value());
     } break;
     case Op::LessEqual: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] <= *args[1]);
+      auto r0 = args[0]->val<json::number_integer_t>();
+      auto r1 = args[1]->val<json::number_integer_t>();
+      if (r0.has_value() && r1.has_value())
+        make_result(r0.value() <= r1.value());
     } break;
     case Op::Add: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_string() && args[1]->is_string()) {
-        make_result(args[0]->get_ref<const json::string_t&>() + args[1]->get_ref<const json::string_t&>());
-      } else if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() + args[1]->get<const json::number_integer_t>());
+      if (auto r0 = args[0]->val<std::string>(), r1 = args[1]->val<std::string>(); r0.has_value() && r1.has_value()) {
+        make_result(r0.value() + r1.value());
+      } else if (auto r0 = args[0]->val<json::number_integer_t>(), r1 = args[1]->val<json::number_integer_t>(); r0.has_value() && r1.has_value()) {
+        make_result(r0.value() + r1.value());
       } else {
-        make_result(args[0]->get<const json::number_float_t>() + args[1]->get<const json::number_float_t>());
+        make_result(args[0]->val<json::number_float_t>().value() + args[1]->val<json::number_float_t>().value());
       }
     } break;
     case Op::Subtract: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() - args[1]->get<const json::number_integer_t>());
+      if (auto r0 = args[0]->val<json::number_integer_t>(), r1 = args[1]->val<json::number_integer_t>(); r0.has_value() && r1.has_value()) {
+        make_result(r0.value() - r1.value());
       } else {
-        make_result(args[0]->get<const json::number_float_t>() - args[1]->get<const json::number_float_t>());
+        make_result(args[0]->val<json::number_float_t>().value() - args[1]->val<json::number_float_t>().value());
       }
     } break;
     case Op::Multiplication: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() * args[1]->get<const json::number_integer_t>());
+      if (auto r0 = args[0]->val<json::number_integer_t>(), r1 = args[1]->val<json::number_integer_t>(); r0.has_value() && r1.has_value()) {
+        make_result(r0.value() * r1.value());
       } else {
-        make_result(args[0]->get<const json::number_float_t>() * args[1]->get<const json::number_float_t>());
+        make_result(args[0]->val<const json::number_float_t>().value() * args[1]->val<const json::number_float_t>().value());
       }
     } break;
     case Op::Division: {
       const auto args = get_arguments<2>(node);
-      if (args[1]->get<const json::number_float_t>() == 0) {
+      auto r0 = args[0]->val<const json::number_float_t>();
+      auto r1 = args[1]->val<const json::number_float_t>();
+      if (r1.has_value() && r1.value() == 0) {
         throw_renderer_error("division by zero", node);
       }
-      make_result(args[0]->get<const json::number_float_t>() / args[1]->get<const json::number_float_t>());
+      if (r0.has_value() && r1.has_value())
+        make_result(r0.value() / r1.value());
     } break;
     case Op::Power: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_number_integer() && args[1]->get<const json::number_integer_t>() >= 0) {
+      auto r0_int = args[0]->val<const json::number_integer_t>();
+      auto r1_int = args[1]->val<const json::number_integer_t>();
+      if (r0_int.has_value() && r1_int.has_value() && r1_int.value() >= 0) {
         const auto result =
-            static_cast<json::number_integer_t>(std::pow(args[0]->get<const json::number_integer_t>(), args[1]->get<const json::number_integer_t>()));
+            static_cast<json::number_integer_t>(std::pow(r0_int.value(), r1_int.value()));
         make_result(result);
       } else {
-        const auto result = std::pow(args[0]->get<const json::number_float_t>(), args[1]->get<const json::number_integer_t>());
-        make_result(result);
+        auto r0_float = args[0]->val<const json::number_float_t>();
+        auto r1_float = args[1]->val<const json::number_float_t>();
+        if (r0_float.has_value() && r1_float.has_value()) {
+          const auto result = std::pow(r0_float.value(), r1_float.value());
+          make_result(result);
+        }
       }
     } break;
     case Op::Modulo: {
       const auto args = get_arguments<2>(node);
-      make_result(args[0]->get<const json::number_integer_t>() % args[1]->get<const json::number_integer_t>());
+      auto r0 = args[0]->val<const json::number_integer_t>();
+      auto r1 = args[1]->val<const json::number_integer_t>();
+      if (r1.has_value() && r1.value() == 0) {
+        throw_renderer_error("modulo by zero", node);
+      }
+      make_result(r0.value() % r1.value());
     } break;
     case Op::AtId: {
-      const auto container = get_arguments<1, 0, false>(node)[0];
+      auto container = get_arguments<1, 0, false>(node)[0];
       node.arguments[1]->accept(*this);
       if (not_found_stack.empty()) {
         throw_renderer_error("could not find element with given name", node);
@@ -340,124 +385,127 @@ class Renderer : public NodeVisitor {
       const auto id_node = not_found_stack.top();
       not_found_stack.pop();
       data_eval_stack.pop();
-      if (container->contains(id_node->name))
-        data_eval_stack.push(&container->at(id_node->name));
+      if (container->contains(id_node->name.c_str()))
+        data_eval_stack.push(container->at(id_node->name.c_str()));
       else
         data_eval_stack.push(nullptr);
     } break;
     case Op::At: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_object()) {
-        auto key = args[1]->get<std::string>();
-        if (key[0] == '/') {
-          json::json_pointer ptr(key);
-          data_eval_stack.push(&args[0]->at(ptr));
+      // Check that first arg is an object and second arg is a string
+      if (args[0]->is_map() && args[1]->has_val()) {
+        if (args[1]->val()[0] == '/') {
+          json::pointer ptr(args[1]->val());
+          data_eval_stack.push(args[0]->at(ptr));
         }
         else
-          data_eval_stack.push(&args[0]->at(args[1]->get<std::string>()));
-      } else {
-        data_eval_stack.push(&args[0]->at(args[1]->get<int>()));
+          data_eval_stack.push(args[0]->at(args[1]->val()));
+      } else if (auto r1 = args[1]->val<int>(); args[0]->is_seq() && r1.has_value()) {
+        data_eval_stack.push(args[0]->at(r1.value()));
       }
     } break;
     case Op::Capitalize: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
-      result[0] = static_cast<char>(::toupper(result[0]));
-      std::transform(result.begin() + 1, result.end(), result.begin() + 1, [](char c) { return static_cast<char>(::tolower(c)); });
-      make_result(std::move(result));
+      auto result = get_arguments<1>(node)[0]->val<std::string>();
+      if (result.has_value()) {
+        (*result)[0] = static_cast<char>(::toupper((*result)[0]));
+        std::transform(result->begin() + 1, result->end(), result->begin() + 1, [](char c) { return static_cast<char>(::tolower(c)); });
+        make_result(std::move(result));
+      } else {
+        make_result("");
+      }
     } break;
     case Op::Default: {
-      const auto test_arg = get_arguments<1, 0, false>(node)[0];
-      data_eval_stack.push(test_arg && !test_arg->is_null() ? test_arg : get_arguments<1, 1>(node)[0]);
+      auto test_arg = get_arguments<1, 0, false>(node)[0];
+      data_eval_stack.push(test_arg && test_arg->valid() ? *test_arg : get_arguments<1, 1>(node)[0]);
     } break;
     case Op::DivisibleBy: {
       const auto args = get_arguments<2>(node);
-      const auto divisor = args[1]->get<const json::number_integer_t>();
-      make_result((divisor != 0) && (args[0]->get<const json::number_integer_t>() % divisor == 0));
+      const auto divisor = args[1]->val<json::number_integer_t>();
+      make_result((divisor != 0) && (args[0]->val<json::number_integer_t>().value() % divisor.value() == 0));
     } break;
     case Op::Even: {
-      make_result(get_arguments<1>(node)[0]->get<const json::number_integer_t>() % 2 == 0);
+      make_result(get_arguments<1>(node)[0]->val<const json::number_integer_t>().value() % 2 == 0);
     } break;
     case Op::Exists: {
-      auto&& name = get_arguments<1>(node)[0]->get_ref<const json::string_t&>();
-      make_result(data_input->contains(json::json_pointer(DataNode::convert_dot_to_ptr(name))));
+      auto name = get_arguments<1>(node)[0]->val<const std::string>();
+      if (name.has_value())
+        make_result(data_input->contains(json::pointer(DataNode::convert_dot_to_ptr(name.value()))));
     } break;
     case Op::ExistsInObject: {
       const auto args = get_arguments<2>(node);
-      auto&& name = args[1]->get_ref<const json::string_t&>();
-      if (args[0]) {
-        if (args[0]->is_object())
-          make_result(args[0]->find(name) != args[0]->end());
-        else if (args[0]->is_array())
+      auto name = args[1]->val<const std::string>();
+      if (args[0] && name.has_value()) {
+        if (args[0]->is_map())
+          make_result(args[0]->find(name.value()) != args[0]->end());
+        else if (args[0]->is_seq())
           make_result(std::any_of(args[0]->begin(), args[0]->end(),
-                                  [&](const auto& obj) { return obj.is_string() && obj.template get_ref<const json::string_t&>().compare(name) == 0; }));
+                                  [&](const auto& obj) { return obj.has_val() && obj.val().compare(name.value()) == 0; }));
         else
           make_result(false);
       } else
         make_result(false);
     } break;
     case Op::First: {
-      const auto result = &get_arguments<1>(node)[0]->front();
-      data_eval_stack.push(result);
+      const auto result = &get_arguments<1>(node)[0];
+      if (result->valid() && result->is_seq() && !result->empty())
+        data_eval_stack.push(result->first_child());
     } break;
     case Op::Float: {
-      make_result(std::stod(get_arguments<1>(node)[0]->get_ref<const json::string_t&>()));
+      auto result = get_arguments<1>(node)[0]->val<const json::number_float_t>();
+      make_result(result.value_or(0.0f));
     } break;
     case Op::Int: {
       const auto val = get_arguments<1>(node)[0];
       if (val->is_number())
-        make_result(val->get<const json::number_integer_t>());
+        make_result(val->val<const json::number_integer_t>());
       else
-        make_result(std::stoi(val->get_ref<const json::string_t&>()));
+        make_result(std::stoi(val->get_ref<const json::node::string_t&>()));
     } break;
     case Op::Last: {
-      const auto result = &get_arguments<1>(node)[0]->back();
-      data_eval_stack.push(result);
+      const auto result = get_arguments<1>(node)[0];
+      if (result->valid() && result->is_seq() && !result->empty())
+        data_eval_stack.push(result->last_child());
     } break;
     case Op::Length: {
-      const auto val = get_arguments<1>(node)[0];
-      if (val->is_string()) {
-        make_result(val->get_ref<const json::string_t&>().length());
-      } else {
-        make_result(val->size());
-      }
+      const auto result = get_arguments<1>(node)[0];
+      make_result(result->size());
     } break;
     case Op::Lower: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
+      auto result = get_arguments<1>(node)[0]->val<json::node::string_t>();
       std::transform(result.begin(), result.end(), result.begin(), [](char c) { return static_cast<char>(::tolower(c)); });
-      make_result(std::move(result));
+      make_result(result);
     } break;
     case Op::Max: {
       const auto args = get_arguments<1>(node);
-      auto values = args[0]->get<std::vector<json>>();
-      if (values.empty()) {
+      if (args[0]->empty()) {
         make_result(nullptr);
       } else {
-        const auto result = std::max_element(values.begin(), values.end());
-        make_result(json(*result));
+        const auto result = std::max_element(args[0]->begin(), args[0]->end());
+        make_result(*result);
       }
     } break;
     case Op::Min: {
       const auto args = get_arguments<1>(node);
-      auto values = args[0]->get<std::vector<json>>();
-      if (values.empty()) {
+      if (args[0]->empty()) {
         make_result(nullptr);
       } else {
-        const auto result = std::min_element(values.begin(), values.end());
-        make_result(json(*result));
+        const auto result = std::min_element(args[0]->begin(), args[0]->end());
+        make_result(*result);
       }
     } break;
     case Op::Odd: {
-      make_result(get_arguments<1>(node)[0]->get<const json::number_integer_t>() % 2 != 0);
+      auto result = get_arguments<1>(node)[0]->val<json::number_integer_t>();
+      make_result(result.value_or(0) % 2 != 0);
     } break;
     case Op::Range: {
-      std::vector<int> result(get_arguments<1>(node)[0]->get<const json::number_integer_t>());
+      std::vector<int> result(get_arguments<1>(node)[0]->val<json::number_integer_t>());
       std::iota(result.begin(), result.end(), 0);
       make_result(std::move(result));
     } break;
     case Op::Round: {
       const auto args = get_arguments<2>(node);
-      const auto precision = args[1]->get<const json::number_integer_t>();
-      const double result = std::round(args[0]->get<const json::number_float_t>() * std::pow(10.0, precision)) / std::pow(10.0, precision);
+      const auto precision = args[1]->val<json::number_integer_t>();
+      const double result = std::round(args[0]->val<json::number_float_t>() * std::pow(10.0, precision)) / std::pow(10.0, precision);
       if (precision == 0) {
         make_result(int(result));
       } else {
@@ -465,35 +513,35 @@ class Renderer : public NodeVisitor {
       }
     } break;
     case Op::Sort: {
-      auto values = get_arguments<1>(node)[0]->get<std::vector<json>>();
+      auto values = get_arguments<1>(node)[0]->val<std::vector<json::node>>();
       std::sort(values.begin(), values.end());
       make_result(std::move(values));
     } break;
     case Op::Upper: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
+      auto result = get_arguments<1>(node)[0]->val<json::node::string_t>();
       std::transform(result.begin(), result.end(), result.begin(), [](char c) { return static_cast<char>(::toupper(c)); });
       make_result(std::move(result));
     } break;
     case Op::IsBoolean: {
-      make_result(get_arguments<1>(node)[0]->is_boolean());
+      make_result(get_arguments<1>(node)[0]->val<bool>().has_value());
     } break;
     case Op::IsNumber: {
-      make_result(get_arguments<1>(node)[0]->is_number());
+      make_result(get_arguments<1>(node)[0]->val<const json::number_float_t>().has_value());
     } break;
     case Op::IsInteger: {
-      make_result(get_arguments<1>(node)[0]->is_number_integer());
+      make_result(get_arguments<1>(node)[0]->val<const json::number_integer_t>().has_value());
     } break;
     case Op::IsFloat: {
-      make_result(get_arguments<1>(node)[0]->is_number_float());
+      make_result(get_arguments<1>(node)[0]->val<const json::number_float_t>().has_value());
     } break;
     case Op::IsObject: {
-      make_result(get_arguments<1>(node)[0]->is_object());
+      make_result(get_arguments<1>(node)[0]->is_map());
     } break;
     case Op::IsArray: {
-      make_result(get_arguments<1>(node)[0]->is_array());
+      make_result(get_arguments<1>(node)[0]->is_seq());
     } break;
     case Op::IsString: {
-      make_result(get_arguments<1>(node)[0]->is_string());
+      make_result(get_arguments<1>(node)[0]->has_val());
     } break;
     case Op::Callback: {
       auto args = get_argument_vector(node);
@@ -502,7 +550,7 @@ class Renderer : public NodeVisitor {
     case Op::Super: {
       const auto args = get_argument_vector(node);
       const size_t old_level = current_level;
-      const size_t level_diff = (args.size() == 1) ? args[0]->get<int>() : 1;
+      const size_t level_diff = (args.size() == 1) ? args[0]->val<int>() : 1;
       const size_t level = current_level + level_diff;
 
       if (block_statement_stack.empty()) {
@@ -530,13 +578,13 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Join: {
       const auto args = get_arguments<2>(node);
-      const auto separator = args[1]->get<json::string_t>();
+      const auto separator = args[1]->val<json::node::string_t>();
       std::ostringstream os;
       std::string sep;
       for (const auto& value : *args[0]) {
         os << sep;
-        if (value.is_string()) {
-          os << value.get<std::string>(); // otherwise the value is surrounded with ""
+        if (value.has_val()) {
+          os << value.val<std::string>().value(); // otherwise the value is surrounded with ""
         } else {
           os << value.dump();
         }
@@ -547,7 +595,7 @@ class Renderer : public NodeVisitor {
     case Op::Hex: {
       const auto args = get_arguments<1>(node);
       if (args[0] != nullptr) {
-        make_result(std::format("{:x}", args[0]->get<int>()));
+        make_result(std::format("{:x}", args[0]->val<int>().value()));
       } else {
         throw_renderer_error("NULL arguments to hex()", node);
       }
@@ -558,12 +606,12 @@ class Renderer : public NodeVisitor {
       if (number_of_args < 2) {
         throw_renderer_error("map() needs at least two arguments", node);
       }
-      inja::json output;
+      inja::json::node output;
       const auto data = args[0];
-      const auto function_name = args[1]->get<std::string>();
+      const auto function_name = args[1]->val<std::string>().value();
       const auto found_function = function_storage.find_function(function_name, number_of_args - 1);
       if (found_function.operation == FunctionStorage::Operation::None) {
-        throw_renderer_error("map() function '" + args[1]->get<std::string>() + "' not found", node);
+        throw_renderer_error("map() function '" + args[1]->val<std::string>().value() + "' not found", node);
       }
       // Remove the function name and the data from the arguments
       // Perhaps it's better to create a splice of the arguments vector?
@@ -571,11 +619,11 @@ class Renderer : public NodeVisitor {
       args.erase(args.begin());
 
       if (found_function.operation == FunctionStorage::Operation::Callback) {
-        for (const auto& i: data->items()) {
-          args.emplace(args.begin(), &i.value());
+        for (const auto i: data->children()) {
+          args.emplace(args.begin(), &i.val());
           const auto result = found_function.callback(args);
           args.erase(args.begin());
-          if (result.is_null()) {
+          if (!result.valid()) {
             continue;
           } else {
             output.push_back(result);
@@ -622,11 +670,11 @@ class Renderer : public NodeVisitor {
 
   void visit(const ForArrayStatementNode& node) {
     const auto result = eval_expression_list(node.condition);
-    if (result->is_null()) {
+    if (!result->valid()) {
       current_loop_data = &additional_data["loop"];
       return;
     }
-    if (!result->is_array()) {
+    if (!result->is_seq()) {
       throw_renderer_error("object must be an array", node);
     }
 
@@ -665,11 +713,11 @@ class Renderer : public NodeVisitor {
 
   void visit(const ForObjectStatementNode& node) {
     const auto result = eval_expression_list(node.condition);
-    if (result->is_null()) {
+    if (!result->valid()) {
       current_loop_data = &additional_data["loop"];
       return;
     }
-    if (!result->is_object()) {
+    if (!result->is_map()) {
       throw_renderer_error("object must be an object", node);
     }
 
@@ -708,7 +756,7 @@ class Renderer : public NodeVisitor {
 
   void visit(const IfStatementNode& node) {
     const auto result = eval_expression_list(node.condition);
-    if (result->is_null()) {
+    if (!result->valid()) {
       if (node.has_false_statement) {
         node.false_statement.accept(*this);
       } else {
@@ -761,14 +809,14 @@ class Renderer : public NodeVisitor {
     std::string ptr = node.key;
     replace_substring(ptr, ".", "/");
     ptr = "/" + ptr;
-    additional_data[json::json_pointer(ptr)] = *eval_expression_list(node.expression);
+    additional_data[json::node::json_pointer(ptr)] = *eval_expression_list(node.expression);
   }
 
 public:
   Renderer(const RenderConfig& config, const TemplateStorage& template_storage, const FunctionStorage& function_storage)
       : config(config), template_storage(template_storage), function_storage(function_storage) {}
 
-  void render_to(std::ostream& os, const Template& tmpl, const json& data, json* loop_data = nullptr) {
+  void render_to(std::ostream& os, const Template& tmpl, const json::node& data, json::node* loop_data = nullptr) {
     output_stream = &os;
     current_template = &tmpl;
     data_input = &data;
