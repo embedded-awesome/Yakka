@@ -1,28 +1,16 @@
 #ifndef INCLUDE_INJA_JSON_HPP_
 #define INCLUDE_INJA_JSON_HPP_
 
-#ifdef INJA_DATA_TYPE_HEADER
-#define INJA_STRINGIZE2(x) #x
-#define INJA_STRINGIZE(x) INJA_STRINGIZE2(x)
-#include INJA_STRINGIZE(INJA_DATA_TYPE_HEADER)
-#undef INJA_STRINGIZE
-#undef INJA_STRINGIZE2
-#else
 #include <ryml.hpp>
-#endif
+#include "ryml_std.hpp"
 
 namespace inja {
-namespace json {
-#ifndef INJA_DATA_TYPE
-using node = ryml::NodeRef;
-using const_node = ryml::ConstNodeRef;
-using pointer = ryml::Pointer;
-#else
-using node = INJA_DATA_TYPE;
-using const_node = INJA_DATA_TYPE;
-using pointer = INJA_POINTER_TYPE;
-#endif
-} // namespace json
+namespace ryml = ::ryml;
+using Tree = ryml::Tree;
+using NodeRef = ryml::NodeRef;
+using ConstNodeRef = ryml::ConstNodeRef;
+using Pointer = ryml::Pointer;
+constexpr size_t NONE = size_t(-1);
 } // namespace inja
 
 #endif // INCLUDE_INJA_JSON_HPP_

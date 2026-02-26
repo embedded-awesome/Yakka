@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "json.hpp"
+#include "utils.hpp"
 #include "config.hpp"
 #include "function_storage.hpp"
 #include "parser.hpp"
@@ -113,44 +114,76 @@ public:
     return parse_template(filename);
   }
 
-  std::string render(std::string_view input, const json::node& data) {
+  std::string render(std::string_view input, const ConstNodeRef& data) {
     return render(parse(input), data);
   }
 
-  std::string render(const Template& tmpl, const json::node& data) {
+  std::string render(const Template& tmpl, const ConstNodeRef& data) {
     std::stringstream os;
     render_to(os, tmpl, data);
     return os.str();
   }
 
-  std::string render_file(const std::filesystem::path& filename, const json::node& data) {
+  std::string render_file(const std::filesystem::path& filename, const ConstNodeRef& data) {
     return render(parse_template(filename), data);
   }
 
-  void write(const std::filesystem::path& filename, const json::node& data, const std::string& filename_out) {
+  std::string render_file_with_json_file(const std::filesystem::path& filename, const std::string& filename_data) {
+    Tree data = load_json(filename_data);
+    return render_file(filename, data.rootref());
+  }
+
+  void write(const std::filesystem::path& filename, const ConstNodeRef& data, const std::string& filename_out) {
     std::ofstream file(output_path / filename_out);
     file << render_file(filename, data);
     file.close();
   }
 
-  void write(const Template& temp, const json::node& data, const std::string& filename_out) {
+  void write(const Template& temp, const ConstNodeRef& data, const std::string& filename_out) {
     std::ofstream file(output_path / filename_out);
     file << render(temp, data);
     file.close();
   }
 
-  std::ostream& render_to(std::ostream& os, const Template& tmpl, const json::node& data) {
+  void write_with_json_file(const std::filesystem::path& filename, const std::string& filename_data, const std::string& filename_out) {
+    Tree data = load_json(filename_data);
+    write(filename, data.rootref(), filename_out);
+  }
+
+  void write_with_json_file(const Template& temp, const std::string& filename_data, const std::string& filename_out) {
+    Tree data = load_json(filename_data);
+    write(temp, data.rootref(), filename_out);
+  }
+
+  std::ostream& render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data) {
     Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data);
     return os;
   }
 
-  std::ostream& render_to(std::ostream& os, const std::string_view input, const json::node& data) {
+  std::ostream& render_to(std::ostream& os, const std::string_view input, const ConstNodeRef& data) {
     return render_to(os, parse(input), data);
   }
 
   std::string load_file(const std::string& filename) {
-    Parser parser(parser_config, lexer_config, template_storage, function_storage);
+    const Parser parser(parser_config, lexer_config, template_storage, function_storage);
     return Parser::load_file(input_path / filename);
+  }
+
+  Tree load_json(const std::string& filename) {
+    std::ifstream file;
+    file.open(input_path / filename);
+    if (file.fail()) {
+      const auto trimmed = trim(filename);
+      if (!trimmed.empty() && (trimmed.front() == '{' || trimmed.front() == '[')) {
+        const ryml::csubstr source_name = to_csubstr("inline-json");
+        return ryml::parse_in_arena(source_name, to_csubstr(filename));
+      }
+      INJA_THROW(FileError("failed accessing file at '" + (input_path / filename).string() + "'"));
+    }
+
+    const std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    const ryml::csubstr file_name = to_csubstr(filename);
+    return ryml::parse_in_arena(file_name, to_csubstr(contents));
   }
 
   /*!
@@ -178,9 +211,14 @@ public:
   @brief Adds a void callback with given number or arguments
   */
   void add_void_callback(const std::string& name, int num_args, const VoidCallbackFunction& callback) {
-    function_storage.add_callback(name, num_args, [callback](Arguments& args) {
-      callback(args);
-      return json();
+    function_storage.add_callback(name, num_args, [callback](Arguments& args, Tree& additional_data) {
+      callback(args, additional_data);
+      auto root = additional_data.rootref();
+      root |= ryml::MAP;
+      auto tmp = ensure_child_seq(root, "_tmp");
+      auto node = tmp.append_child();
+      node = nullptr;
+      return ConstNodeRef(node);
     });
   }
 
@@ -203,14 +241,14 @@ public:
 /*!
 @brief render with default settings to a string
 */
-inline std::string render(std::string_view input, const json& data) {
+inline std::string render(std::string_view input, const ConstNodeRef& data) {
   return Environment().render(input, data);
 }
 
 /*!
 @brief render with default settings to the given output stream
 */
-inline void render_to(std::ostream& os, std::string_view input, const json& data) {
+inline void render_to(std::ostream& os, std::string_view input, const ConstNodeRef& data) {
   Environment env;
   env.render_to(os, env.parse(input), data);
 }

@@ -176,6 +176,9 @@ public:
     template<class U=Impl>
     C4_ALWAYS_INLINE C4_PURE auto get() noexcept -> _C4_IF_MUTABLE(NodeData*) { RYML_ASSERT(tree_ != nullptr); return tree__->get(id__); }
 
+    template<typename T>
+    C4_ALWAYS_INLINE C4_PURE std::optional<T> val() const noexcept { RYML_ASSERT(tree_ != nullptr); const auto n = tree_->get(id_); T result; if(n && read(*this, &result)) return result; return std::nullopt; }
+
     C4_ALWAYS_INLINE C4_PURE NodeType    type() const noexcept { _C4RV(); return tree_->type(id_); }
     C4_ALWAYS_INLINE C4_PURE const char* type_str() const noexcept { return tree_->type_str(id_); }
 
@@ -246,6 +249,7 @@ public:
 
     /** Wrapper for has_child() with std::map-like naming convention */
     C4_ALWAYS_INLINE C4_PURE bool contains(csubstr name) const noexcept { _C4RV(); return tree_->has_child(id_, name); }
+    C4_ALWAYS_INLINE C4_PURE bool contains(Pointer ptr) const noexcept { _C4RV(); return (*this)[ptr].valid(); }
 
     C4_ALWAYS_INLINE C4_PURE bool has_sibling(ConstImpl const& n) const noexcept { _C4RV(); return tree_->has_sibling(id_, n.m_id); }
     C4_ALWAYS_INLINE C4_PURE bool has_sibling(csubstr name) const noexcept { _C4RV(); return tree_->has_sibling(id_, name); }
@@ -425,6 +429,56 @@ public:
             curr = Impl(curr.m_tree, ch);
         }
         return curr;
+    }
+
+    /** Find child by key name. O(num_children). Equivalent to operator[] but throws an error if not found. */
+    C4_ALWAYS_INLINE C4_PURE ConstImpl at(csubstr k) const
+    {
+        _C4RV();
+        size_t ch = tree_->find_child(id_, k);
+        if(ch == NONE)
+        {
+            _RYML_CB_ERR(tree_->m_callbacks, "child not found");
+        }
+        return {tree_, ch};
+    }
+
+    /** Find child by key name. O(num_children). Equivalent to operator[] but throws an error if not found. */
+    template<class U=Impl>
+    C4_ALWAYS_INLINE C4_PURE auto at(csubstr k) noexcept -> _C4_IF_MUTABLE(Impl)
+    {
+        _C4RV();
+        size_t ch = tree__->find_child(id__, k);
+        if(ch == NONE)
+        {
+            _RYML_CB_ERR(tree__->m_callbacks, "child not found");
+        }
+        return Impl(tree__, ch);
+    }
+
+    /** Find child by index position. O(pos). Equivalent to operator[] but throws an error if not found. */
+    C4_ALWAYS_INLINE C4_PURE ConstImpl at(size_t pos) const
+    {
+        _C4RV();
+        size_t ch = tree_->child(id_, pos);
+        if(ch == NONE)
+        {
+            _RYML_CB_ERR(tree_->m_callbacks, "child index not found");
+        }
+        return {tree_, ch};
+    }
+
+    /** Find child by index position. O(pos). Equivalent to operator[] but throws an error if not found. */
+    template<class U=Impl>
+    C4_ALWAYS_INLINE C4_PURE auto at(size_t pos) noexcept -> _C4_IF_MUTABLE(Impl)
+    {
+        _C4RV();
+        size_t ch = tree__->child(id__, pos);
+        if(ch == NONE)
+        {
+            _RYML_CB_ERR(tree__->m_callbacks, "child index not found");
+        }
+        return Impl(tree__, ch);
     }
 
     /** @} */

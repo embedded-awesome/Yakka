@@ -1,0 +1,8 @@
+name: RapidYAML Pointer
+
+includes:
+  global:
+    - .
+
+sources:
+  - rapidyaml_json.cpp

@@ -12,6 +12,7 @@ sources:
   - master/src/c4/yml/parse.cpp
   - master/src/c4/yml/preprocess.cpp
   - master/src/c4/yml/tree.cpp
+  - master/src/c4/yml/pointer.cpp
   - master/ext/c4core/src/c4/error.cpp
   - master/ext/c4core/src/c4/utf.cpp
   - master/ext/c4core/src/c4/base64.cpp

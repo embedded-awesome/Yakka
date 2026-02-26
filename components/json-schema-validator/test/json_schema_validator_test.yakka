@@ -1,9 +1,0 @@
-name: JSON Schema Validator Test
-
-sources:
-  - json_schema_validator_test.cpp
-
-requires:
-  components:
-    - json-schema-validator
-    - googletest

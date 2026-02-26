@@ -10,6 +10,7 @@
 #include <vector>
 #include "c4/yml/export.hpp"
 #include "c4/substr.hpp"
+#include "c4/yml/common.hpp"
 
 #ifdef __clang__
 #   pragma clang diagnostic push

@@ -48,11 +48,11 @@ class Parser {
   std::stack<ForStatementNode*> for_statement_stack;
   std::stack<BlockStatementNode*> block_statement_stack;
 
-  inline void throw_parser_error(const std::string& message) const {
+  void throw_parser_error(const std::string& message) const {
     INJA_THROW(ParserError(message, lexer.current_position()));
   }
 
-  inline void get_next_token() {
+  void get_next_token() {
     if (have_peek_tok) {
       tok = peek_tok;
       have_peek_tok = false;
@@ -61,19 +61,19 @@ class Parser {
     }
   }
 
-  inline void get_peek_token() {
+  void get_peek_token() {
     if (!have_peek_tok) {
       peek_tok = lexer.scan();
       have_peek_tok = true;
     }
   }
 
-  inline void add_literal(Arguments &arguments, const char* content_ptr) {
+  void add_literal(Arguments &arguments, const char* content_ptr) {
     const std::string_view data_text(literal_start.data(), tok.text.data() - literal_start.data() + tok.text.size());
     arguments.emplace_back(std::make_shared<LiteralNode>(data_text, data_text.data() - content_ptr));
   }
 
-  inline void add_operator(Arguments &arguments, OperatorStack &operator_stack) {
+  void add_operator(Arguments &arguments, OperatorStack &operator_stack) {
     auto function = operator_stack.top();
     operator_stack.pop();
 
@@ -123,7 +123,6 @@ class Parser {
     if (config.include_callback) {
       auto include_template = config.include_callback(path, original_name);
       template_storage.emplace(template_name, include_template);
-      parse_into_template(template_storage[template_name], template_name);
     }
   }
 
@@ -247,12 +246,6 @@ class Parser {
 
         // Operators
       } break;
-      case Token::Kind::Dot:
-        if (arguments.empty()) {
-          arguments.emplace_back(std::make_shared<DataNode>("", tok.text.data() - tmpl.content.c_str()));
-          break;
-        }
-        [[fallthrough]];
       case Token::Kind::Equal:
       case Token::Kind::NotEqual:
       case Token::Kind::GreaterThan:
@@ -264,7 +257,8 @@ class Parser {
       case Token::Kind::Times:
       case Token::Kind::Slash:
       case Token::Kind::Power:
-      case Token::Kind::Percent: {
+      case Token::Kind::Percent:
+      case Token::Kind::Dot: {
 
       parse_operator:
         FunctionStorage::Operation operation;
@@ -523,7 +517,7 @@ class Parser {
           throw_parser_error("expected id, got '" + tok.describe() + "'");
         }
 
-        const Token key_token = std::move(value_token);
+        const Token key_token = value_token;
         value_token = tok;
         get_next_token();
 
@@ -665,7 +659,6 @@ class Parser {
       } break;
       }
     }
-    current_block = nullptr;
   }
 
 public:
@@ -673,13 +666,13 @@ public:
                   const FunctionStorage& function_storage)
       : config(parser_config), lexer(lexer_config), template_storage(template_storage), function_storage(function_storage) {}
 
-  Template parse(std::string_view input, std::filesystem::path path) {
+  Template parse(std::string_view input, const std::filesystem::path& path) {
     auto result = Template(std::string(input));
     parse_into(result, path);
     return result;
   }
 
-  void parse_into_template(Template& tmpl, std::filesystem::path filename) {
+  void parse_into_template(Template& tmpl, const std::filesystem::path& filename) {
     auto sub_parser = Parser(config, lexer.get_config(), template_storage, function_storage);
     sub_parser.parse_into(tmpl, filename.parent_path());
   }

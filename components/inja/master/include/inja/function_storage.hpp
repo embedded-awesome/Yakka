@@ -12,9 +12,9 @@
 
 namespace inja {
 
-using Arguments = std::vector<ryml::NodeRef>;
-using CallbackFunction = std::function<json::node(Arguments& args)>;
-using VoidCallbackFunction = std::function<void(Arguments& args)>;
+using Arguments = std::vector<ConstNodeRef>;
+using CallbackFunction = std::function<ConstNodeRef(Arguments& args, Tree& additional_data)>;
+using VoidCallbackFunction = std::function<void(Arguments& args, Tree& additional_data)>;
 
 /*!
  * \brief Class for builtin functions and user-defined callbacks.
@@ -63,14 +63,13 @@ public:
     Min,
     Odd,
     Range,
+    Replace,
     Round,
     Sort,
     Upper,
     Super,
     Join,
     Callback,
-    Hex,
-    Map,
     None,
   };
 
@@ -108,14 +107,13 @@ private:
       {std::make_pair("min", 1), FunctionData {Operation::Min}},
       {std::make_pair("odd", 1), FunctionData {Operation::Odd}},
       {std::make_pair("range", 1), FunctionData {Operation::Range}},
+      {std::make_pair("replace", 3), FunctionData {Operation::Replace}},
       {std::make_pair("round", 2), FunctionData {Operation::Round}},
       {std::make_pair("sort", 1), FunctionData {Operation::Sort}},
       {std::make_pair("upper", 1), FunctionData {Operation::Upper}},
       {std::make_pair("super", 0), FunctionData {Operation::Super}},
       {std::make_pair("super", 1), FunctionData {Operation::Super}},
       {std::make_pair("join", 2), FunctionData {Operation::Join}},
-      {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
-      {std::make_pair("map", -1), FunctionData {Operation::Map}},
   };
 
 public:
