@@ -222,7 +222,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     if (component_path.has_value()) {
       yakka::component component_data;
       component_data.parse_file(component_path.value());
-      res.set_content(ryml::emitrs_json<std::string>(component_data.json), "application/json");
+      res.set_content(ryml::emitrs_json<std::string>(component_data.tree), "application/json");
     } else {
       res.status = 404;
     }

@@ -34,7 +34,7 @@ struct component {
   // - yaml_buffer: Buffer to hold YAML file contents (ryml uses views into this)
   ryml::Tree tree;
   std::string yaml_buffer;
-  mutable ryml::Tree json;  // mutable to allow lazy evaluation in const methods
+  // mutable ryml::Tree json;  // mutable to allow lazy evaluation in const methods
   mutable bool json_cache_valid = false;  // Track if json cache is up-to-date
   
   semver::version version;

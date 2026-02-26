@@ -51,11 +51,11 @@ void project::process_build_string(const std::string build_string)
   while (std::getline(ss, word, ' ')) {
     // Identify features, commands, and components
     if (word.front() == '+')
-      this->initial_features.push_back(word.substr(1));
+      this->initial_features.push_back(c4::to_csubstr(word).sub(1, word.size() - 1));
     else if (word.back() == '!')
-      this->commands.insert(word.substr(0, word.size() - 1));
+      this->commands.insert(c4::to_csubstr(word).sub(0, word.size() - 1));
     else
-      this->initial_components.push_back(word);
+      this->initial_components.push_back(c4::to_csubstr(word));
   }
 }
 
@@ -75,12 +75,12 @@ void project::init_project(std::vector<std::string> components, std::vector<std:
   initial_features = features;
 
   for (const auto &c: components) {
-    unprocessed_components.insert(c);
-    initial_components.push_back(c);
+    unprocessed_components.insert(c4::to_csubstr(c));
+    initial_components.push_back(c4::to_csubstr(c));
   }
   for (const auto &f: features) {
-    unprocessed_features.insert(f);
-    initial_features.push_back(f);
+    unprocessed_features.insert(c4::to_csubstr(f));
+    initial_features.push_back(c4::to_csubstr(f));
   }
   this->commands = commands;
 
@@ -99,10 +99,10 @@ void project::init_project()
     project_summary = std::move(result).value();
 
     // Fill required_features with features from project summary
-    for (auto &f: project_summary["features"])
+    for (auto f: project_summary["features"])
       required_features.insert(f.val());
 
-    project_summary["choices"] = {};
+    project_summary.append_child() << ryml::key("choices");
     update_summary();
   } else
     fs::create_directories(output_path);
@@ -135,7 +135,7 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
       for (const auto &i: node)
         unprocessed_components.insert(i.val());
     else
-      spdlog::error("Node '{}' has invalid 'requires'", child_node["requires"].val());
+      spdlog::error("Node '{}' has invalid 'requires'", ryml_val_string(child_node["requires"]));
   }
 
   // Process required features
@@ -184,10 +184,11 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
   }
 
   // Process choices
-  for (const auto &[choice_name, choice]: child_node["choices"].children()) {
+  for (const auto choice: child_node["choices"].children()) {
+    const auto choice_name = choice.key();
     if (!project_summary["choices"].has_child(choice_name)) {
       unprocessed_choices.insert(choice_name);
-      project_summary["choices"][choice_name]           = choice;
+      project_summary["choices"].append_child() << ryml::key(choice_name) << choice.val();
       project_summary["choices"][choice_name]["parent"] = component->json["name"].val();
     }
   }
@@ -242,7 +243,7 @@ void project::update_summary()
 bool project::add_component(const std::string &component_name, component_database::flag flags)
 {
   // Convert string to id
-  const auto component_id = yakka::component_dotname_to_id(component_name);
+  const auto component_id = c4::to_csubstr(component_dotname_to_id(component_name));
 
   // Check if component has been replaced
   if (replacements.contains(component_id)) {
@@ -276,16 +277,16 @@ bool project::add_component(const std::string &component_name, component_databas
   // Add special processing of SLC related files and data
   if (new_component->type == yakka::component::YAKKA_FILE) {
     if (this->project_has_slcc)
-      for (const auto &f: new_component->json["requires"]["slc"])
+      for (const auto &f: new_component->root()["requires"]["slc"])
         slc_required.insert(f.val());
   } else if (new_component->type == yakka::component::SLCC_FILE) {
     project_has_slcc = true;
     unprocessed_components.insert("jinja");
-    for (const auto &f: new_component->json["requires"]["features"])
+    for (const auto &f: new_component->root()["requires"]["features"])
       slc_required.insert(f.val());
-    for (const auto &f: new_component->json["provides"]["features"])
+    for (const auto &f: new_component->root()["provides"]["features"])
       slc_provided.insert(f.val());
-    for (const auto &r: new_component->json["recommends"]) {
+    for (const auto &r: new_component->root()["recommends"]) {
       auto id        = r["id"].val();
       auto start_pos = id.find('%');
       auto end_pos   = id.rfind('%');
@@ -293,20 +294,20 @@ bool project::add_component(const std::string &component_name, component_databas
         id.erase(start_pos, end_pos - start_pos + 1);
       slc_recommended.insert({ id, r });
     }
-    for (const auto &[key, instance_list]: new_component->json["instances"].children())
-      for (const auto &i: instance_list)
-        this->instances.insert({ key, i.val() });
+    for (const auto instance: new_component->root()["instances"].children())
+      for (const auto i: instance.children())
+        this->instances.insert({ instance.key(), i.val() });
     // Extract config overrides
-    for (const auto &c: new_component->json["config_file"])
+    for (const auto &c: new_component->root()["config_file"])
       if (c.contains("override")) {
         slc_overrides.insert({ c["override"]["file_id"].val(), new_component });
       }
 
   } else if (new_component->type == yakka::component::SLCP_FILE) {
     unprocessed_components.insert("jinja");
-    for (const auto &f: new_component->json["requires"]["features"])
+    for (const auto &f: new_component->root()["requires"]["features"])
       slc_required.insert(f.val());
-    for (const auto &r: new_component->json["recommends"]) {
+    for (const auto &r: new_component->root()["recommends"]) {
       auto id        = r["id"].val();
       auto start_pos = id.find('%');
       auto end_pos   = id.rfind('%');
@@ -314,53 +315,54 @@ bool project::add_component(const std::string &component_name, component_databas
         id.erase(start_pos, end_pos - start_pos + 1);
       slc_recommended.insert({ id, r });
     }
-    for (const auto &[key, instance_list]: new_component->json["instances"].children())
-      for (const auto &i: instance_list)
-        this->instances.insert({ key, i.val() });
+    for (const auto instance: new_component->root()["instances"].children())
+      for (const auto i: instance.children())
+        this->instances.insert({ instance.key(), i.val() });
   }
 
   // Add all the required components into the unprocessed list
-  if (new_component->json[_requires_components_pointer].valid())
-    for (const auto &r: new_component->json["requires"]["components"]) {
+  if (new_component->root()[_requires_components_pointer].valid())
+    for (const auto &r: new_component->root()["requires"]["components"]) {
       unprocessed_components.insert(r.val());
-      if (r.contains("instance")) {
+      if (r.has_child("instance")) {
         for (const auto &i: r["instance"])
           instances.insert({ r.val(), i.val() });
       }
     }
 
   // Add all the required features into the unprocessed list
-  if (new_component->json.contains(ryml_pointer("/requires/features")))
-    for (const auto &f: new_component->json["requires"]["features"]) {
+  if (new_component->root()[_requires_features_pointer].valid())
+    for (const auto &f: new_component->root()["requires"]["features"]) {
       if (f.has_val())
         unprocessed_features.insert(f.val());
       else {
         unprocessed_features.insert(f["name"].val());
-        if (f.contains("recommends")) {
+        if (f.has_child("recommends")) {
           feature_recommendations.insert({ f["name"].val(), f["recommends"] });
         }
       }
     }
 
   // Add all the provided features into the unprocessed list
-  if (new_component->json.contains(ryml_pointer("/provides/features")))
-    for (const auto &f: new_component->json["provides"]["features"]) {
+  if (new_component->root()[_provides_features_pointer].valid())
+    for (const auto &f: new_component->root()["provides"]["features"]) {
       // unprocessed_features.insert(f.val());
       provided_features.insert(f.val());
     }
 
   // Add all the component choices to the global choice list
-  if (new_component->json.contains("choices"))
-    for (auto &[choice_name, value]: new_component->json["choices"].children()) {
+  if (new_component->root().contains("choices"))
+    for (auto choice: new_component->root()["choices"].children()) {
+      const auto choice_name = choice.key();
       if (!project_summary["choices"].contains(choice_name)) {
         unprocessed_choices.insert(choice_name);
-        project_summary["choices"][choice_name]           = value;
-        project_summary["choices"][choice_name]["parent"] = new_component->id;
+        project_summary["choices"].append_child() << ryml::key(choice_name) << choice.val();
+        project_summary["choices"][choice_name]["parent"] = c4::to_csubstr(new_component->id);
       }
     }
 
-  if (new_component->json.contains(ryml_pointer("/replaces/component"))) {
-    const auto &replaced = new_component->json["replaces"]["component"].val();
+  if (new_component->root()[_replaces_component_pointer].valid()) {
+    const auto &replaced = new_component->root()["replaces"]["component"].val();
 
     if (replacements.contains(replaced)) {
       if (replacements[replaced] != component_id) {
@@ -375,34 +377,33 @@ bool project::add_component(const std::string &component_name, component_databas
   }
 
   // Process all the currently required features. Note new feature will be processed in the features pass
-  if (new_component->json.contains(ryml_pointer("/supports/features"))) {
+  if (new_component->root()[_supports_features_pointer].valid()) {
     for (auto &f: required_features)
-      if (new_component->json["supports"]["features"].contains(f)) {
+      if (new_component->root()["supports"]["features"].has_child(f)) {
         spdlog::info("Processing required feature '{}' in {}", f, component_id);
-        process_requirements(new_component, new_component->json["supports"]["features"][f]);
+        process_requirements(new_component, new_component->root()["supports"]["features"][f]);
       }
   }
-  if (new_component->json.contains(ryml_pointer("/supports/components"))) {
+  if (new_component->root()[_supports_components_pointer].valid()) {
     // Process the new components support for all the currently required components
     for (auto &c: required_components)
-      if (new_component->json["supports"]["components"].contains(c)) {
+      if (new_component->root()["supports"]["components"].has_child(c)) {
         spdlog::info("Processing required component '{}' in {}", c, component_id);
-        process_requirements(new_component, new_component->json["supports"]["components"][c]);
+        process_requirements(new_component, new_component->root()["supports"]["components"][c]);
       }
   }
 
   // Process schema data
-  if (new_component->json.contains("schema")) {
-    project_schema.add_schema_data(new_component->json["schema"]);
+  if (new_component->root().has_child("schema")) {
+    project_schema.add_schema_data(new_component->root()["schema"]);
   }
-  if (new_component->json.contains("data_schema")) {
-    data_schema.add_schema_data(new_component->json["data_schema"]);
+  if (new_component->root().has_child("data_schema")) {
+    data_schema.add_schema_data(new_component->root()["data_schema"]);
   }
 
   // Process all the existing components support for the new component
   for (auto &c: components)
-    if (c->json.contains(ryml_pointer("/supports/components") / component_id)) {
-      // if (c->json.contains("supports") && c->json["supports"].contains("components") && c->json["supports"]["components"].contains(component_id)) {
+    if (c->json[_supports_components_pointer][component_id].valid()) {
       spdlog::info("Processing component '{}' in {}", component_id, c->json["name"].val());
       process_requirements(c, c->json["supports"]["components"][component_id]);
     }
@@ -410,7 +411,7 @@ bool project::add_component(const std::string &component_name, component_databas
   return true;
 }
 
-bool project::add_feature(const std::string &feature_name)
+bool project::add_feature(const c4::csubstr &feature_name)
 {
   // Insert feature and continue if this is not new
   if (required_features.insert(feature_name).second == false)
@@ -422,8 +423,7 @@ bool project::add_feature(const std::string &feature_name)
 
   // Process the feature "supports" for each existing component
   for (auto &c: components)
-    if (c->json.contains(ryml_pointer("/supports/features") / feature_name)) {
-      // if (c->json.contains("supports") && c->json["supports"].contains("features") && c->json["supports"]["features"].contains(f)) {
+    if (c->json[_supports_features_pointer][feature_name].valid()) {
       spdlog::info("Processing feature '{}' in {}", feature_name, c->json["name"].val());
       process_requirements(c, c->json["supports"]["features"][feature_name]);
     }
@@ -431,7 +431,7 @@ bool project::add_feature(const std::string &feature_name)
   return true;
 }
 
-project::state project::process_choice(const std::string &choice_name)
+project::state project::process_choice(const c4::csubstr &choice_name)
 {
   const auto &choice = project_summary["choices"][choice_name];
   int matches        = 0;
@@ -1026,8 +1026,8 @@ void project::process_slc_rules()
               components.push_back(new_component);
               // ++size;
               // Process all the required components
-              if (new_component->json.contains("requires") && new_component->json["requires"].contains("features"))
-                for (const auto &r: new_component->json["requires"]["features"])
+              if (new_component->root().contains("requires") && new_component->root()["requires"].contains("features"))
+                for (const auto &r: new_component->root()["requires"]["features"])
                   slc_required.insert(r.val());
             }
           }

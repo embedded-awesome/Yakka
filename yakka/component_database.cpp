@@ -274,23 +274,23 @@ std::expected<std::string, error> component_database::get_component_id(const pat
   return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
 }
 
-std::optional<const json> component_database::get_blueprint_provider(std::string_view blueprint) const
+std::optional<const ryml::ConstNodeRef> component_database::get_blueprint_provider(std::string_view blueprint) const
 {
-  const auto blueprint_str = std::string{ blueprint };
-  auto blueprints_node = ryml_get_child(database.crootref(), "blueprints");
-  if (blueprints_node.valid() && blueprints_node.has_child(c4::to_csubstr(blueprint_str))) {
-    return std::optional<const json>(std::in_place, ryml_to_json(ryml_get_child(blueprints_node, c4::to_csubstr(blueprint_str))));
+  // const auto blueprint_str = std::string{ blueprint };
+  auto blueprints_node = database.crootref()["blueprints"];
+  if (blueprints_node.valid() && blueprints_node.has_child(blueprint)) {
+    return blueprints_node[blueprint];
   }
 
   return std::nullopt;
 }
 
-std::optional<const json> component_database::get_serve_endpoint_provider(std::string_view endpoint) const
+std::optional<const ryml::ConstNodeRef> component_database::get_serve_endpoint_provider(std::string_view endpoint) const
 {
-  const auto endpoint_str = std::string{ endpoint };
-  auto serve_node = ryml_get_child(database.crootref(), "serve");
-  if (serve_node.valid() && serve_node.has_child(c4::to_csubstr(endpoint_str))) {
-    return std::optional<const json>(std::in_place, ryml_to_json(ryml_get_child(serve_node, c4::to_csubstr(endpoint_str))));
+  // const auto endpoint_str = std::string{ endpoint };
+  auto serve_node = database.crootref()["serve"];
+  if (serve_node.valid() && serve_node.has_child(endpoint)) {
+    return serve_node[endpoint];
   }
   return std::nullopt;
 }
@@ -351,10 +351,10 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
 
 std::optional<const json> component_database::get_feature_provider(std::string_view feature) const
 {
-  const auto feature_str = std::string{ feature };
-  auto features_node = ryml_get_child(database.crootref(), "features");
-  if (features_node.valid() && features_node.has_child(c4::to_csubstr(feature_str))) {
-    return std::optional<const json>(std::in_place, ryml_to_json(ryml_get_child(features_node, c4::to_csubstr(feature_str))));
+  // const auto feature_str = std::string{ feature };
+  auto features_node = database.crootref()["features"];
+  if (features_node.valid() && features_node[feature].valid()) {
+    return features_node[feature];
   }
   return std::nullopt;
 }

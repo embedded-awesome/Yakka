@@ -48,7 +48,7 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
         std::string type = "component";
         auto type_node = ryml_get_child(component, "type");
         if (type_node.valid() && type_node.has_val()) {
-          type = ryml_val_string(type_node);
+          type = yakka::ryml_val_string(type_node);
         }
         components_by_type.insert({type, component_name});
       }
@@ -82,9 +82,7 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
       if (!c.has_key()) {
         continue;
       }
-      std::string component_name;
-      c4::from_chars(c.key(), &component_name);
-      std::cout << "  - " << component_name << "\n";
+      std::cout << "  - " << c.key() << "\n";
     }
   }
   return 0;
@@ -248,7 +246,7 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
       // Check if we haven't been able to fetch any of the unknown components
       if (fetch_list.empty()) {
         for (const auto &i: project.unknown_components)
-          spdlog::error("Cannot fetch {}", i);
+          spdlog::error("Cannot fetch {}", ryml_string(i));
         spdlog::shutdown();
         exit(0);
       }

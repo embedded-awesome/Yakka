@@ -18,7 +18,7 @@ struct blueprint_match {
 
 class blueprint_database {
 public:
-  std::vector<std::shared_ptr<blueprint_match>> find_match(const std::string target, const ryml::Tree &project_summary);
+  std::vector<std::shared_ptr<blueprint_match>> find_match(const c4::csubstr target, const ryml::Tree &project_summary);
 
   void load(const std::filesystem::path filename);
   void save(const std::filesystem::path filename);
@@ -26,7 +26,7 @@ public:
   // void generate_task_database(std::vector<std::string> command_list);
   // void process_blueprint_target( const std::string target );
 
-  std::multimap<std::string, std::shared_ptr<blueprint>> blueprints;
+  std::multimap<c4::csubstr, std::shared_ptr<blueprint>> blueprints;
 };
 
 } // namespace yakka

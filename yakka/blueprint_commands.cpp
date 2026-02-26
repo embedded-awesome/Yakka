@@ -226,10 +226,10 @@ process_return template_command(std::string target, const ryml::ConstNodeRef &co
       }
     }
 
-    spdlog::error("Inja template is invalid:\n'{}'", ryml::emitrs_yaml(command));
+    spdlog::error("Inja template is invalid:\n'{}'", ryml::emitrs_yaml<std::string>(command));
     return { "", -1 };
   } catch (std::exception &e) {
-    spdlog::error("Failed to apply template: {}\n{}", ryml::emitrs_yaml(command), e.what());
+    spdlog::error("Failed to apply template: {}\n{}", ryml::emitrs_yaml<std::string>(command), e.what());
     return { "", -1 };
   }
   return { captured_output, 0 };

@@ -259,7 +259,7 @@ int main(int argc, char **argv)
         download_unknown_components(workspace, project);
       } else {
         for (const auto &i: project.unknown_components)
-          spdlog::error("Missing component '{}'", i);
+          spdlog::error("Missing component '{}'", yakka::ryml_val_string(i));
         spdlog::error("Try adding the '-f' command line option to automatically fetch components");
         spdlog::shutdown();
         exit(0);
@@ -318,7 +318,7 @@ int main(int argc, char **argv)
   // Print a list of required features
   spdlog::info("Required features:");
   for (auto f: project.required_features)
-    spdlog::info("- {}", f);
+    spdlog::info("- {}", yakka::ryml_val_string(f));
 
   // Generate and save the summary
   project.save_summary();
@@ -332,9 +332,9 @@ int main(int argc, char **argv)
   if (result["data"].count() != 0) {
     spdlog::info("Processing additional data: {}", result["data"].as<std::string>());
     const auto additional_data = "{" + result["data"].as<std::string>() + "}";
-    ryml::Tree yaml_data       = ryml::parse_in_arena(ryml::to_csubstr(additional_data));
-    ryml::Tree json_data   = ryml_to_json(yaml_data.crootref());
-    spdlog::info("Additional data: {}", json_data.dump());
+    ryml::Tree data       = ryml::parse_in_arena(ryml::to_csubstr(additional_data));
+    // ryml::Tree json_data   = ryml_to_json(yaml_data.crootref());
+    // spdlog::info("Additional data: {}", json_data.dump());
     yakka::json_node_merge(std::vector<std::string>{ "data" }, project.project_summary.rootref(), yaml_data.crootref(), &project.project_schema);
   }
 
@@ -352,7 +352,7 @@ int main(int argc, char **argv)
     // Find a component that has that blueprint
     auto result = workspace.find_blueprint(c);
     if (result) {
-      const auto blueprint_options = ryml_to_json(result.value().crootref());
+      const auto blueprint_options = result.value().crootref();
       if (blueprint_options.size() == 1) {
         const auto &component_name = blueprint_options[0].get<std::string>();
         auto component_paths       = workspace.find_component(component_name);
@@ -433,11 +433,11 @@ static void print_project_choice_errors(yakka::project &project)
     spdlog::error("Component '{}' has a choice '{}' - Must choose from the following", i.first, i.second);
     for (const auto &b: project.project_summary["choices"][i.second]["options"]) {
       if (b.contains("feature"))
-        spdlog::error("  - feature '{}'", b["feature"].get<std::string>());
+        spdlog::error("  - feature '{}'", yakka::ryml_val_string(b["feature"]));
       else if (b.contains("component"))
-        spdlog::error("  - component '{}'", b["component"].get<std::string>());
+        spdlog::error("  - component '{}'", yakka::ryml_val_string(b["component"]));
       else {
-        spdlog::error("Invalid choice {}: Invalid format");
+        spdlog::error("Invalid choice {}: Invalid format", yakka::ryml_val_string(b));
         project.current_state = yakka::project::state::PROJECT_HAS_INVALID_COMPONENT;
         return;
       }
@@ -446,7 +446,7 @@ static void print_project_choice_errors(yakka::project &project)
   }
 
   for (auto a: project.multiple_answer_choices) {
-    spdlog::error("Choice {} - Has multiple selections", a);
+    spdlog::error("Choice {} - Has multiple selections", yakka::ryml_val_string(a));
     project.current_state = yakka::project::state::PROJECT_HAS_MULTIPLE_ANSWERS_FOR_CHOICES;
   }
 }

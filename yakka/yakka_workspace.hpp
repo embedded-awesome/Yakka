@@ -90,14 +90,14 @@ public:
    * @param feature Name of the feature to find
    * @return Optional JSON containing feature provider info
    */
-  std::optional<ryml::Tree> find_feature(std::string_view feature) const;
+  std::optional<ryml::ConstNodeRef> find_feature(std::string_view feature) const;
 
   /**
    * @brief Finds a blueprint provider in the workspace
    * @param blueprint Name of the blueprint to find
    * @return Optional JSON containing blueprint provider info
    */
-  std::optional<ryml::Tree> find_blueprint(std::string_view blueprint) const;
+  std::optional<ryml::ConstNodeRef> find_blueprint(std::string_view blueprint) const;
 
   /**
    * @brief Loads the workspace configuration file

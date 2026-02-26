@@ -12,19 +12,17 @@ namespace yakka {
 struct blueprint {
   struct dependency {
     enum dependency_type { DEFAULT_DEPENDENCY, DATA_DEPENDENCY, DEPENDENCY_FILE_DEPENDENCY } type;
-    std::string name;
+    c4::csubstr name;
   };
-  std::string target;
-  std::optional<std::string> regex;
-  std::vector<std::string> requirements;
+  c4::csubstr target;
+  std::optional<c4::csubstr> regex;
+  std::vector<c4::csubstr> requirements;
   std::vector<dependency> dependencies; // Unprocessed dependencies. Raw values as found in the YAML.
-  ryml::Tree data;
+  ryml::ConstNodeRef data;
   ryml::ConstNodeRef process;
-  std::string parent_path;
-  std::string task_group;
+  c4::csubstr parent_path;
+  c4::csubstr task_group;
 
-  blueprint(const std::string &target, ryml::Tree blueprint_data, const std::string &parent_path);
-
-  const ryml::Tree &as_ryml() const;
+  blueprint(const c4::csubstr &target, ryml::ConstNodeRef blueprint_data, const c4::csubstr &parent_path);
 };
 } // namespace yakka

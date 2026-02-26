@@ -53,11 +53,11 @@ public:
   void parse_project_string(const std::vector<std::string> &project_string);
   void process_requirements(std::shared_ptr<yakka::component> component, const ryml::ConstNodeRef &child_node);
   state evaluate_dependencies();
-  bool add_component(const std::string &component_name, component_database::flag flags);
-  bool add_feature(const std::string &feature_name);
+  bool add_component(const c4::csubstr &component_name, component_database::flag flags);
+  bool add_feature(const c4::csubstr &feature_name);
   //std::optional<std::filesystem::path> find_component(const std::string component_dotname);
   void evaluate_choices();
-  project::state process_choice(const std::string &choice_name);
+  project::state process_choice(const c4::csubstr &choice_name);
   void add_additional_tool(const std::filesystem::path component_path);
 
   // Component processing functions
@@ -86,27 +86,27 @@ public:
   std::string project_name;
   std::filesystem::path output_path;
   std::string yakka_home_directory;
-  std::vector<std::string> initial_components;
-  std::vector<std::string> initial_features;
+  std::vector<c4::csubstr> initial_components;
+  std::vector<c4::csubstr> initial_features;
   yakka::project::state current_state;
 
   // Component processing
-  std::unordered_set<std::string> unprocessed_components;
-  std::unordered_set<std::string> unprocessed_features;
-  std::unordered_set<std::string> unprocessed_choices;
-  std::unordered_map<std::string, std::string> unprocessed_replacements;
-  //std::unordered_set<std::string> replaced_components;
-  std::unordered_map<std::string, std::string> replacements;
-  std::unordered_set<std::string> required_components;
-  std::unordered_set<std::string> required_features;
-  std::unordered_set<std::string> provided_features;
-  std::unordered_set<std::string> unprovided_features;
-  std::map<std::string, ryml::Tree> feature_recommendations;
-  std::unordered_set<std::string> additional_tools;
-  std::unordered_set<std::string> commands;
-  std::unordered_set<std::string> unknown_components;
-  std::vector<std::pair<std::string, std::string>> incomplete_choices;
-  std::vector<std::string> multiple_answer_choices;
+  std::unordered_set<c4::csubstr> unprocessed_components;
+  std::unordered_set<c4::csubstr> unprocessed_features;
+  std::unordered_set<c4::csubstr> unprocessed_choices;
+  std::unordered_map<c4::csubstr, c4::csubstr> unprocessed_replacements;
+  //std::unordered_set<c4::csubstr> replaced_components;
+  std::unordered_map<c4::csubstr, c4::csubstr> replacements;
+  std::unordered_set<c4::csubstr> required_components;
+  std::unordered_set<c4::csubstr> required_features;
+  std::unordered_set<c4::csubstr> provided_features;
+  std::unordered_set<c4::csubstr> unprovided_features;
+  std::map<c4::csubstr, ryml::NodeRef> feature_recommendations;
+  std::unordered_set<c4::csubstr> additional_tools;
+  std::unordered_set<c4::csubstr> commands;
+  std::unordered_set<c4::csubstr> unknown_components;
+  std::vector<std::pair<c4::csubstr, c4::csubstr>> incomplete_choices;
+  std::vector<c4::csubstr> multiple_answer_choices;
   component_database::flag component_flags;
   bool project_has_slcc;
 
@@ -149,11 +149,11 @@ public:
 
   // SLC specific
   ryml::Tree template_contributions;
-  std::unordered_set<std::string> slc_required;
-  std::unordered_set<std::string> slc_provided;
-  std::map<std::string, ryml::Tree> slc_recommended;
-  std::multimap<std::string, std::string> instances;
-  std::multimap<std::string, const std::shared_ptr<yakka::component>> slc_overrides;
+  std::unordered_set<c4::csubstr> slc_required;
+  std::unordered_set<c4::csubstr> slc_provided;
+  std::map<c4::csubstr, ryml::ConstNodeRef> slc_recommended;
+  std::multimap<c4::csubstr, c4::csubstr> instances;
+  std::multimap<c4::csubstr, const std::shared_ptr<yakka::component>> slc_overrides;
   bool is_disqualified_by_unless(const ryml::ConstNodeRef &node);
   bool condition_is_fulfilled(const ryml::ConstNodeRef &node);
   void process_slc_rules();

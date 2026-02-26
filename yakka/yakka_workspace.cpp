@@ -15,7 +15,6 @@ namespace fs = std::filesystem;
 
 namespace yakka {
 
-namespace {
 ryml::NodeRef ensure_map_node(ryml::NodeRef node)
 {
   if (!node.is_map()) {
@@ -64,27 +63,6 @@ ryml::NodeRef ensure_child_scalar(ryml::NodeRef parent, c4::csubstr key, c4::csu
   child.set_val(value);
   return child;
 }
-
-std::expected<ryml::Tree, std::error_code> parse_yaml_file(const std::filesystem::path &path)
-{
-  auto file_content = yakka::get_file_contents<std::string>(path);
-  if (!file_content) {
-    return std::unexpected(file_content.error());
-  }
-  return ryml::parse_in_arena(ryml::to_csubstr(*file_content));
-}
-
-template <typename JsonOptional>
-std::optional<ryml::Tree> json_optional_to_ryml_tree(const JsonOptional &node)
-{
-  if (!node.has_value()) {
-    return std::nullopt;
-  }
-  const auto json_text = node->dump();
-  ryml::Tree tree      = ryml::parse_in_arena(ryml::to_csubstr(json_text));
-  return tree;
-}
-} // namespace
 
 // Using std::expected for error handling
 std::expected<void, std::error_code> workspace::init(const std::filesystem::path &workspace_path)
@@ -147,7 +125,7 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
 
   // Check for project file
   if (fs::exists(workspace_path / yakka::projects_filename)) {
-    auto projects_tree = parse_yaml_file(workspace_path / yakka::projects_filename);
+    auto projects_tree = ryml_load_file(workspace_path / yakka::projects_filename);
     if (!projects_tree) {
       spdlog::error("Failed to parse projects file: {}\n", projects_tree.error().message());
       return std::unexpected(projects_tree.error());
@@ -178,7 +156,7 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
       spdlog::error("Failed to create projects file at {}\n", (workspace_path / yakka::projects_filename).string());
       return std::unexpected(std::make_error_code(std::errc::io_error));
     }
-    project_file << ryml::emitrs(projects.rootref());
+    project_file << ryml::emitrs_json(projects.rootref());
     project_file.close();
   }
 
@@ -203,7 +181,7 @@ void workspace::load_component_registries()
   for (const auto &entry: yaml_files) {
     try {
       const auto registry_name  = entry.path().filename().replace_extension().string();
-      auto registry_tree = parse_yaml_file(entry.path());
+      auto registry_tree = ryml_load_file(entry.path());
       if (!registry_tree) {
         spdlog::error("Could not parse component registry '{}': {}\n", entry.path().string(), registry_tree.error().message());
         continue;
@@ -277,16 +255,15 @@ std::optional<std::pair<std::filesystem::path, std::filesystem::path>> workspace
   return std::nullopt;
 }
 
-// Feature finding with modern C++ features
-std::optional<ryml::Tree> workspace::find_feature(std::string_view feature) const
+std::optional<ryml::ConstNodeRef> workspace::find_feature(std::string_view feature) const
 {
   // Using structured bindings and if-init statement
   if (auto node = local_database.get_feature_provider(feature); node.has_value()) {
-    return json_optional_to_ryml_tree(node);
+    return node;
   }
 
   if (auto node = shared_database.get_feature_provider(feature); node.has_value()) {
-    return json_optional_to_ryml_tree(node);
+    return node;
   }
 
   // Using ranges to search package databases
@@ -295,21 +272,20 @@ std::optional<ryml::Tree> workspace::find_feature(std::string_view feature) cons
   });
 
   if (found != package_databases.end()) {
-    return json_optional_to_ryml_tree(found->get_feature_provider(feature));
+    return found->get_feature_provider(feature);
   }
 
   return std::nullopt;
 }
 
-// Blueprint finding with modern features
-std::optional<ryml::Tree> workspace::find_blueprint(std::string_view blueprint) const
+std::optional<ryml::ConstNodeRef> workspace::find_blueprint(std::string_view blueprint) const
 {
   if (auto node = local_database.get_blueprint_provider(blueprint); node.has_value()) {
-    return json_optional_to_ryml_tree(node);
+    return node;
   }
 
   if (auto node = shared_database.get_blueprint_provider(blueprint); node.has_value()) {
-    return json_optional_to_ryml_tree(node);
+    return node;
   }
 
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
@@ -317,7 +293,7 @@ std::optional<ryml::Tree> workspace::find_blueprint(std::string_view blueprint) 
   });
 
   if (found != package_databases.end()) {
-    return json_optional_to_ryml_tree(found->get_blueprint_provider(blueprint));
+    return found->get_blueprint_provider(blueprint);
   }
 
   return std::nullopt;
@@ -330,7 +306,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
     if (!fs::exists(config_file_path))
       return {};
 
-    auto configuration_tree = parse_yaml_file(config_file_path);
+    auto configuration_tree = ryml_load_file(config_file_path);
     if (!configuration_tree) {
       return std::unexpected(configuration_tree.error());
     }

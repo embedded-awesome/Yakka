@@ -7,7 +7,7 @@
 #include <regex>
 
 namespace yakka {
-std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(const std::string target, const inja::ryml_json &project_summary)
+std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(const c4::csubstr target, const ryml::Tree &project_summary);
 {
   bool blueprint_match_found = false;
   std::vector<std::shared_ptr<blueprint_match>> result;
@@ -18,7 +18,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
     // Check if rule is a regex, otherwise do a string comparison
     if (blueprint.second->regex.has_value()) {
       std::smatch s;
-      if (!std::regex_match(target, s, std::regex{ blueprint.first }))
+      if (!std::regex_match(target.str, s, std::regex{ blueprint.first }))
         continue;
 
       // arg_count starts at 0 as the first match is the entire string
