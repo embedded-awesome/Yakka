@@ -53,13 +53,12 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     }
 
     // Else try to find a serve endpoint
-    auto endpoint = workspace.local_database.get_serve_endpoint_provider(start);
+    auto endpoint = workspace.local_database.get_serve_endpoint_provider(c4::to_csubstr(start));
     if (endpoint.has_value()) {
       // Find details of the component providing this endpoint
-      const auto &endpoint_tree = endpoint.value();
-      auto endpoint_root = endpoint_tree.crootref();
+      auto endpoint_root = endpoint.value();
       if (endpoint_root.is_seq() && endpoint_root.num_children() > 0) {
-        auto component_name = ryml_val_string(endpoint_root.child(0));
+        auto component_name = endpoint_root.first_child().val<std::string>().value();
         auto component_path = workspace.local_database.get_component(component_name);
         if (component_path.has_value()) {
         // Check if the request is for an endpoint or a file
@@ -87,18 +86,19 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
 
   // server.set_mount_point("/assets", "./components/configurator/assets");
   // Loop through the 'serve' endpoints in the local database and mount them
-  auto serve_root = ryml_get_child(workspace.local_database.database.crootref(), "serve");
+  auto serve_root = workspace.local_database.database.crootref().find_child("serve");
   if (serve_root.valid() && serve_root.is_map()) {
-    for (const auto &child : serve_root.children()) {
+    for (const auto child : serve_root.children()) {
       if (!child.has_key()) {
         continue;
       }
-      std::string endpoint;
-      c4::from_chars(child.key(), &endpoint);
       if (!child.is_seq() || child.num_children() == 0) {
         continue;
       }
-      const auto component_id = ryml_val_string(child.child(0));
+
+      std::string endpoint;
+      c4::from_chars(child.key(), &endpoint);
+      const auto component_id = child.val();
       auto component_path     = workspace.local_database.get_component(component_id);
     if (!component_path.has_value())
       continue;
@@ -144,9 +144,9 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       res.status = 404;
       return;
     }
-    auto project_node = ryml_get_child(workspace.projects.crootref(), c4::to_csubstr(project));
-    auto path_node = ryml_get_child(project_node, "path");
-    auto project_summary_file = std::filesystem::path{ ryml_val_string(path_node) } / project_summary_filename;
+    auto project_node = workspace.projects.crootref().find_child(c4::to_csubstr(project));
+    auto path_node = project_node.find_child("path");
+    auto project_summary_file = std::filesystem::path{ path_node.val<std::string>().value() } / project_summary_filename;
     if (fs::exists(project_summary_file)) {
       auto summary_loaded = ryml_load_file(project_summary_file);
       if (!summary_loaded) {
@@ -154,8 +154,8 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
         return;
       }
       ryml::Tree project_summary = std::move(*summary_loaded);
-      auto project_name_node = ryml_get_child(project_summary.crootref(), "project_name");
-      const auto project_file = ryml_val_string(project_name_node) + ".yakka";
+      auto project_name_node = project_summary.crootref().find_child("project_name");
+      const auto project_file = project_name_node.val<std::string>().value() + ".yakka";
       if (fs::exists(project_file)) {
         auto file_content = yakka::get_file_contents<std::string>(project_file);
         if (!file_content) {
@@ -165,8 +165,8 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
         }
         ryml::Tree node = ryml::parse_in_arena(ryml::to_csubstr(*file_content));
         // Merge data from the project file
-        const auto project_json = ryml_to_json(node.crootref());
-        json_node_merge(ryml_pointer("/data"), project_summary, project_json);
+        // const auto project_json = ryml_to_json(node.crootref());
+        json_node_merge(ryml::Pointer{"/data"}, project_summary, node.rootref());
       }
 
       // std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

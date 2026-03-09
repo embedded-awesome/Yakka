@@ -9,7 +9,6 @@
 namespace yakka {
 
 // Using declarations for cleaner code
-using json = ryml::Tree;
 using std::filesystem::path;
 
 class component_database {
@@ -29,7 +28,7 @@ public:
   enum class flag { ALL_COMPONENTS, IGNORE_ALL_SLC, ONLY_SLCC, IGNORE_YAKKA };
 
   // Use string_view for non-owning string references
-  void insert(std::string_view id, const path &config_file);
+  void insert(ryml::csubstr id, const path &config_file);
 
   // Return expected for operations that might fail
   [[nodiscard]] std::expected<void, std::error_code> load(const path &workspace_path);
@@ -39,26 +38,27 @@ public:
   void clear() noexcept;
 
   // Return expected for operations that might fail
-  [[nodiscard]] std::expected<bool, std::error_code> add_component(std::string_view component_id, const path &path);
+  [[nodiscard]] std::expected<bool, std::error_code> add_component(ryml::csubstr component_id, const path &path);
 
   // Use optional path for operations that might not find a result
   void scan_for_components(std::optional<path> search_start_path = std::nullopt);
 
   // Make getter methods const and nodiscard
   [[nodiscard]] const path &get_path() const noexcept;
-  [[nodiscard]] std::expected<path, std::error_code> get_component(std::string_view id, flag flags = flag::ALL_COMPONENTS) const;
+  [[nodiscard]] std::expected<path, std::error_code> get_component(ryml::csubstr id, flag flags = flag::ALL_COMPONENTS) const;
+  [[nodiscard]] std::expected<path, std::error_code> get_component(const std::string &id, flag flags = flag::ALL_COMPONENTS) const;
 
   [[nodiscard]] std::expected<std::string, std::error_code> get_component_id(const path &path) const;
 
   // Return optional for queries that might not find a result
-  [[nodiscard]] std::optional<const json> get_feature_provider(std::string_view feature) const;
-  [[nodiscard]] std::optional<const json> get_blueprint_provider(std::string_view blueprint) const;
-  [[nodiscard]] std::optional<const json> get_serve_endpoint_provider(std::string_view endpoint) const;
+  [[nodiscard]] std::optional<ryml::ConstNodeRef> get_feature_provider(ryml::csubstr feature) const;
+  [[nodiscard]] std::optional<ryml::ConstNodeRef> get_blueprint_provider(ryml::csubstr blueprint) const;
+  [[nodiscard]] std::optional<ryml::ConstNodeRef> get_serve_endpoint_provider(ryml::csubstr endpoint) const;
 
   // Process external data
   std::expected<void, std::error_code> process_slc_sdk(const path &slcs_path);
   std::expected<void, std::error_code> parse_slcc_file(const path &path);
-  std::expected<void, std::error_code> parse_yakka_file(const path &path, std::string_view id);
+  std::expected<void, std::error_code> parse_yakka_file(const path &path, ryml::csubstr id);
 
   // Make this a const getter
   [[nodiscard]] bool has_done_scan() const noexcept
@@ -72,7 +72,7 @@ public:
     return ryml::emitrs_json<std::string>(this->database);
   }
 
-  json database;
+  ryml::Tree database;
 private:
   path workspace_path;
   path database_filename;

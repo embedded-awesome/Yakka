@@ -28,14 +28,11 @@ struct component {
   std::filesystem::path file_path;
   std::filesystem::path component_path;
   
-  // Dual storage approach for gradual migration:
   // - tree: ryml::Tree for efficient zero-copy storage (primary)
-  // - json: ryml::Tree for compatibility with existing code (lazy-evaluated cache)
   // - yaml_buffer: Buffer to hold YAML file contents (ryml uses views into this)
   ryml::Tree tree;
+  ryml::NodeRef blueprints; // Helper reference to blueprints node for easy access
   std::string yaml_buffer;
-  // mutable ryml::Tree json;  // mutable to allow lazy evaluation in const methods
-  mutable bool json_cache_valid = false;  // Track if json cache is up-to-date
   
   semver::version version;
 
@@ -50,15 +47,8 @@ struct component {
   } type;
   
   // Helper to get root node for easy access
-  ryml::ConstNodeRef root() const { return tree.rootref(); }
-  ryml::NodeRef root() { json_cache_valid = false; return tree.rootref(); }
-  
-  // Get json representation (lazy conversion from ryml if needed)
-  const ryml::Tree& get_json() const;
-  ryml::Tree& get_json_mutable();
-  
-  // Invalidate json cache when tree is modified
-  void invalidate_json_cache() { json_cache_valid = false; }
+  ryml::ConstNodeRef root() const { return tree.crootref(); }
+  ryml::NodeRef root() { return tree.rootref(); }
 };
 
 } /* namespace yakka */

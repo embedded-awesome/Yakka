@@ -28,8 +28,10 @@ public:
   {
   }
 
-  void add_schema_data(const ryml::Tree &schema_data);
-  bool validate(const ryml::Tree &data, std::string id = "");
+  void add_schema_data(ryml::ConstNodeRef schema_data);
+  bool validate(ryml::ConstNodeRef data, std::string id = "");
+  ryml::ConstNodeRef operator[](const ryml::Pointer &path) const;
+  ryml::ConstNodeRef operator[](const std::string &path) const;
   schema::merge_strategy get_merge_strategy(const ryml::Pointer &path) const;
 
 private:

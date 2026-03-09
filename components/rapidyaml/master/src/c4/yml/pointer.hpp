@@ -65,6 +65,15 @@ public:
     /** Construct from a std::string_view path. The view is copied internally. */
     explicit Pointer(std::string_view path);
 
+    /** Construct from a vector of path segments */
+    explicit Pointer(std::vector<csubstr> const& segments);
+
+    /** Construct from a string literal
+     * @param path A string literal in the format "/segment1/segment2/..."
+     * The leading slash is optional. */
+    template<size_t N>
+    explicit Pointer(const char (&path)[N]);
+
     /** @} */
 
 public:
@@ -75,6 +84,26 @@ public:
     /** Add a path segment to the end
      * @param fragment The path fragment to append (should not contain '/') */
     void push(csubstr fragment);
+
+    /** Append a path fragment and return this pointer, enabling chaining.
+     *
+     * Example: ptr / "foo" / "bar";
+     */
+    Pointer& operator/ (csubstr fragment);
+
+    /** Append a path fragment from std::string and return this pointer,
+     * enabling chaining.
+     *
+     * Example: ptr / std::string("foo") / std::string("bar");
+     */
+    Pointer& operator/ (std::string const& fragment);
+
+    /** Append a path fragment from another Pointer and return this pointer,
+     * enabling chaining.
+     *
+     * Example: ptr / other_ptr;
+     */
+    Pointer& operator/ (Pointer const& fragment);
 
     /** Remove the last path segment
      * @return true if a segment was removed, false if already empty */

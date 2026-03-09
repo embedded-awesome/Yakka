@@ -1,6 +1,7 @@
 #include "c4/yml/pointer.hpp"
 #include "c4/yml/common.hpp"
 #include <string.h>
+#include <utility>
 
 namespace c4 {
 namespace yml {
@@ -26,10 +27,55 @@ Pointer::Pointer(std::string_view path)
     _parse(csubstr(m_storage.data(), m_storage.size()));
 }
 
+template<size_t N>
+Pointer::Pointer(const char (&path)[N])
+    : m_storage(path)
+    , m_path()
+{
+    _parse(csubstr(m_storage.data(), m_storage.size()));
+}
+
+Pointer::Pointer(std::vector<csubstr> const& segments)
+    : m_storage()
+    , m_path(segments)
+{
+}
+
 void Pointer::push(csubstr fragment)
 {
     RYML_ASSERT(!fragment.empty());
     m_path.push_back(fragment);
+}
+
+Pointer& Pointer::operator/ (csubstr fragment)
+{
+    push(fragment);
+    return *this;
+}
+
+Pointer& Pointer::operator/ (std::string const& fragment)
+{
+    RYML_ASSERT(!fragment.empty());
+
+    std::string rebuilt;
+    for(csubstr const segment : m_path)
+    {
+        rebuilt.push_back('/');
+        rebuilt.append(segment.str, segment.len);
+    }
+    rebuilt.push_back('/');
+    rebuilt += fragment;
+
+    m_storage = std::move(rebuilt);
+    _parse(csubstr(m_storage.data(), m_storage.size()));
+    return *this;
+}
+
+Pointer& Pointer::operator/ (Pointer const& fragment)
+{
+    for(csubstr const segment : fragment.m_path)
+        push(segment);
+    return *this;
 }
 
 bool Pointer::pop()

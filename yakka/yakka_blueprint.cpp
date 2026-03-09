@@ -10,13 +10,13 @@ blueprint::blueprint(const c4::csubstr &target, ryml::ConstNodeRef blueprint_dat
   this->data        = blueprint_data;
   this->process     = ryml::ConstNodeRef();
 
-  const auto root = data;
+  auto root = data;
 
   if (root.has_child("regex"))
     this->regex = root["regex"].val();
 
-  if (const auto requires = root["requires"]; requires.valid() && requires.is_seq()) {
-    for (const auto &d: requires.children())
+  if (ryml::ConstNodeRef requires = root["requires"]; requires.valid() && requires.is_seq()) {
+    for (const auto d: requires.children())
       this->requirements.push_back(d.val());
   }
 

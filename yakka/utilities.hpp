@@ -5,7 +5,7 @@
 #include "pugixml.hpp"
 #include "yakka_schema.hpp"
 // #include "rapidyaml_pointer.hpp"
-#include "json-pointer.hpp"
+// #include "pointer.hpp"
 
 #include <ryml.hpp>
 #include <ryml_std.hpp>
@@ -21,41 +21,43 @@ namespace fs = std::filesystem;
 
 namespace yakka {
 
-void ryml_node_merge(const ryml::ConstNodeRef &source, ryml::NodeRef target, const schema* schema = nullptr);
-void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_target, const ryml::ConstNodeRef &node, const schema* schema = nullptr);
+void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const schema* schema = nullptr);
+// void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema* schema = nullptr);
+void json_node_merge(ryml::Pointer path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema* schema = nullptr);
 
 std::pair<std::string, int> exec(const std::string &command_text, const std::string &arg_text);
 int exec(const std::string &command_text, const std::string &arg_text, std::function<void(std::string &)> function);
 bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2);
-void json_node_merge(ryml::Pointer path, ryml::Tree &merge_target, const ryml::Tree &node, const schema* schema = nullptr);
 YAML::Node yaml_path(const YAML::Node &node, std::string path);
-ryml::Tree json_path(const ryml::Tree &node, std::string path);
 
-std::string ryml_val_string(const ryml::ConstNodeRef &node);
-bool ryml_has_child(const ryml::ConstNodeRef &node, c4::csubstr key);
-ryml::ConstNodeRef ryml_get_child(const ryml::ConstNodeRef &node, c4::csubstr key);
+bool ryml_has_child(ryml::ConstNodeRef node, c4::csubstr key);
 std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem::path &path);
-void ryml_save_file(const std::filesystem::path &path, const ryml::Tree &tree);
+void ryml_save_file(const std::filesystem::path &path, ryml::ConstNodeRef node);
 std::filesystem::path ryml_path(c4::csubstr path);
+static inline std::string ryml_string(c4::csubstr str)
+{
+  return std::string(str.data(), str.size());
+}
 
-ryml::Pointer ryml_pointer(std::string path);
-std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(const std::vector<std::string> &argument_string);
+// std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(const std::vector<std::string> &argument_string);
 std::string generate_project_name(const component_list_t &components, const feature_list_t &features);
-std::vector<std::string> parse_gcc_dependency_file(const std::string &filename);
-std::string component_dotname_to_id(const std::string dotname);
+std::vector<ryml::csubstr> parse_gcc_dependency_file(const std::string &filename);
+ryml::csubstr component_dotname_to_id(const ryml::csubstr dotname);
 std::filesystem::path get_yakka_shared_home();
-std::string try_render(inja::Environment &env, const std::string &input, const ryml::Tree &data);
-std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::Tree &data);
-std::string try_render(inja::Environment &env, const std::string &input, const ryml::ConstNodeRef &data);
-std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::ConstNodeRef &data);
+std::string try_render(inja::Environment &env, std::string_view input, ryml::ConstNodeRef data);
+std::string try_render(inja::Environment &env, ryml::csubstr input, ryml::ConstNodeRef data);
+std::string try_render(inja::Environment &env, const std::string &input, ryml::ConstNodeRef data);
+std::string try_render(inja::Environment &env, ryml::ConstNodeRef input, ryml::ConstNodeRef data);
+std::string try_render_file(inja::Environment &env, const std::string &filename, ryml::ConstNodeRef data);
+std::string try_render_file(inja::Environment &env, const std::filesystem::path &file_path, ryml::ConstNodeRef data);
 std::pair<std::string, int> download_resource(const std::string url, std::filesystem::path destination);
-ryml::Pointer create_condition_pointer(const ryml::Tree condition);
-void find_json_keys(const inja::json &j, const std::string &target_key, const std::string &current_path, inja::json &paths);
+ryml::Pointer create_condition_pointer(ryml::ConstNodeRef condition);
+void find_json_keys(ryml::ConstNodeRef j, const std::string &target_key, const std::string &current_path, ryml::NodeRef paths);
 
 void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept;
-ryml::Tree xml_to_json(const pugi::xml_node& node);
+void xml_to_json(const pugi::xml_node& node, ryml::NodeRef& target);
 
-std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, const ryml::Tree &left, const ryml::Tree &right) noexcept;
+std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, ryml::ConstNodeRef left, ryml::ConstNodeRef right) noexcept;
 
 void add_common_template_commands(inja::Environment &inja_env);
 

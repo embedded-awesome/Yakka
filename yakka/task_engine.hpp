@@ -58,8 +58,8 @@ public:
   typedef std::function<void(std::shared_ptr<task_group> group)> task_complete_type;
 
   void init(task_complete_type task_complete_handler);
-  void create_tasks(const std::string target_name, tf::Task &parent, yakka::project &project);
-  std::pair<std::string, int> run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::ConstNodeRef project_data);
+  void create_tasks(ryml::csubstr target_name, tf::Task &parent, yakka::project &project);
+  std::pair<std::string, int> run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::NodeRef project_data);
   void run_taskflow(yakka::project &project, task_engine_ui *ui);
   bool is_valid();
 
@@ -68,7 +68,7 @@ public:
   tf::Taskflow taskflow;
 
   task_complete_type task_complete_handler;
-  std::multimap<std::string, std::shared_ptr<construction_task>> todo_list;
-  std::map<std::string, std::shared_ptr<task_group>> todo_task_groups;
+  std::multimap<ryml::csubstr, std::shared_ptr<construction_task>> todo_list;
+  std::map<ryml::csubstr, std::shared_ptr<task_group>> todo_task_groups;
 };
 } // namespace yakka

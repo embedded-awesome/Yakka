@@ -46,18 +46,18 @@ public:
   virtual ~project();
 
   void set_project_directory(const std::string path);
-  void init_project(std::vector<std::string> components, std::vector<std::string> features, std::unordered_set<std::string> commands = {});
+  void init_project(std::vector<ryml::csubstr> components, std::vector<ryml::csubstr> features, std::unordered_set<ryml::csubstr> commands = {});
   void init_project(const std::string build_string);
   void init_project();
   void process_build_string(const std::string build_string);
   void parse_project_string(const std::vector<std::string> &project_string);
-  void process_requirements(std::shared_ptr<yakka::component> component, const ryml::ConstNodeRef &child_node);
+  void process_requirements(std::shared_ptr<yakka::component> component, ryml::ConstNodeRef child_node);
   state evaluate_dependencies();
-  bool add_component(const c4::csubstr &component_name, component_database::flag flags);
-  bool add_feature(const c4::csubstr &feature_name);
+  bool add_component(c4::csubstr &component_name, component_database::flag flags);
+  bool add_feature(c4::csubstr &feature_name);
   //std::optional<std::filesystem::path> find_component(const std::string component_dotname);
   void evaluate_choices();
-  project::state process_choice(const c4::csubstr &choice_name);
+  project::state process_choice(c4::csubstr &choice_name);
   void add_additional_tool(const std::filesystem::path component_path);
 
   // Component processing functions
@@ -101,7 +101,7 @@ public:
   std::unordered_set<c4::csubstr> required_features;
   std::unordered_set<c4::csubstr> provided_features;
   std::unordered_set<c4::csubstr> unprovided_features;
-  std::map<c4::csubstr, ryml::NodeRef> feature_recommendations;
+  std::map<c4::csubstr, ryml::ConstNodeRef> feature_recommendations;
   std::unordered_set<c4::csubstr> additional_tools;
   std::unordered_set<c4::csubstr> commands;
   std::unordered_set<c4::csubstr> unknown_components;
@@ -120,8 +120,9 @@ public:
   yakka::blueprint_database blueprint_database;
   yakka::target_database target_database;
 
-  ryml::Tree previous_summary;
-  ryml::Tree project_summary;
+  ryml::Tree project_data;
+  ryml::NodeRef previous_summary;
+  ryml::NodeRef project_summary;
 
   yakka::schema project_schema;
   yakka::schema data_schema;
@@ -141,11 +142,12 @@ public:
   // std::function<void(std::shared_ptr<task_group> group)> task_complete_handler;
 
   // Internal helper objects
-  const ryml::Pointer _requires_components_pointer = ryml_pointer("/requires/components");
-  const ryml::Pointer _requires_features_pointer = ryml_pointer("/requires/features");
-  const ryml::Pointer _provides_features_pointer = ryml_pointer("/provides/features");
-  const ryml::Pointer _supports_components_pointer = ryml_pointer("/supports/components");
-  const ryml::Pointer _supports_features_pointer = ryml_pointer("/supports/features");
+  const ryml::Pointer _requires_components_pointer = ryml::Pointer("/requires/components");
+  const ryml::Pointer _requires_features_pointer = ryml::Pointer("/requires/features");
+  const ryml::Pointer _provides_features_pointer = ryml::Pointer("/provides/features");
+  const ryml::Pointer _supports_components_pointer = ryml::Pointer("/supports/components");
+  const ryml::Pointer _supports_features_pointer = ryml::Pointer("/supports/features");
+  const ryml::Pointer _replaces_components_pointer = ryml::Pointer("/replaces/components");
 
   // SLC specific
   ryml::Tree template_contributions;
@@ -154,10 +156,10 @@ public:
   std::map<c4::csubstr, ryml::ConstNodeRef> slc_recommended;
   std::multimap<c4::csubstr, c4::csubstr> instances;
   std::multimap<c4::csubstr, const std::shared_ptr<yakka::component>> slc_overrides;
-  bool is_disqualified_by_unless(const ryml::ConstNodeRef &node);
-  bool condition_is_fulfilled(const ryml::ConstNodeRef &node);
+  bool is_disqualified_by_unless(ryml::ConstNodeRef node);
+  bool condition_is_fulfilled(ryml::ConstNodeRef node);
   void process_slc_rules();
-  void create_config_file(const std::shared_ptr<yakka::component> component, const ryml::ConstNodeRef &config, const std::string &prefix, std::string instance_name);
+  void create_config_file(const std::shared_ptr<yakka::component> component, ryml::ConstNodeRef config, const std::string &prefix, std::string instance_name);
 };
 
 } /* namespace yakka */

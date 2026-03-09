@@ -3,7 +3,7 @@
 
 namespace yakka {
 
-std::string try_render(inja::Environment &env, const std::string &input, const ryml::Tree &data)
+std::string try_render(inja::Environment &env, const std::string &input, ryml::ConstNodeRef data)
 {
   try {
     return env.render(input, data);
@@ -13,7 +13,7 @@ std::string try_render(inja::Environment &env, const std::string &input, const r
   }
 }
 
-std::string try_render_file(inja::Environment &env, const std::string &filename, const ryml::Tree &data)
+std::string try_render_file(inja::Environment &env, const std::string &filename, ryml::ConstNodeRef data)
 {
   try {
     return env.render_file(filename, data);

@@ -249,7 +249,7 @@ public:
 
     /** Wrapper for has_child() with std::map-like naming convention */
     C4_ALWAYS_INLINE C4_PURE bool contains(csubstr name) const noexcept { _C4RV(); return tree_->has_child(id_, name); }
-    C4_ALWAYS_INLINE C4_PURE bool contains(Pointer ptr) const noexcept { _C4RV(); return (*this)[ptr].valid(); }
+    C4_ALWAYS_INLINE C4_PURE bool contains(Pointer ptr) const noexcept { _C4RV(); return tree_->valid(ptr); }
 
     C4_ALWAYS_INLINE C4_PURE bool has_sibling(ConstImpl const& n) const noexcept { _C4RV(); return tree_->has_sibling(id_, n.m_id); }
     C4_ALWAYS_INLINE C4_PURE bool has_sibling(csubstr name) const noexcept { _C4RV(); return tree_->has_sibling(id_, name); }
@@ -367,17 +367,17 @@ public:
     C4_ALWAYS_INLINE C4_PURE ConstImpl operator[] (Pointer const& ptr) const noexcept
     {
         _C4RV();
-        ConstImpl* curr = ((ConstImpl const*)this);
+        ConstImpl curr = *((ConstImpl const*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            curr = curr->find_child(ptr[i]);
-            _RYML_CB_ASSERT(tree__->m_callbacks, curr->valid());
+            curr = curr.find_child(ptr[i]);
+            _RYML_CB_ASSERT(tree__->m_callbacks, curr.valid());
         }
         return *curr;
     }
 
     /** Navigate to a node using a Pointer path. O(num_segments * num_children).
-     * Returns a seed node if any segment in the path is not found. */
+     * Creates missing nodes along the path, returns a seed node for the last segment. */
     template<class U=Impl>
     C4_ALWAYS_INLINE C4_PURE auto operator[] (Pointer const& ptr) noexcept -> _C4_IF_MUTABLE(Impl)
     {
@@ -385,14 +385,25 @@ public:
         Impl curr = *((Impl*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            curr = curr.find_child(ptr[i]);
-            if(!curr.valid())
+            Impl ch = curr.find_child(ptr[i]);
+            if(!ch.valid())
             {
-                // Return a seed node for the missing path segment
-                return NodeRef(curr.m_tree, curr.m_id, ptr[i]);
+                if(i == ptr.size() - 1)
+                {
+                    // Last segment: return a seed node
+                    return NodeRef(curr.m_tree, curr.m_id, ptr[i]);
+                }
+                else
+                {
+                    // Intermediate segment: create the node
+                    ch = curr.append_child();
+                    ch.set_key(ptr[i]);
+                }
             }
+            curr = ch;
         }
-        return curr;
+        // All segments exist: return as seed node for consistency
+        return NodeRef(curr.m_tree, curr.m_id, csubstr{});
     }
 
     /** Navigate to a node using a Pointer path. O(num_segments * num_children).
@@ -400,16 +411,16 @@ public:
     C4_ALWAYS_INLINE C4_PURE ConstImpl at(Pointer const& ptr) const
     {
         _C4RV();
-        ConstImpl* curr = ((ConstImpl const*)this);
+        ConstImpl curr = *((ConstImpl const*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            curr = curr->find_child(ptr[i]);
-            if(!curr->valid())
+            curr = curr.find_child(ptr[i]);
+            if(!curr.valid())
             {
                 _RYML_CB_ERR(tree__->m_callbacks, "pointer path segment not found");
             }
         }
-        return *curr;
+        return curr;
     }
 
     /** Navigate to a node using a Pointer path. O(num_segments * num_children).
@@ -1390,6 +1401,16 @@ inline read(ConstNodeRef const& n, T *v)
     return from_chars_float(n.val(), v);
 }
 
+inline bool read(NodeRef const& n, std::string *v)
+{
+    v->assign(n.val().str, n.val().len);
+    return true;
+}
+inline bool read(ConstNodeRef const& n, std::string *v)
+{
+    v->assign(n.val().str, n.val().len);
+    return true;
+}
 
 } // namespace yml
 } // namespace c4

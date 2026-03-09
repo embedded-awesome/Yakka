@@ -209,7 +209,7 @@ class Renderer : public NodeVisitor {
     if (!field.valid()) {
       const auto key_sub = to_csubstr(key);
       field = node.append_child();
-      field << ryml::key(key_sub);
+      field << ryml::Key(key_sub);
     }
     field << (value ? "true" : "false");
   }
@@ -219,7 +219,7 @@ class Renderer : public NodeVisitor {
     if (!field.valid()) {
       const auto key_sub = to_csubstr(key);
       field = node.append_child();
-      field << ryml::key(key_sub);
+      field << ryml::Key(key_sub);
     }
     field << value;
   }
@@ -228,7 +228,7 @@ class Renderer : public NodeVisitor {
     auto field = find_child_by_key(node, to_csubstr("key"));
     if (!field.valid()) {
       field = node.append_child();
-      field << ryml::key("key");
+      field << ryml::Key("key");
     }
     field << value;
   }

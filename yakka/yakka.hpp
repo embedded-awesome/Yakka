@@ -1,6 +1,8 @@
 #pragma once
 
-#include "yaml-cpp/yaml.h"
+// #include "yaml-cpp/yaml.h"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <set>
 #include <string>
 #include <functional>
@@ -46,8 +48,8 @@ struct process_return {
 };
 
 struct project_description {
-  std::vector<std::string> components;
-  std::vector<std::string> features;
+  std::vector<ryml::csubstr> components;
+  std::vector<ryml::csubstr> features;
 };
 
 enum yakka_status {
@@ -55,8 +57,8 @@ enum yakka_status {
   FAIL,
 };
 
-using component_list_t = std::unordered_set<std::string>;
-using feature_list_t   = std::unordered_set<std::string>;
-using command_list_t   = std::unordered_set<std::string>;
+using component_list_t = std::unordered_set<ryml::csubstr>;
+using feature_list_t   = std::unordered_set<ryml::csubstr>;
+using command_list_t   = std::unordered_set<ryml::csubstr>;
 
 } // namespace yakka

@@ -11,14 +11,14 @@
 
 namespace yakka {
 struct blueprint_match {
-  std::vector<std::string> dependencies; // Template processed dependencies
+  std::vector<ryml::csubstr> dependencies; // Template processed dependencies
   std::shared_ptr<yakka::blueprint> blueprint;
-  std::vector<std::string> regex_matches; // Regex capture groups for a particular regex match
+  std::vector<ryml::csubstr> regex_matches; // Regex capture groups for a particular regex match
 };
 
 class blueprint_database {
 public:
-  std::vector<std::shared_ptr<blueprint_match>> find_match(const c4::csubstr target, const ryml::Tree &project_summary);
+  std::vector<std::shared_ptr<blueprint_match>> find_match(ryml::csubstr target, ryml::ConstNodeRef project_summary);
 
   void load(const std::filesystem::path filename);
   void save(const std::filesystem::path filename);
@@ -26,6 +26,7 @@ public:
   // void generate_task_database(std::vector<std::string> command_list);
   // void process_blueprint_target( const std::string target );
 
+  ryml::Tree database;
   std::multimap<c4::csubstr, std::shared_ptr<blueprint>> blueprints;
 };
 

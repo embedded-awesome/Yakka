@@ -95,11 +95,11 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
 
     // Set version
     if (root_node.has_child("version")) {
-      auto version_node = ryml_get_child(root_node, "version");
+      auto version_node = root_node.find_child("version");
       try {
-        this->version = semver::version::parse(ryml_val_string(version_node));
+        this->version = semver::version::parse(version_node.val<std::string>().value());
       } catch (std::exception &e) {
-        spdlog::error("Failed to parse version: '{}'\n{}\n", ryml_val_string(version_node), e.what());
+        spdlog::error("Failed to parse version: '{}'\n{}\n", version_node.val<std::string>().value(), e.what());
         this->version = "0.0.0"_v;
       }
     } else {
@@ -114,7 +114,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
         auto components_node = requires_node.find_child("components");
         // If it's a scalar, convert to sequence
         if (components_node.is_val()) {
-          std::string value = ryml_val_string(components_node);
+          std::string value = components_node.val<std::string>().value();
           components_node |= ryml::SEQ;
           auto child = components_node.append_child();
           child << value;
@@ -125,7 +125,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
         auto features_node = requires_node.find_child("features");
         // If it's a scalar, convert to sequence
         if (features_node.is_val()) {
-          std::string value = ryml_val_string(features_node);
+          std::string value = features_node.val<std::string>().value();
           features_node |= ryml::SEQ;
           auto child = features_node.append_child();
           child << value;
@@ -138,7 +138,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
         if (components_node.is_seq()) {
           for (auto comp : components_node.children()) {
             if (comp.has_val()) {
-              std::string comp_str = ryml_val_string(comp);
+              std::string comp_str = comp.val<std::string>().value();
               if (!comp_str.empty() && comp_str.front() == '.') {
                 comp << (path_string + comp_str);
               }
@@ -161,7 +161,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
               if (components_node.is_seq()) {
                 for (auto comp : components_node.children()) {
                   if (comp.has_val()) {
-                    std::string comp_str = ryml_val_string(comp);
+                    std::string comp_str = comp.val<std::string>().value();
                     if (!comp_str.empty() && comp_str.front() == '.') {
                       comp << (path_string + comp_str);
                     }
@@ -182,7 +182,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
               if (req_components_node.is_seq()) {
                 for (auto comp : req_components_node.children()) {
                   if (comp.has_val()) {
-                    std::string comp_str = ryml_val_string(comp);
+                    std::string comp_str = comp.val<std::string>().value();
                     if (!comp_str.empty() && comp_str.front() == '.') {
                       comp << (path_string + comp_str);
                     }
@@ -204,8 +204,8 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
   yakka_file_node << file_path.string();
   
   // Populate json cache for backward compatibility
-  json = ryml_to_json(tree.rootref());
-  json_cache_valid = true;
+  // json = ryml_to_json(tree.rootref());
+  // json_cache_valid = true;
   
   return yakka_status::SUCCESS;
 }
@@ -216,8 +216,8 @@ void component::convert_to_yakka()
   
   // Set basic data such as directory and name
   if (root_node.has_child("id")) {
-    auto id_node = ryml_get_child(root_node, "id");
-    std::string id_val = ryml_val_string(id_node);
+    auto id_node = root_node.find_child("id");
+    std::string id_val = id_node.val<std::string>().value();
     
     // Set name
     if (!root_node.has_child("name")) {
@@ -242,14 +242,14 @@ void component::convert_to_yakka()
     std::string temp_path;
     if (!package_path.empty())
       temp_path = package_path.string() + "/";
-    auto root_path_node = ryml_get_child(root_node, "component_root_path");
-    component_path = temp_path + ryml_val_string(root_path_node);
+    auto root_path_node = root_node.find_child("component_root_path");
+    component_path = temp_path + root_path_node.val<std::string>().value();
   } else if (root_node.has_child("root_path")) {
     std::string temp_path;
     if (!package_path.empty())
       temp_path = package_path.string() + "/";
-    auto root_path_node = ryml_get_child(root_node, "root_path");
-    component_path = temp_path + ryml_val_string(root_path_node);
+    auto root_path_node = root_node.find_child("root_path");
+    component_path = temp_path + root_path_node.val<std::string>().value();
   } else {
     if (package_path.empty())
       if (this->type == SLCP_FILE)
@@ -288,16 +288,16 @@ void component::convert_to_yakka()
       
       for (const auto &p : provides_node.children()) {
         if (p.is_map() && p.has_child("name")) {
-          auto name_val = ryml_val_string(p.find_child("name"));
+          auto name_val = p.find_child("name");
           
           if (p.has_child("condition")) {
             // TODO: Handle conditional provides - needs ryml::Pointer equivalent
             // For now, just add to features
             auto feat_child = features_node.append_child();
-            feat_child << name_val;
+            feat_child << name_val.val();
           } else {
             auto feat_child = features_node.append_child();
-            feat_child << name_val;
+            feat_child << name_val.val();
           }
         }
       }
@@ -321,15 +321,15 @@ void component::convert_to_yakka()
       
       for (const auto &p : requires_node.children()) {
         if (p.is_map() && p.has_child("name")) {
-          auto name_val = ryml_val_string(p.find_child("name"));
+          auto name_val = p.find_child("name");
           
           if (p.has_child("condition")) {
             // TODO: Handle conditional requires
             auto feat_child = features_node.append_child();
-            feat_child << name_val;
+            feat_child << name_val.val();
           } else {
             auto feat_child = features_node.append_child();
-            feat_child << name_val;
+            feat_child << name_val.val();
           }
         }
       }
@@ -360,11 +360,11 @@ void component::convert_to_yakka()
       
       for (const auto &p : component_node.children()) {
         if (p.is_map() && p.has_child("id")) {
-          auto id_val = ryml_val_string(p.find_child("id"));
+          auto id_val = p.find_child("id");
           
           // Add to requires/components
           auto comp_child = req_components_node.append_child();
-          comp_child << id_val;
+          comp_child << id_val.val();
           
           // Handle instances
           if (p.has_child("instance")) {
@@ -377,27 +377,8 @@ void component::convert_to_yakka()
   }
   
   // Update json cache after modifications
-  json = ryml_to_json(tree.rootref());
-  json_cache_valid = true;
-}
-
-// Lazy conversion from ryml to json (only when needed)
-const ryml::Tree& component::get_json() const
-{
-  if (!json_cache_valid) {
-    json = ryml_to_json(tree.rootref());
-    json_cache_valid = true;
-  }
-  return json;
-}
-
-ryml::Tree& component::get_json_mutable()
-{
-  if (!json_cache_valid) {
-    json = ryml_to_json(tree.rootref());
-    json_cache_valid = true;
-  }
-  return json;
+  // json = ryml_to_json(tree.rootref());
+  // json_cache_valid = true;
 }
 
 } /* namespace yakka */
