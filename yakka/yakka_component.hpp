@@ -24,7 +24,7 @@ struct component {
   // std::vector< blueprint_node > get_blueprints();
 
   // Variables
-  std::string id;
+  ryml::csubstr id;
   std::filesystem::path file_path;
   std::filesystem::path component_path;
   

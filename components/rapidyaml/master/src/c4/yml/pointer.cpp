@@ -27,14 +27,6 @@ Pointer::Pointer(std::string_view path)
     _parse(csubstr(m_storage.data(), m_storage.size()));
 }
 
-template<size_t N>
-Pointer::Pointer(const char (&path)[N])
-    : m_storage(path)
-    , m_path()
-{
-    _parse(csubstr(m_storage.data(), m_storage.size()));
-}
-
 Pointer::Pointer(std::vector<csubstr> const& segments)
     : m_storage()
     , m_path(segments)

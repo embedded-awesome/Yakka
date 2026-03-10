@@ -58,7 +58,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       // Find details of the component providing this endpoint
       auto endpoint_root = endpoint.value();
       if (endpoint_root.is_seq() && endpoint_root.num_children() > 0) {
-        auto component_name = endpoint_root.first_child().val<std::string>().value();
+        auto component_name = endpoint_root.first_child().template val<std::string>().value();
         auto component_path = workspace.local_database.get_component(component_name);
         if (component_path.has_value()) {
         // Check if the request is for an endpoint or a file

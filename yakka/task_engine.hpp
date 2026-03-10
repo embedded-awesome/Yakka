@@ -18,13 +18,13 @@ namespace yakka {
 class task_engine;
 
 struct task_group {
-  std::string name;
+  ryml::csubstr name;
   int total_count;
   std::atomic<int> current_count;
   size_t ui_id;
   int last_progress_update;
 
-  task_group(const std::string name) : name(name)
+  task_group(const ryml::csubstr name) : name(name)
   {
     total_count          = 0;
     current_count        = 0;

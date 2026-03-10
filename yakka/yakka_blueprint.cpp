@@ -3,7 +3,7 @@
 #include <iostream>
 
 namespace yakka {
-blueprint::blueprint(const c4::csubstr &target, ryml::ConstNodeRef blueprint_data, const c4::csubstr &parent_path)
+blueprint::blueprint(c4::csubstr target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path)
 {
   this->target      = target;
   this->parent_path = parent_path;
@@ -15,8 +15,8 @@ blueprint::blueprint(const c4::csubstr &target, ryml::ConstNodeRef blueprint_dat
   if (root.has_child("regex"))
     this->regex = root["regex"].val();
 
-  if (ryml::ConstNodeRef requires = root["requires"]; requires.valid() && requires.is_seq()) {
-    for (const auto d: requires.children())
+  if (auto r = root["requires"]; r.valid() && r.is_seq()) {
+    for (const auto d: r.children())
       this->requirements.push_back(d.val());
   }
 

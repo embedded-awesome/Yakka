@@ -367,7 +367,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
 }
 
 // Modern implementation of component fetching
-std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name, ryml::ConstNodeRef node, std::function<void(std::string_view, size_t)> progress_handler)
+std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name, ryml::ConstNodeRef node, std::function<void(std::string, size_t)> progress_handler)
 {
   const auto url_node = node["packages"]["default"]["url"];
   const auto url      = try_render(inja_environment, url_node.val<std::string>().value(), summary.crootref());
@@ -382,14 +382,14 @@ std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name
 
   const auto git_location = (is_tool && shared_components_write_access) ? shared_components_path / "repos" : workspace_path / ".yakka/repos";
 
-  const auto checkout_location = (is_tool && shared_components_write_access) ? shared_components_path / "repos" / std::string(name) : workspace_path / "components" / std::string(name);
+  const auto checkout_location = (is_tool && shared_components_write_access) ? shared_components_path / "repos" / ryml_string(name) : workspace_path / "components" / ryml_string(name);
 
   return std::async(std::launch::async, [=]() -> std::filesystem::path {
     auto result = do_fetch_component(name, url, branch, git_location, checkout_location, progress_handler);
     if (result) {
       return *result;
     } else {
-      spdlog::error("Failed to fetch '{}'. error: {}", std::string(name.str, name.len), result.error().message());
+      spdlog::error("Failed to fetch '{}'. error: {}", ryml_string(name), result.error().message());
       return {};
     }
   });
@@ -398,7 +398,7 @@ std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name
 std::expected<void, std::error_code> workspace::execute_git_command(ryml::csubstr command, ryml::csubstr git_directory_string)
 {
   constexpr auto GIT_STRING = "git";
-  auto [output, result]     = yakka::exec(GIT_STRING, std::string(git_directory_string.str, git_directory_string.len) + std::string(command.str, command.len));
+  auto [output, result]     = yakka::exec(GIT_STRING, ryml_string(git_directory_string) + ryml_string(command));
 
   if (result != 0) {
     spdlog::error(output);
@@ -446,14 +446,14 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
                                                                        std::string branch,
                                                                        const std::filesystem::path &git_location,
                                                                        const std::filesystem::path &checkout_location,
-                                                                       std::function<void(std::string_view, size_t)> progress_handler)
+                                                                       std::function<void(std::string, size_t)> progress_handler)
 {
   // Modern enum class for Git phases
   enum class GitPhase { Counting, Compressing, Receiving, Resolving, Updating, LfsCheckout };
 
   // Phase names as compile-time array
   using namespace std::literals;
-  static constexpr std::array phase_names = { "Counting"sv, "Compressing"sv, "Receiving"sv, "Resolving"sv, "Updating"sv, "Fetch LFS"sv };
+  static constexpr std::array phase_names = { "Counting", "Compressing", "Receiving", "Resolving", "Updating", "Fetch LFS" };
 
   try {
     // Setup logging with RAII

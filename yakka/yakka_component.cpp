@@ -195,7 +195,8 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
       }
     }
 
-    this->id = file_path.stem().string();
+    this->root()["id"] << file_path.stem().string();
+    this->id = this->root()["id"].val();
   }
 
   // Add known information
@@ -225,17 +226,14 @@ void component::convert_to_yakka()
       name_node << ryml::key("name");
       name_node << id_val;
     }
-    this->id = id_val;
+    this->id = id_node.val();
   } else {
-    this->id = file_path.stem().string();
-    
-    auto id_node = root_node.append_child();
-    id_node << ryml::key("id");
-    id_node << this->id;
+    root_node["id"] << file_path.stem().string();
+    this->id = root_node["id"].val();
     
     auto name_node = root_node.append_child();
     name_node << ryml::key("name");
-    name_node << this->id;
+    root_node["name"] << this->id;
   }
 
   if (root_node.has_child("component_root_path")) {

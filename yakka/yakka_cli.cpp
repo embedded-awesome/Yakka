@@ -43,8 +43,8 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
     }
 
     for (auto &i: task_engine.todo_task_groups) {
-      std::string spaces(largest_name_length - i.second->name.size(), ' ');
-      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ i.second->name + spaces }, option::MaxProgress{ i.second->total_count });
+      std::string spaced_name = yakka::ryml_string(i.second->name) + std::string(largest_name_length - i.second->name.size(), ' ');
+      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ spaced_name }, option::MaxProgress{ i.second->total_count });
       task_progress_bars.push_back(new_task_bar);
       i.second->ui_id = task_progress_ui.push_back(*new_task_bar);
       task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });

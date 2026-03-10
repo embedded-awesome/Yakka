@@ -24,6 +24,7 @@
 
 namespace yakka {
 
+
 /*
 // Execute with admin
 if(0 == CreateProcess(argv[2], params, NULL, NULL, false, 0, NULL, NULL, &si, &pi)) {
@@ -161,58 +162,58 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path)
   return temp;
 }
 
-static std::string unescape_ryml_pointer_segment(std::string_view segment)
-{
-  std::string result;
-  result.reserve(segment.size());
-  for (size_t i = 0; i < segment.size(); ++i) {
-    if (segment[i] == '~' && i + 1 < segment.size()) {
-      char next = segment[i + 1];
-      if (next == '0') {
-        result.push_back('~');
-        ++i;
-        continue;
-      }
-      if (next == '1') {
-        result.push_back('/');
-        ++i;
-        continue;
-      }
-    }
-    result.push_back(segment[i]);
-  }
-  return result;
-}
+// static std::string unescape_ryml_pointer_segment(std::string_view segment)
+// {
+//   std::string result;
+//   result.reserve(segment.size());
+//   for (size_t i = 0; i < segment.size(); ++i) {
+//     if (segment[i] == '~' && i + 1 < segment.size()) {
+//       char next = segment[i + 1];
+//       if (next == '0') {
+//         result.push_back('~');
+//         ++i;
+//         continue;
+//       }
+//       if (next == '1') {
+//         result.push_back('/');
+//         ++i;
+//         continue;
+//       }
+//     }
+//     result.push_back(segment[i]);
+//   }
+//   return result;
+// }
 
-static std::vector<std::string> parse_ryml_pointer_segments(std::string path)
-{
-  std::vector<std::string> segments;
-  if (path.empty()) {
-    return segments;
-  }
+// static std::vector<std::string> parse_ryml_pointer_segments(std::string path)
+// {
+//   std::vector<std::string> segments;
+//   if (path.empty()) {
+//     return segments;
+//   }
 
-  if (path.front() != '/') {
-    std::replace(path.begin(), path.end(), '.', '/');
-    path = "/" + path;
-  }
+//   if (path.front() != '/') {
+//     std::replace(path.begin(), path.end(), '.', '/');
+//     path = "/" + path;
+//   }
 
-  std::string_view path_view(path);
-  size_t start = 1;
-  while (start <= path_view.size()) {
-    size_t slash = path_view.find('/', start);
-    if (slash == std::string_view::npos) {
-      slash = path_view.size();
-    }
-    auto segment_view = path_view.substr(start, slash - start);
-    segments.emplace_back(unescape_ryml_pointer_segment(segment_view));
-    if (slash >= path_view.size()) {
-      break;
-    }
-    start = slash + 1;
-  }
+//   std::string_view path_view(path);
+//   size_t start = 1;
+//   while (start <= path_view.size()) {
+//     size_t slash = path_view.find('/', start);
+//     if (slash == std::string_view::npos) {
+//       slash = path_view.size();
+//     }
+//     auto segment_view = path_view.substr(start, slash - start);
+//     segments.emplace_back(unescape_ryml_pointer_segment(segment_view));
+//     if (slash >= path_view.size()) {
+//       break;
+//     }
+//     start = slash + 1;
+//   }
 
-  return segments;
-}
+//   return segments;
+// }
 
 std::string generate_project_name(const component_list_t &components, const feature_list_t &features)
 {
@@ -397,7 +398,7 @@ std::string try_render(inja::Environment &env, ryml::csubstr input, ryml::ConstN
 }
 std::string try_render(inja::Environment &env, ryml::ConstNodeRef input, ryml::ConstNodeRef data)
 {
-  return try_render(env, input.val<std::string_view>().value(), data);
+  return try_render(env, input.val<std::string>().value(), data);
 }
 
 std::string try_render(inja::Environment &env, const std::string &input, ryml::ConstNodeRef data)

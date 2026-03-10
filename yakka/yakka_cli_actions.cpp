@@ -159,7 +159,7 @@ int fetch_action(workspace &workspace, const cxxopts::ParseResult &result)
     if (s.front() == '+' || s.back() == '!')
       continue;
     else
-      project.unknown_components.insert(c4::csubstr(s));
+      project.unknown_components.insert(c4::to_csubstr(s));
   }
 
   // Fetch the components
@@ -224,8 +224,8 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
           fetch_progress_bars.insert({i, new_progress_bar});
           size_t id = fetch_progress_ui.push_back(*new_progress_bar);
           
-          auto result = workspace.fetch_component(i, *node, [&fetch_progress_ui, &largest_name_length, id, i](ryml::csubstr postfix, size_t number) {
-            fetch_progress_ui[id].set_option(option::PostfixText{ std::string(postfix.str, postfix.len) });
+          auto result = workspace.fetch_component(i, *node, [&fetch_progress_ui, &largest_name_length, id, i](std::string postfix, size_t number) {
+            fetch_progress_ui[id].set_option(option::PostfixText{ postfix });
             auto prefix_test = "Fetching " + std::string(i.str, i.len) + " ";
             if (prefix_test.size() < largest_name_length) {
               prefix_test.append(largest_name_length - prefix_test.size(), ' ');

@@ -38,6 +38,7 @@ static void initialize_database(ryml::Tree &database)
 // Constructor initializes empty database with default values
 component_database::component_database() : workspace_path(""), database_is_dirty(false), has_scanned(false)
 {
+  initialize_database(database);
 }
 
 // Destructor saves if dirty
@@ -144,7 +145,7 @@ std::expected<bool, error> component_database::add_component(ryml::csubstr compo
     }
   }
 
-  auto entry_node = database.rootref()[ryml::Pointer{ryml::csubstr{"components"}} / component_id]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "components", id_str }, true);
+  auto entry_node = database.rootref()[ryml::Pointer{"/components"} / component_id]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "components", id_str }, true);
   if (!entry_node.is_seq()) {
     entry_node |= ryml::SEQ;
   }

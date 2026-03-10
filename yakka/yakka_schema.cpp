@@ -12,8 +12,13 @@ void schema::add_schema_data(ryml::ConstNodeRef schema_data)
   validator_updated = false;
 }
 
-bool schema::validate(ryml::ConstNodeRef data, std::string id)
+bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id)
 {
+  return true;
+}
+
+// bool schema::validate(ryml::ConstNodeRef data, std::string id)
+// {
   // custom_error_handler err;
   // err.component_name = id;
 
@@ -31,8 +36,8 @@ bool schema::validate(ryml::ConstNodeRef data, std::string id)
   // // Validate schema
   // validator.validate(data, err);
   // return !err.error_triggered;
-  return true;
-}
+//   return true;
+// }
 
 ryml::ConstNodeRef schema::operator[](const ryml::Pointer &path) const
 {

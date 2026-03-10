@@ -177,7 +177,20 @@ public:
     C4_ALWAYS_INLINE C4_PURE auto get() noexcept -> _C4_IF_MUTABLE(NodeData*) { RYML_ASSERT(tree_ != nullptr); return tree__->get(id__); }
 
     template<typename T>
-    C4_ALWAYS_INLINE C4_PURE std::optional<T> val() const noexcept { RYML_ASSERT(tree_ != nullptr); const auto n = tree_->get(id_); T result; if(n && read(*this, &result)) return result; return std::nullopt; }
+    C4_ALWAYS_INLINE C4_PURE std::optional<T> val() const noexcept
+    {
+        RYML_ASSERT(tree_ != nullptr);
+        const auto n = tree_->get(id_);
+        T result{};
+        if(!n) return std::nullopt;
+
+        // Cast CRTP base to actual node type so read() overloads match.
+        Impl const& self = *static_cast<Impl const*>(this);
+        if(read(self, &result))
+            return result;
+
+        return std::nullopt;
+    }
 
     C4_ALWAYS_INLINE C4_PURE NodeType    type() const noexcept { _C4RV(); return tree_->type(id_); }
     C4_ALWAYS_INLINE C4_PURE const char* type_str() const noexcept { return tree_->type_str(id_); }
@@ -249,7 +262,18 @@ public:
 
     /** Wrapper for has_child() with std::map-like naming convention */
     C4_ALWAYS_INLINE C4_PURE bool contains(csubstr name) const noexcept { _C4RV(); return tree_->has_child(id_, name); }
-    C4_ALWAYS_INLINE C4_PURE bool contains(Pointer ptr) const noexcept { _C4RV(); return tree_->valid(ptr); }
+    C4_ALWAYS_INLINE C4_PURE bool contains(Pointer ptr) const noexcept
+    {
+        _C4RV();
+        ConstImpl curr = *((ConstImpl const*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            curr = curr.find_child(ptr[i]);
+            if(!curr.valid())
+                return false;
+        }
+        return true;
+    }
 
     C4_ALWAYS_INLINE C4_PURE bool has_sibling(ConstImpl const& n) const noexcept { _C4RV(); return tree_->has_sibling(id_, n.m_id); }
     C4_ALWAYS_INLINE C4_PURE bool has_sibling(csubstr name) const noexcept { _C4RV(); return tree_->has_sibling(id_, name); }
@@ -373,7 +397,7 @@ public:
             curr = curr.find_child(ptr[i]);
             _RYML_CB_ASSERT(tree__->m_callbacks, curr.valid());
         }
-        return *curr;
+        return curr;
     }
 
     /** Navigate to a node using a Pointer path. O(num_segments * num_children).

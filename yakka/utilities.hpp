@@ -19,6 +19,22 @@
 
 namespace fs = std::filesystem;
 
+// #include <fmt/format.h>
+// #include <c4/substr.hpp>
+template<>
+struct fmt::formatter<c4::csubstr> : fmt::formatter<std::string_view>
+{
+    template<typename FormatContext>
+    auto format(const c4::csubstr& s, FormatContext& ctx)
+    {
+        return fmt::formatter<std::string_view>::format(
+            std::string_view{s.str, s.len},
+            ctx
+        );
+    }
+};
+
+
 namespace yakka {
 
 void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const schema* schema = nullptr);

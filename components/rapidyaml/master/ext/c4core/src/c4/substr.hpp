@@ -5,6 +5,8 @@
 
 #include <string.h>
 #include <ctype.h>
+#include <functional>
+#include <string_view>
 #include <type_traits>
 
 #include "c4/config.hpp"
@@ -2211,6 +2213,20 @@ inline OStream& operator<< (OStream& os, basic_substring<C> s)
 #endif // !C4_SUBSTR_NO_OSTREAM_LSHIFT
 
 } // namespace c4
+
+
+namespace std {
+
+template<>
+struct hash<c4::csubstr>
+{
+    size_t operator() (c4::csubstr s) const noexcept
+    {
+        return std::hash<std::string_view>{}(std::string_view(s.str, s.len));
+    }
+};
+
+} // namespace std
 
 
 #ifdef __clang__

@@ -72,7 +72,12 @@ public:
      * @param path A string literal in the format "/segment1/segment2/..."
      * The leading slash is optional. */
     template<size_t N>
-    explicit Pointer(const char (&path)[N]);
+    explicit Pointer(const char (&path)[N])
+        : m_storage(path)
+        , m_path()
+    {
+        _parse(csubstr(m_storage.data(), m_storage.size()));
+    }
 
     /** @} */
 

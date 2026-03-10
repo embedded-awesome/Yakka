@@ -277,10 +277,12 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     return ryml::NodeRef{};
   });
   inja_env.add_callback("unique", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    auto filtered = additional_data.rootref().append_child();
-    std::copy_if(args[0].cbegin(), args[0].cend(), std::back_inserter(filtered), [&](ryml::NodeRef item) {
-      return std::find(filtered.begin(), filtered.end(), item.val<std::string>().value()) == filtered.end();
-    });
+    auto filtered = additional_data.rootref().append_child() << ryml::SEQ;
+    std::unordered_set<ryml::csubstr> seen;
+    for (auto i: args[0].children())
+      seen.insert(i.val());
+    for (auto i: seen)
+      filtered.append_child() << i;
     return filtered;
   });
 

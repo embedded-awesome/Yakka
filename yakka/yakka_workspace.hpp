@@ -49,7 +49,7 @@ public:
    * @param progress_handler Function to report progress during fetch
    * @return Future containing the path where component was fetched
    */
-  std::future<std::filesystem::path> fetch_component(ryml::csubstr name, ryml::ConstNodeRef node, std::function<void(std::string_view, size_t)> progress_handler);
+  std::future<std::filesystem::path> fetch_component(ryml::csubstr name, ryml::ConstNodeRef node, std::function<void(std::string, size_t)> progress_handler);
 
   /**
    * @brief Loads all component registries from the workspace
@@ -156,7 +156,7 @@ public:
                                                                      std::string branch,
                                                                      const std::filesystem::path &git_location,
                                                                      const std::filesystem::path &checkout_location,
-                                                                     std::function<void(std::string_view, size_t)> progress_handler);
+                                                                     std::function<void(std::string, size_t)> progress_handler);
 
   /**
    * @brief Updates the workspace version information
