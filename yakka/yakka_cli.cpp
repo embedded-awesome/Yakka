@@ -191,48 +191,43 @@ int main(int argc, char **argv)
   }
 
   // Process the command line options
-  std::string project_name;
-  std::string feature_suffix;
-  std::vector<ryml::csubstr> components;
-  std::vector<ryml::csubstr> features;
-  std::unordered_set<ryml::csubstr> commands;
-  for (auto s: result.unmatched()) {
-    // Identify features, commands, and components
-    if (s.front() == '+') {
-      feature_suffix += s;
-      features.push_back(c4::to_csubstr(s.substr(1)));
-    } else if (s.back() == '!')
-      commands.insert(c4::to_csubstr(s.substr(0, s.size() - 1)));
-    else {
-      components.push_back(c4::to_csubstr(s));
+  // std::string project_name;
+  // std::string feature_suffix;
+  // for (auto s: result.unmatched()) {
+  //   // Identify features, commands, and components
+  //   if (s.front() == '+') {
+  //     feature_suffix += s;
+  //     features.push_back(c4::to_csubstr(s.substr(1)));
+  //   } else if (s.back() == '!')
+  //     commands.insert(c4::to_csubstr(s.substr(0, s.size() - 1)));
+  //   else {
+  //     components.push_back(c4::to_csubstr(s));
 
-      // Compose the project name by concatenation all the components in CLI order.
-      // The features will be added at the end
-      project_name += s + "-";
-    }
-  }
+  //     // Compose the project name by concatenation all the components in CLI order.
+  //     // The features will be added at the end
+  //     project_name += s + "-";
+  //   }
+  // }
 
-  if (components.size() == 0) {
-    spdlog::error("No components identified");
-    return -1;
-  }
+  // if (components.size() == 0) {
+  //   spdlog::error("No components identified");
+  //   return -1;
+  // }
 
   // Remove the extra "-" and add the feature suffix
-  project_name.pop_back();
-  project_name += feature_suffix;
+  // project_name.pop_back();
+  // project_name += feature_suffix;
 
+  // cli_set_project_name can override the generated project name but will be empty if not set (default value of project name arg in project constructor)
   auto cli_set_project_name = result["project-name"].as<std::string>();
-  if (!cli_set_project_name.empty())
-    project_name = cli_set_project_name;
 
   // Create a project and output
-  yakka::project project(project_name, workspace);
-
-  // Add the action as a command
-  commands.insert(c4::to_csubstr(action));
+  yakka::project project(workspace, cli_set_project_name);
 
   // Init the project
-  project.init_project(components, features, commands);
+  project.init_project(result.unmatched());
+  
+  project.add_command(action);
 
   // Check if we don't want Yakka files
   if (result["no-yakka"].count() != 0) {
@@ -272,31 +267,31 @@ int main(int argc, char **argv)
   } else {
     spdlog::info("Skipping project evalutaion");
 
-    for (const auto &i: components) {
-      // Convert string to id
-      const auto component_id = yakka::component_dotname_to_id(i);
-      // Find the component in the project component database
-      auto component_location = workspace.find_component(component_id, project.component_flags);
-      if (!component_location) {
-        continue;
-      }
+    // for (const auto &i: components) {
+    //   // Convert string to id
+    //   const auto component_id = yakka::component_dotname_to_id(i);
+    //   // Find the component in the project component database
+    //   auto component_location = workspace.find_component(component_id, project.component_flags);
+    //   if (!component_location) {
+    //     continue;
+    //   }
 
-      // Add component to the required list and continue if this is not a new component
-      // Insert component and continue if this is not new
-      if (project.required_components.insert(component_id).second == false)
-        continue;
+    //   // Add component to the required list and continue if this is not a new component
+    //   // Insert component and continue if this is not new
+    //   if (project.required_components.insert(component_id).second == false)
+    //     continue;
 
-      auto [component_path, package_path]             = component_location.value();
-      std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
-      if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
-        project.components.push_back(new_component);
-      } else {
-        if (!result["ignore-eval"].as<bool>()) {
-          spdlog::error("Failed to parse {}", component_path.generic_string());
-          exit(-1);
-        }
-      }
-    }
+    //   auto [component_path, package_path]             = component_location.value();
+    //   std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
+    //   if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
+    //     project.components.push_back(new_component);
+    //   } else {
+    //     if (!result["ignore-eval"].as<bool>()) {
+    //       spdlog::error("Failed to parse {}", component_path.generic_string());
+    //       exit(-1);
+    //     }
+    //   }
+    // }
   }
 
   if (result["no-slcc"].count() == 0)

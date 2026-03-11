@@ -18,18 +18,19 @@ using namespace std;
 namespace yakka {
 using namespace std::chrono_literals;
 
-project::project(const std::string project_name, yakka::workspace &workspace) : project_name(project_name), yakka_home_directory("/.yakka"), project_directory("."), workspace(workspace)
+project::project(yakka::workspace &workspace, const std::string project_name) : project_name(project_name), yakka_home_directory("/.yakka"), project_directory("."), workspace(workspace)
 {
   // abort_build      = false;
   project_has_slcc = false;
   current_state    = yakka::project::state::PROJECT_VALID;
   component_flags  = component_database::flag::ALL_COMPONENTS;
 
-  output_path          = yakka::default_output_directory + project_name;
-  project_summary_file = output_path / yakka::project_summary_filename;
-  project_file         = project_name + ".yakka";
-
-  project_summary = project_data["current"];
+  if (!project_name.empty()) {
+    output_path          = yakka::default_output_directory + project_name;
+    project_summary_file = output_path / yakka::project_summary_filename;
+    project_file         = project_name + ".yakka";
+  }
+  project_summary  = project_data["current"];
   previous_summary = project_data["previous"];
 
   add_common_template_commands(inja_environment);
@@ -44,32 +45,36 @@ void project::set_project_directory(const std::string path)
   project_directory = path;
 }
 
-void project::process_build_string(const std::string build_string)
+void project::process_build_string(const std::string word)
 {
-  // When C++20 ranges are available
-  // for (const auto word: std::views::split(build_string, " ")) {
-
-  std::stringstream ss(build_string);
-  std::string word;
-  while (std::getline(ss, word, ' ')) {
-    // Identify features, commands, and components
-    if (word.front() == '+')
-      this->initial_features.push_back(c4::to_csubstr(word).sub(1, word.size() - 1));
-    else if (word.back() == '!')
-      this->commands.insert(c4::to_csubstr(word).sub(0, word.size() - 1));
-    else
-      this->initial_components.push_back(c4::to_csubstr(word));
+  // Identify features, commands, and components
+  if (word.front() == '+') {
+    auto feature_node = project_data["initial_features"].append_child() << word.substr(1);
+    this->initial_features.push_back(feature_node.val());
+    unprocessed_features.insert(feature_node.val());
+  } else if (word.back() == '!') {
+    auto command_node = project_data["commands"].append_child() << word.substr(0, word.size() - 1);
+    this->commands.insert(command_node.val());
+  } else {
+    auto component_node = project_data["initial_components"].append_child() << word;
+    this->initial_components.push_back(component_node.val());
+    unprocessed_components.insert(component_node.val());
   }
+}
+
+void project::init_project(const std::vector<std::string> build_string_list)
+{
+  for (const auto &build_string: build_string_list)
+    process_build_string(build_string);
+  init_project();
 }
 
 void project::init_project(const std::string build_string)
 {
-  process_build_string(build_string);
-
-  for (const auto &c: initial_components)
-    unprocessed_components.insert(c);
-  for (const auto &f: initial_features)
-    unprocessed_features.insert(f);
+  std::stringstream ss(build_string);
+  std::string word;
+  while (std::getline(ss, word, ' '))
+    process_build_string(word);
   init_project();
 }
 
@@ -78,12 +83,12 @@ void project::init_project(std::vector<ryml::csubstr> components, std::vector<ry
   initial_features = features;
 
   for (const auto &c: components) {
-    unprocessed_components.insert(c4::to_csubstr(c));
-    initial_components.push_back(c4::to_csubstr(c));
+    unprocessed_components.insert(c);
+    initial_components.push_back(c);
   }
   for (const auto &f: features) {
-    unprocessed_features.insert(c4::to_csubstr(f));
-    initial_features.push_back(c4::to_csubstr(f));
+    unprocessed_features.insert(f);
+    initial_features.push_back(f);
   }
   this->commands = commands;
 
@@ -92,6 +97,19 @@ void project::init_project(std::vector<ryml::csubstr> components, std::vector<ry
 
 void project::init_project()
 {
+  if (project_name.empty()) {
+    // Generate a project name based on the components and features
+    for (auto c: initial_components)
+      project_name += ryml_string(c) + "-";
+    project_name.pop_back();
+    for (auto f: initial_features)
+      project_name += "+" + ryml_string(f);
+
+    output_path          = yakka::default_output_directory + project_name;
+    project_summary_file = output_path / yakka::project_summary_filename;
+    project_file         = project_name + ".yakka";
+  }
+
   if (fs::exists(project_summary_file)) {
     project_summary_last_modified = fs::last_write_time(project_summary_file);
     auto result                   = ryml_load_file(project_summary_file);
@@ -120,6 +138,12 @@ void project::init_project()
       json_node_merge(ryml::Pointer{ "data" }, project_summary, node->rootref(), &data_schema);
     }
   }
+}
+
+void project::add_command(const std::string command)
+{
+  auto command_node = project_data["commands"].append_child() << command;
+  commands.insert(command_node.val());
 }
 
 void project::process_requirements(std::shared_ptr<yakka::component> component, ryml::ConstNodeRef child_node)
@@ -243,7 +267,12 @@ void project::update_summary()
   previous_summary["data"] = project_summary["data"];
 }
 
-bool project::add_component(c4::csubstr &component_name, component_database::flag flags)
+bool project::add_component(std::string &component_name, component_database::flag flags)
+{
+  return add_component(c4::to_csubstr(component_name), flags);
+}
+
+bool project::add_component(c4::csubstr component_name, component_database::flag flags)
 {
   // Convert string to id
   const auto component_id = component_dotname_to_id(component_name);
@@ -295,7 +324,7 @@ bool project::add_component(c4::csubstr &component_name, component_database::fla
       auto end_pos   = id.rfind('%');
       if (start_pos != std::string::npos && end_pos != std::string::npos && start_pos < end_pos)
         id = id.sub(start_pos, end_pos - start_pos + 1);
-        // id.erase(start_pos, end_pos - start_pos + 1);
+      // id.erase(start_pos, end_pos - start_pos + 1);
       slc_recommended.insert({ id, r });
     }
     for (const auto instance: new_component->root()["instances"].children())
@@ -317,7 +346,7 @@ bool project::add_component(c4::csubstr &component_name, component_database::fla
       auto end_pos   = id.rfind('%');
       if (start_pos != std::string::npos && end_pos != std::string::npos && start_pos < end_pos)
         id = id.sub(start_pos, end_pos - start_pos + 1);
-        // id.erase(start_pos, end_pos - start_pos + 1);
+      // id.erase(start_pos, end_pos - start_pos + 1);
       slc_recommended.insert({ id, r });
     }
     for (const auto instance: new_component->root()["instances"].children())
@@ -687,8 +716,7 @@ project::state project::evaluate_dependencies()
     auto f = workspace.find_feature(r);
     if (f.has_value()) {
       spdlog::error("Found a possible provider for feature '{}' but there are multiple options:\n{}", r, ryml::emitrs_yaml<std::string>(f.value()));
-    }
-    else
+    } else
       spdlog::error("Failed to find provider for feature '{}'", r);
   }
 
@@ -751,8 +779,8 @@ void project::create_project_file()
 void project::generate_project_summary()
 {
   // Add standard information into the project summary
-  project_summary["project_name"]   << project_name;
-  project_summary["project_file"]   << project_file;
+  project_summary["project_name"] << project_name;
+  project_summary["project_file"] << project_file;
   project_summary["project_output"] << default_output_directory + project_name;
   // project_summary["configuration"]  << workspace.summary["configuration"];
   workspace.summary["configuration"].duplicate(project_summary, project_summary.last_child());
@@ -781,15 +809,15 @@ void project::generate_project_summary()
 
   project_summary["initial"] << ryml::MAP;
   project_summary["initial"]["components"] << ryml::SEQ;
-  project_summary["initial"]["features"]   << ryml::SEQ;
-  for ( auto &i: this->initial_components)
+  project_summary["initial"]["features"] << ryml::SEQ;
+  for (auto &i: this->initial_components)
     project_summary["initial"]["components"].append_child() << i;
-  for ( auto &i: this->initial_features)
+  for (auto &i: this->initial_features)
     project_summary["initial"]["features"].append_child() << i;
 
   // TODO: Implement ryml version - needs json::object()
-  project_summary["data"]         << ryml::MAP;
-  project_summary["host"]         << ryml::MAP;
+  project_summary["data"] << ryml::MAP;
+  project_summary["host"] << ryml::MAP;
   project_summary["host"]["name"] << host_os_string;
 }
 
@@ -986,10 +1014,9 @@ void project::create_config_file(const std::shared_ptr<yakka::component> compone
   ryml::Tree temp_tree;
   temp_tree["instance"] << prefix;
   config_file_path = this->inja_environment.render(config_file_path.generic_string(), temp_tree.rootref());
-  
+
   temp_tree["instance"] << instance_name;
-  std::filesystem::path destination_path =
-    std::filesystem::path{ default_output_directory + project_name + "/config" } / this->inja_environment.render(std::filesystem::path(config_filename).filename().string(), temp_tree.rootref());
+  std::filesystem::path destination_path = std::filesystem::path{ default_output_directory + project_name + "/config" } / this->inja_environment.render(std::filesystem::path(config_filename).filename().string(), temp_tree.rootref());
   if (!instance_name.empty()) {
     // Convert instance name uppercase
     std::transform(instance_name.begin(), instance_name.end(), instance_name.begin(), ::toupper);
@@ -1099,7 +1126,7 @@ void project::process_slc_rules()
 
     // Process library
     if (c->root().contains("library")) {
-      for ( auto p: c->root()["library"]) {
+      for (auto p: c->root()["library"]) {
         if (!p.contains("path"))
           continue;
         if (is_disqualified_by_unless(p) || !condition_is_fulfilled(p))
@@ -1112,7 +1139,7 @@ void project::process_slc_rules()
 
     // Process template_contributions
     if (c->root().contains("template_contribution")) {
-      for ( auto t: c->root()["template_contribution"]) {
+      for (auto t: c->root()["template_contribution"]) {
         if (is_disqualified_by_unless(t) || !condition_is_fulfilled(t))
           continue;
 
@@ -1150,7 +1177,7 @@ void project::process_slc_rules()
 
     // Process config_file
     if (c->root().contains("config_file")) {
-      for ( auto config: c->root()["config_file"]) {
+      for (auto config: c->root()["config_file"]) {
         if (!config.contains("path"))
           continue;
         if (is_disqualified_by_unless(config) || !condition_is_fulfilled(config))
@@ -1170,7 +1197,7 @@ void project::process_slc_rules()
 
       // Process 'template_file'
       if (c->root().contains("template_file")) {
-        for ( auto t: c->root()["template_file"]) {
+        for (auto t: c->root()["template_file"]) {
           if (is_disqualified_by_unless(t) || !condition_is_fulfilled(t))
             continue;
 
@@ -1279,8 +1306,8 @@ void project::process_blueprints(const std::shared_ptr<component> c)
       spdlog::info("Additional blueprint: {}", blueprint_string);
       try {
         ryml::Tree blueprint_tree = ryml::parse_in_arena(b.val());
-        auto new_blueprint = std::make_shared<blueprint>(c4::to_csubstr(blueprint_string), blueprint_tree.crootref(), c->root()["directory"].val());
-        blueprint_database.blueprints.insert({ c4::to_csubstr(blueprint_string), new_blueprint});
+        auto new_blueprint        = std::make_shared<blueprint>(c4::to_csubstr(blueprint_string), blueprint_tree.crootref(), c->root()["directory"].val());
+        blueprint_database.blueprints.insert({ c4::to_csubstr(blueprint_string), new_blueprint });
       } catch (const std::exception &e) {
         spdlog::error("Failed to convert blueprint '{}' to ryml: {}", blueprint_string, e.what());
       }

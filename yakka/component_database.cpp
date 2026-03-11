@@ -18,7 +18,7 @@ using error  = std::error_code;
 
 static void initialize_database(ryml::Tree &database)
 {
-  database.clear();
+  // database.clear();
   auto root = database.rootref();
   root |= ryml::MAP;
 
@@ -54,7 +54,7 @@ component_database::~component_database()
 
 void component_database::insert(ryml::csubstr id, const path &config_file)
 {
-  auto pointer = ryml::Pointer{ryml::csubstr{"components"}} / id ; 
+  auto pointer         = ryml::Pointer{ ryml::csubstr{ "components" } } / id;
   auto components_node = database.rootref()[pointer]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "components", std::string{ id } }, true);
   if (!components_node.is_seq()) {
     components_node |= ryml::SEQ;
@@ -71,23 +71,17 @@ std::expected<void, error> component_database::load(const path &workspace_path)
 
   try {
     if (!fs::exists(database_filename)) {
-      initialize_database(database);
+      // initialize_database(database);
       scan_for_components(this->workspace_path);
       return save();
-    }
-
-    auto loaded = ryml_load_file(database_filename);
-    if (!loaded) {
-      initialize_database(database);
-      scan_for_components(this->workspace_path);
-      return save();
-    }
-    database = std::move(*loaded);
-
-    if (!database.crootref().has_child("components")) {
-      initialize_database(database);
-      scan_for_components(this->workspace_path);
-      return save();
+    } else {
+      auto loaded = ryml_load_file(database_filename);
+      if (!loaded) {
+        // initialize_database(database);
+        scan_for_components(this->workspace_path);
+        return save();
+      }
+      database = std::move(*loaded);
     }
     return {};
   } catch (const std::exception &e) {
@@ -100,7 +94,7 @@ std::expected<void, error> component_database::save() const
 {
   try {
     std::ofstream ofs(database_filename);
-    ofs << ryml::emitrs_json<std::string>(database);
+    ofs << ryml::emitrs_yaml<std::string>(database);
     return {};
   } catch (const std::exception &) {
     return std::unexpected(std::make_error_code(std::errc::io_error));
@@ -118,7 +112,13 @@ void component_database::erase() noexcept
 void component_database::clear() noexcept
 {
   database.clear();
+  initialize_database(database);
   database_is_dirty = true;
+}
+
+[[nodiscard]] std::expected<bool, std::error_code> component_database::add_component(std::string component_id, const path &path)
+{
+  return add_component(c4::to_csubstr(component_id), path);
 }
 
 std::expected<bool, error> component_database::add_component(ryml::csubstr component_id, const path &path)
@@ -131,11 +131,11 @@ std::expected<bool, error> component_database::add_component(ryml::csubstr compo
 
   const auto path_string = abs_path.generic_string();
 
-  auto components_node = database.crootref().find_child("components");
-  if (components_node.valid() && components_node.has_child(component_id)) {
-    auto entries = components_node.find_child(component_id);
+  auto components_node = database["components"];
+  if (components_node.has_child(component_id)) {
+    auto entries = components_node[component_id];
     if (entries.is_seq()) {
-      for (auto entry : entries.children()) {
+      for (auto entry: entries.children()) {
         if (entry.val<std::string>().value() == path_string) {
           return false;
         }
@@ -145,12 +145,10 @@ std::expected<bool, error> component_database::add_component(ryml::csubstr compo
     }
   }
 
-  auto entry_node = database.rootref()[ryml::Pointer{"/components"} / component_id]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "components", id_str }, true);
-  if (!entry_node.is_seq()) {
-    entry_node |= ryml::SEQ;
-  }
-  auto new_entry = entry_node.append_child();
-  new_entry.set_val(c4::to_csubstr(path_string));
+  auto components = database["components"];
+  auto entry_node = components.append_child() << ryml::key(component_id);
+  entry_node |= ryml::SEQ;
+  entry_node.append_child() << path_string;
   database_is_dirty = true;
   return true;
 }
@@ -164,12 +162,12 @@ void component_database::scan_for_components(std::optional<path> search_start_pa
   }
 
   const auto process_entry = [this](const fs::directory_entry &entry) {
-    const auto &path = entry.path();
-    const auto ext   = path.extension();
-    const auto id    = path.stem().string();
+    const auto &path     = entry.path();
+    const auto ext       = path.extension();
+    const auto id        = path.stem().string();
     const auto id_substr = c4::to_csubstr(id);
 
-    if (auto result = add_component(id_substr, path); result && *result) {
+    if (auto result = add_component(id, path); result && *result) {
       if (ext == yakka_component_extension || ext == yakka_component_old_extension) {
         parse_yakka_file(path, id_substr);
       } else if (ext == slcc_component_extension) {
@@ -212,14 +210,14 @@ std::expected<path, std::error_code> component_database::get_component(const std
 
 std::expected<path, error> component_database::get_component(ryml::csubstr id, flag flags) const
 {
-  auto components_node = database.crootref().find_child("components");
-  if (!components_node.valid() || !components_node.has_child(id)) {
+  auto components_node = database["components"];
+  if (!components_node.has_child(id)) {
     return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
 
-  const auto node = components_node.find_child(id);
-  auto iterate_node = [&](ryml::ConstNodeRef entry) -> std::optional<path> {
-    const auto path = this->workspace_path / std::filesystem::path{ entry.val<std::string>().value() };
+  auto node   = components_node[id];
+  auto iterate_node = [&](const ryml::ConstNodeRef &entry) -> std::optional<path> {
+    const auto path      = this->workspace_path / std::filesystem::path{ entry.val<std::string>().value() };
     const auto extension = path.extension();
     if (flags == flag::IGNORE_ALL_SLC && ((extension == slcc_component_extension) || (extension == slce_component_extension) || (extension == slcp_component_extension)))
       return std::nullopt;
@@ -239,7 +237,7 @@ std::expected<path, error> component_database::get_component(ryml::csubstr id, f
   };
 
   if (node.is_seq()) {
-    for (const auto &n : node.children()) {
+    for (const auto &n: node.children()) {
       auto candidate = iterate_node(n);
       if (candidate.has_value()) {
         return candidate.value();
@@ -256,12 +254,9 @@ std::expected<path, error> component_database::get_component(ryml::csubstr id, f
 
 std::expected<std::string, error> component_database::get_component_id(const path &path) const
 {
-  auto components_node = database.crootref().find_child("components");
-  if (!components_node.valid() || !components_node.is_map()) {
-    return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
-  }
+  auto components_node = database["components"];
 
-  for (const auto &entry : components_node.children()) {
+  for (const auto &entry: components_node.children()) {
     if (!entry.has_key()) {
       continue;
     }
@@ -271,7 +266,7 @@ std::expected<std::string, error> component_database::get_component_id(const pat
       return name;
     }
     if (entry.is_seq()) {
-      for (const auto &n : entry.children()) {
+      for (const auto &n: entry.children()) {
         if (std::filesystem::path{ n.val<std::string>().value() } == path) {
           return name;
         }
@@ -284,8 +279,8 @@ std::expected<std::string, error> component_database::get_component_id(const pat
 std::optional<ryml::ConstNodeRef> component_database::get_blueprint_provider(ryml::csubstr blueprint) const
 {
   // const auto blueprint_str = std::string{ blueprint };
-  auto blueprints_node = database.crootref()["blueprints"];
-  if (blueprints_node.valid() && blueprints_node.has_child(blueprint)) {
+  auto blueprints_node = database["blueprints"];
+  if (blueprints_node.has_child(blueprint)) {
     return blueprints_node[blueprint];
   }
 
@@ -295,9 +290,8 @@ std::optional<ryml::ConstNodeRef> component_database::get_blueprint_provider(rym
 std::optional<ryml::ConstNodeRef> component_database::get_serve_endpoint_provider(ryml::csubstr endpoint) const
 {
   // const auto endpoint_str = std::string{ endpoint };
-  auto serve_node = database.crootref()["serve"];
-  if (serve_node.valid() && serve_node.has_child(endpoint)) {
-    return serve_node[endpoint];
+  if (database["serve"].has_child(endpoint)) {
+    return database["serve"][endpoint];
   }
   return std::nullopt;
 }
@@ -321,34 +315,24 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
   // Check for Yakka serve endpoints
   if (root.has_child("yakka") && root["yakka"].has_child("serve")) {
     for (const auto &f: root["yakka"]["serve"].children()) {
-      std::string endpoint = std::string{ f.val().str, f.val().len };
-      auto serve_node = database.rootref()[ryml::Pointer{"serve"} / endpoint];
-      // auto serve_node = ryml_navigate_path(database.rootref(), std::vector<std::string>{ "serve", endpoint }, true);
-      if (!serve_node.is_seq()) {
-        serve_node |= ryml::SEQ;
-      }
-      auto entry = serve_node.append_child();
-      entry.set_val(id);
+      auto serve_node = database["serve"].append_child();
+      serve_node |= ryml::SEQ;
+      serve_node.set_key_serialized(f.val()); // This is done as f.val() is from another tree
+      serve_node.append_child() << id;
     }
   }
 
   if (root.has_child("type")) {
     if (root["type"].is_seq()) {
       for (const auto &t: root["type"].children()) {
-        auto type_node = database.rootref()[ryml::Pointer{ryml::csubstr{"types"}} / t.val()]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "types", type_name }, true);
-        if (!type_node.is_seq()) {
-          type_node |= ryml::SEQ;
-        }
-        auto entry = type_node.append_child();
-        entry.set_val(id);
+        auto type_node = database["types"][t.val()];
+        type_node |= ryml::SEQ;
+        type_node.append_child() << id;
       }
     } else {
-      auto type_node = database.rootref()[ryml::Pointer{ryml::csubstr{"types"}} / root["type"].val()]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "types", type_name }, true);
-      if (!type_node.is_seq()) {
-        type_node |= ryml::SEQ;
-      }
-      auto entry = type_node.append_child();
-      entry.set_val(id);
+      auto type_node = database["types"][root["type"].val()];
+      type_node |= ryml::SEQ;
+      type_node.append_child() << id;
     }
   }
 
@@ -402,7 +386,7 @@ std::expected<void, std::error_code> component_database::parse_slcc_file(const p
       return std::unexpected(std::make_error_code(std::errc::invalid_argument));
     }
 
-      auto result = add_component(id_node.val(), path);
+    auto result = add_component(id_node.val(), path);
     if (!result) {
       return std::unexpected(result.error());
     } else if (*result) {
@@ -424,10 +408,10 @@ std::expected<void, std::error_code> component_database::parse_slcc_file(const p
             condition_child |= ryml::SEQ;
             for (const auto &c: f["condition"].children()) {
               std::string condition_string = std::string(c.val().str, c.val().len);
-              auto cond_entry = condition_child.append_child();
+              auto cond_entry              = condition_child.append_child();
               cond_entry.set_val(c4::to_csubstr(condition_string));
             }
-            auto feature_node_ref = database.rootref()[ryml::Pointer{ryml::csubstr{"features"}} / feature_name]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "features", feature_name }, true);
+            auto feature_node_ref = database.rootref()[ryml::Pointer{ ryml::csubstr{ "features" } } / feature_name]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "features", feature_name }, true);
             if (!feature_node_ref.is_seq()) {
               feature_node_ref |= ryml::SEQ;
             }
@@ -435,7 +419,7 @@ std::expected<void, std::error_code> component_database::parse_slcc_file(const p
             new_entry |= ryml::MAP;
             new_entry.tree()->merge_with(&node, node.root_id(), new_entry.id());
           } else {
-            auto feature_node_ref = database.rootref()[ryml::Pointer{ryml::csubstr{"features"}} / feature_name]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "features", feature_name }, true);
+            auto feature_node_ref = database.rootref()[ryml::Pointer{ ryml::csubstr{ "features" } } / feature_name]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "features", feature_name }, true);
             if (!feature_node_ref.is_seq()) {
               feature_node_ref |= ryml::SEQ;
             }
@@ -470,13 +454,10 @@ static void process_blueprint(ryml::Tree &database, ryml::csubstr id_string, con
   }
 
   // Store blueprint entry
-  spdlog::info("Found blueprint: {}", std::string(blueprint_node.key().str, blueprint_node.key().len));
-  auto blueprint_node_ref = database.rootref()[ryml::Pointer{ryml::csubstr{"blueprints"}} / blueprint_node.key()]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "blueprints", blueprint_name }, true);
-  if (!blueprint_node_ref.is_seq()) {
-    blueprint_node_ref |= ryml::SEQ;
-  }
-  auto entry = blueprint_node_ref.append_child();
-  entry.set_val(id_string);
+  spdlog::info("Found blueprint: {}", blueprint_node.key());
+  auto blueprint_node_ref = database["blueprints"][blueprint_node.key()]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "blueprints", blueprint_name }, true);
+  blueprint_node_ref |= ryml::SEQ;
+  blueprint_node_ref.append_child() << id_string;
 }
 
 } // namespace yakka

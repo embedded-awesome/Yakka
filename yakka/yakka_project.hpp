@@ -41,24 +41,27 @@ public:
   };
 
 public:
-  project(const std::string project_name, yakka::workspace &workspace);
+  project(yakka::workspace &workspace, const std::string project_name = "");
 
   virtual ~project();
 
   void set_project_directory(const std::string path);
   void init_project(std::vector<ryml::csubstr> components, std::vector<ryml::csubstr> features, std::unordered_set<ryml::csubstr> commands = {});
   void init_project(const std::string build_string);
+  void init_project(const std::vector<std::string> build_string_list);
   void init_project();
   void process_build_string(const std::string build_string);
   void parse_project_string(const std::vector<std::string> &project_string);
   void process_requirements(std::shared_ptr<yakka::component> component, ryml::ConstNodeRef child_node);
   state evaluate_dependencies();
-  bool add_component(c4::csubstr &component_name, component_database::flag flags);
+  bool add_component(std::string &component_name, component_database::flag flags);
+  bool add_component(c4::csubstr component_name, component_database::flag flags);
   bool add_feature(c4::csubstr &feature_name);
   //std::optional<std::filesystem::path> find_component(const std::string component_dotname);
   void evaluate_choices();
   project::state process_choice(c4::csubstr &choice_name);
   void add_additional_tool(const std::filesystem::path component_path);
+  void add_command(const std::string command);
 
   // Component processing functions
   void process_tools(const std::shared_ptr<component> c);

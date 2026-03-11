@@ -262,7 +262,7 @@ process_return save_command(std::string target, ryml::ConstNodeRef command, std:
     auto pointer     = ryml::Pointer{ save_filename.substr(6) };
     auto target_node = project_data[pointer]; //ryml_navigate_path(project_data, pointer, true);
     if (target_node.valid()) {
-      target_node.set_val(c4::to_csubstr(captured_output));
+      target_node << captured_output;
     }
     return { captured_output, 0 };
   }

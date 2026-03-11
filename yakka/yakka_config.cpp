@@ -183,7 +183,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     auto project_id = req.path_params.at("id");
 
     // Load up project summary and see if the project file exists
-    yakka::project the_project(project_id, workspace);
+    yakka::project the_project(workspace, project_id);
     the_project.init_project();
 
     // If not, create a new project file

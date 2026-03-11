@@ -172,8 +172,7 @@ void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakk
         } else if (construct_task->match->blueprint->process.valid()) {
           auto max_element = todo_list.end();
           for (auto j: construct_task->match->dependencies) {
-            auto j_substr = c4::to_csubstr(j);
-            auto temp         = todo_list.equal_range(j_substr);
+            auto temp         = todo_list.equal_range(j);
             auto temp_element = std::max_element(temp.first, temp.second, [](auto const &i, auto const &j) {
               return i.second->last_modified < j.second->last_modified;
             });

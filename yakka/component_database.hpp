@@ -39,6 +39,7 @@ public:
 
   // Return expected for operations that might fail
   [[nodiscard]] std::expected<bool, std::error_code> add_component(ryml::csubstr component_id, const path &path);
+  [[nodiscard]] std::expected<bool, std::error_code> add_component(std::string component_id, const path &path);
 
   // Use optional path for operations that might not find a result
   void scan_for_components(std::optional<path> search_start_path = std::nullopt);

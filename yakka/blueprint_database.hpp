@@ -25,6 +25,7 @@ public:
 
   // void generate_task_database(std::vector<std::string> command_list);
   // void process_blueprint_target( const std::string target );
+  std::vector<ryml::csubstr> parse_gcc_dependency_file(const std::string &filename);
 
   ryml::Tree database;
   std::multimap<c4::csubstr, std::shared_ptr<blueprint>> blueprints;

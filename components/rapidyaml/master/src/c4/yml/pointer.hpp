@@ -162,6 +162,11 @@ public:
     /** Alias for path(), matching JSON pointer naming in some integrations */
     C4_ALWAYS_INLINE C4_PURE std::vector<csubstr> const& tokens() const noexcept { return m_path; }
 
+    /** Build a normalized path string from stored fragments.
+     * Example: ["foo", "bar"] -> "/foo/bar"
+     * Empty pointer serializes to "/" (root). */
+    std::string to_string() const;
+
     /** @} */
 
 public:

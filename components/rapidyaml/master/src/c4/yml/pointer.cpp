@@ -78,6 +78,27 @@ bool Pointer::pop()
     return true;
 }
 
+std::string Pointer::to_string() const
+{
+    if(m_path.empty())
+        return std::string("/");
+
+    size_t total_len = 0;
+    for(csubstr const segment : m_path)
+        total_len += 1u + segment.len; // '/' + segment
+
+    std::string out;
+    out.reserve(total_len);
+
+    for(csubstr const segment : m_path)
+    {
+        out.push_back('/');
+        out.append(segment.str, segment.len);
+    }
+
+    return out;
+}
+
 bool Pointer::operator== (Pointer const& that) const noexcept
 {
     if(m_path.size() != that.m_path.size())

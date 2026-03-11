@@ -23,8 +23,10 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
         continue;
       
       // arg_count starts at 0 as the first match is the entire string
-      for (auto &regex_match: s)
-        match->regex_matches.push_back(c4::to_csubstr(regex_match.str()));
+      for (auto &regex_match: s) {
+        auto match_node = database["matches"].append_child() << regex_match.str();
+        match->regex_matches.push_back(match_node.val());
+      }
     } else {
       if (target != blueprint.first)
         continue;
@@ -116,7 +118,8 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
           std::string data_name = yakka::try_render(local_inja_env, d.name, project_summary);
           if (data_name.front() != yakka::data_dependency_identifier)
             data_name.insert(0, 1, yakka::data_dependency_identifier);
-          match->dependencies.push_back(c4::to_csubstr(data_name));
+          auto dependency = database["dependencies"].append_child() << data_name;
+          match->dependencies.push_back(dependency.val());
           continue;
         }
         default:
@@ -139,15 +142,15 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
           auto generated_node = YAML::Load(generated_depend);
           for (auto i: generated_node) {
             auto temp = i.Scalar();
-            std::string dependency = temp.starts_with("./") ? temp.substr(temp.find_first_not_of("/", 2)) : temp;
-            match->dependencies.push_back(c4::to_csubstr(dependency));
+            auto dependency = database["dependencies"].append_child() << (temp.starts_with("./") ? temp.substr(temp.find_first_not_of("/", 2)) : temp);
+            match->dependencies.push_back(dependency.val());
           }
         } catch (std::exception &e) {
           std::cerr << "Failed to parse dependency: " << ryml_string(d.name) << "\n";
         }
       } else {
-        std::string dependency = generated_depend.starts_with("./") ? generated_depend.substr(generated_depend.find_first_not_of("/", 2)) : generated_depend;
-        match->dependencies.push_back(c4::to_csubstr(dependency));
+        auto dependency = database["dependencies"].append_child() << (generated_depend.starts_with("./") ? generated_depend.substr(generated_depend.find_first_not_of("/", 2)) : generated_depend);
+        match->dependencies.push_back(dependency.val());
       }
     }
 
@@ -189,5 +192,45 @@ void blueprint_database::save(const std::filesystem::path filename)
 
   std::ofstream file(filename);
   file << ryml::emitrs_json<std::string>(output);
+}
+
+/**
+ * @brief Parses dependency files as output by GCC or Clang generating a vector of filenames as found in the named file
+ *
+ * @param filename  Name of the dependency file. Typically ending in '.d'
+ * @return std::vector<ryml::csubstr>  Vector of files specified as dependencies
+ */
+std::vector<ryml::csubstr> blueprint_database::parse_gcc_dependency_file(const std::string &filename)
+{
+  std::vector<ryml::csubstr> dependencies;
+  std::ifstream infile(filename);
+
+  if (!infile.is_open())
+    return {};
+
+  std::string line;
+
+  // Find and ignore the first line with the target. Typically "<target>: \"
+  do {
+    std::getline(infile, line);
+  } while (line.length() > 0 && line.find(':') == std::string::npos);
+
+  while (std::getline(infile, line, ' ')) {
+    if (line.empty() || line.compare("\\\n") == 0)
+      continue;
+    if (line.back() == '\n')
+      line.pop_back();
+    if (line.back() == '\r')
+      line.pop_back();
+    if (line.rfind("./", 0) == 0) {
+      auto dependency = database["dependencies"].append_child() << line.substr(2);
+      dependencies.push_back(dependency.val());
+    } else {
+      auto dependency = database["dependencies"].append_child() << line;
+      dependencies.push_back(dependency.val());
+    }
+  }
+
+  return dependencies;
 }
 } // namespace yakka

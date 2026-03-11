@@ -153,7 +153,7 @@ int git_action(workspace &workspace, const cxxopts::ParseResult &result)
 
 int fetch_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
-  yakka::project project("", workspace);
+  yakka::project project(workspace);
   // Identify components named on command line and add to unknown components
   for (auto s: result.unmatched()) {
     if (s.front() == '+' || s.back() == '!')

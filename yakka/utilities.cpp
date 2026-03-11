@@ -235,43 +235,7 @@ std::string generate_project_name(const component_list_t &components, const feat
   return project_name;
 }
 
-/**
- * @brief Parses dependency files as output by GCC or Clang generating a vector of filenames as found in the named file
- *
- * @param filename  Name of the dependency file. Typically ending in '.d'
- * @return std::vector<ryml::csubstr>  Vector of files specified as dependencies
- */
-std::vector<ryml::csubstr> parse_gcc_dependency_file(const std::string &filename)
-{
-  std::vector<ryml::csubstr> dependencies;
-  std::ifstream infile(filename);
 
-  if (!infile.is_open())
-    return {};
-
-  std::string line;
-
-  // Find and ignore the first line with the target. Typically "<target>: \"
-  do {
-    std::getline(infile, line);
-  } while (line.length() > 0 && line.find(':') == std::string::npos);
-
-  while (std::getline(infile, line, ' ')) {
-    if (line.empty() || line.compare("\\\n") == 0)
-      continue;
-    if (line.back() == '\n')
-      line.pop_back();
-    if (line.back() == '\r')
-      line.pop_back();
-    if (line.rfind("./", 0) == 0) {
-      dependencies.push_back(c4::to_csubstr(line.substr(2)));
-    } else {
-      dependencies.push_back(c4::to_csubstr(line));
-    }
-  }
-
-  return dependencies;
-}
 
 /**
  * @brief Merges a node into a merge_target node according to the rules defined in the provided schema, if any.
@@ -692,7 +656,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
       return { true, "" };
     }
 
-    c4::csubstr key = c4::to_csubstr(component_name);
+    c4::csubstr key = component_name;
     if (!left_components.has_child(key) || !right_components.has_child(key)) {
       return { true, "" };
     }
