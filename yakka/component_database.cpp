@@ -94,7 +94,7 @@ std::expected<void, error> component_database::save() const
 {
   try {
     std::ofstream ofs(database_filename);
-    ofs << ryml::emitrs_yaml<std::string>(database);
+    ofs << ryml::emitrs_json<std::string>(database);
     return {};
   } catch (const std::exception &) {
     return std::unexpected(std::make_error_code(std::errc::io_error));
@@ -325,13 +325,15 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
   if (root.has_child("type")) {
     if (root["type"].is_seq()) {
       for (const auto &t: root["type"].children()) {
-        auto type_node = database["types"][t.val()];
+        auto type_node = database["types"].append_child();
         type_node |= ryml::SEQ;
+        type_node.set_key_serialized(t.val());
         type_node.append_child() << id;
       }
     } else {
-      auto type_node = database["types"][root["type"].val()];
+      auto type_node = database["types"].append_child();
       type_node |= ryml::SEQ;
+      type_node.set_key_serialized(root["type"].val());
       type_node.append_child() << id;
     }
   }
@@ -394,43 +396,33 @@ std::expected<void, std::error_code> component_database::parse_slcc_file(const p
         for (const auto &f: provides_node.children()) {
           if (!f.has_child("name"))
             continue;
-          auto feature_node        = f["name"].val();
-          std::string feature_name = std::string(feature_node.str, feature_node.len);
+          // Create new feature node
+          auto feature_node_ref = database["features"].append_child();
+          feature_node_ref |= ryml::SEQ;
+          feature_node_ref.set_key_serialized(f["name"].val());
+
           if (f.has_child("condition")) {
-            ryml::Tree node;
-            auto node_root = node.rootref();
-            node_root |= ryml::MAP;
-            auto name_child = node_root.append_child();
-            name_child << ryml::Key("name");
-            name_child.set_val(id_node.val());
-            auto condition_child = node_root.append_child();
-            condition_child << ryml::Key("condition");
-            condition_child |= ryml::SEQ;
-            for (const auto &c: f["condition"].children()) {
-              std::string condition_string = std::string(c.val().str, c.val().len);
-              auto cond_entry              = condition_child.append_child();
-              cond_entry.set_val(c4::to_csubstr(condition_string));
-            }
-            auto feature_node_ref = database.rootref()[ryml::Pointer{ ryml::csubstr{ "features" } } / feature_name]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "features", feature_name }, true);
-            if (!feature_node_ref.is_seq()) {
-              feature_node_ref |= ryml::SEQ;
-            }
             auto new_entry = feature_node_ref.append_child();
             new_entry |= ryml::MAP;
-            new_entry.tree()->merge_with(&node, node.root_id(), new_entry.id());
-          } else {
-            auto feature_node_ref = database.rootref()[ryml::Pointer{ ryml::csubstr{ "features" } } / feature_name]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "features", feature_name }, true);
-            if (!feature_node_ref.is_seq()) {
-              feature_node_ref |= ryml::SEQ;
+
+            auto name_child = new_entry.append_child() << ryml::key("name");
+            name_child.set_val_serialized(id_node.val());
+            auto condition_child = new_entry.append_child() << ryml::key("condition");
+            condition_child |= ryml::SEQ;
+            for (const auto &c: f["condition"].children()) {
+              auto node = condition_child.append_child();
+              node.set_val_serialized(c.val());
             }
+          } else {
             auto new_entry = feature_node_ref.append_child();
-            new_entry.set_val(id_node.val());
+            new_entry.set_val_serialized(id_node.val());
           }
         }
       }
 
       if (blueprint_node.valid()) {
         for (const auto &b: blueprint_node.children()) {
+          // TODO. This is passing a csubstr and ConstNodeRef from another tree. This needs to be copied into arena
           process_blueprint(database, id_node.val(), b);
         }
       }
@@ -455,9 +447,11 @@ static void process_blueprint(ryml::Tree &database, ryml::csubstr id_string, con
 
   // Store blueprint entry
   spdlog::info("Found blueprint: {}", blueprint_node.key());
-  auto blueprint_node_ref = database["blueprints"][blueprint_node.key()]; // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "blueprints", blueprint_name }, true);
+  auto blueprint_node_ref = database["blueprints"].append_child();
   blueprint_node_ref |= ryml::SEQ;
-  blueprint_node_ref.append_child() << id_string;
+  blueprint_node_ref.set_key_serialized(blueprint_node.key()); // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "blueprints", blueprint_name }, true);
+  auto entry = blueprint_node_ref.append_child();
+  entry.set_val_serialized(id_string);
 }
 
 } // namespace yakka
