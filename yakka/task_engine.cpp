@@ -183,7 +183,7 @@ void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakk
           }
           //spdlog::info("{}: Max element is {}", target_name, max_element->first);
           if (!fs::exists(target_name_string) || max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch()) {
-            spdlog::info("{}: Updating because of {}", target_name_string, ryml_string(max_element->first));
+            spdlog::info("{}: Updating because of {}", target_name_string, max_element->first);
             try {
               auto [output, retcode]        = run_command(target_name_string, construct_task->match, project, project.project_summary["data"]);
               construct_task->last_modified = fs::file_time_type::clock::now();
@@ -362,7 +362,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     auto [component_path, package_path] = component_location.value();
     yakka::component new_component;
     if (new_component.parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
-      return new_component.root();
+      return new_component.root;
     } else {
       return ryml::NodeRef{};
     }
@@ -433,13 +433,13 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
           captured_output                   = test_result.result;
           retcode                           = test_result.retcode;
         } else {
-          spdlog::error("{} tool doesn't exist", ryml_string(command_name));
+          spdlog::error("{} tool doesn't exist", command_name);
         }
 
         if (retcode < 0)
           return { captured_output, retcode };
       } catch (std::exception &e) {
-        spdlog::error("Failed to run command: '{}' as part of {}", ryml_string(command_name), target);
+        spdlog::error("Failed to run command: '{}' as part of {}", command_name, target);
         spdlog::error("{}", e.what());
         throw e;
       }

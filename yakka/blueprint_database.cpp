@@ -76,7 +76,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
       // Loop through components, check if object path exists, if so add it to the aggregate
       for (const auto &child: project_summary["components"].children()) {
         // auto c_value = child.val();
-        if (!child[path].valid())
+        if (!child.contains(path))
           continue;
 
         auto v = child[path];
@@ -91,7 +91,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
       }
 
       // Check project data
-      if (project_summary["data"][path].valid()) {
+      if (project_summary["data"].contains(path)) {
         auto v = project_summary["data"][path];
         if (v.is_map())
           for (auto i: v.children())
@@ -131,7 +131,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
       try {
         generated_depend = local_inja_env.render(std::string_view(d.name.data(), d.name.size()), project_summary);
       } catch (std::exception &e) {
-        spdlog::error("Error evaluating dependency for {}\r\nCouldn't apply template: '{}'\n{}", ryml_string(blueprint.first), ryml_string(d.name), e.what());
+        spdlog::error("Error evaluating dependency for {}\r\nCouldn't apply template: '{}'\n{}", blueprint.first, d.name, e.what());
         return result;
       }
 
@@ -159,7 +159,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
 
   if (!blueprint_match_found) {
     if (!fs::exists(ryml_string(target)) && target[0] != yakka::data_dependency_identifier)
-      spdlog::info("No blueprint for '{}'", ryml_string(target));
+      spdlog::info("No blueprint for '{}'", target);
   }
   return result;
 }

@@ -389,7 +389,7 @@ std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name
     if (result) {
       return *result;
     } else {
-      spdlog::error("Failed to fetch '{}'. error: {}", ryml_string(name), result.error().message());
+      spdlog::error("Failed to fetch '{}'. error: {}", name, result.error().message());
       return {};
     }
   });

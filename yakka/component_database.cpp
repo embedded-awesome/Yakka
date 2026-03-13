@@ -345,7 +345,7 @@ std::optional<ryml::ConstNodeRef> component_database::get_feature_provider(ryml:
 {
   // const auto feature_str = std::string{ feature };
   auto features_node = database.crootref()["features"];
-  if (features_node.valid() && features_node[feature].valid()) {
+  if (features_node.valid() && features_node.contains(feature)) {
     return features_node[feature];
   }
   return std::nullopt;

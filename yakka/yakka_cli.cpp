@@ -254,7 +254,7 @@ int main(int argc, char **argv)
         download_unknown_components(workspace, project);
       } else {
         for (const auto &i: project.unknown_components)
-          spdlog::error("Missing component '{}'", yakka::ryml_string(i));
+          spdlog::error("Missing component '{}'", i);
         spdlog::error("Try adding the '-f' command line option to automatically fetch components");
         spdlog::shutdown();
         exit(0);
@@ -313,7 +313,7 @@ int main(int argc, char **argv)
   // Print a list of required features
   spdlog::info("Required features:");
   for (auto f: project.required_features)
-    spdlog::info("- {}", yakka::ryml_string(f));
+    spdlog::info("- {}", f);
 
   // Generate and save the summary
   project.save_summary();
@@ -441,7 +441,7 @@ static void print_project_choice_errors(yakka::project &project)
   }
 
   for (auto a: project.multiple_answer_choices) {
-    spdlog::error("Choice {} - Has multiple selections", yakka::ryml_string(a));
+    spdlog::error("Choice {} - Has multiple selections", a);
     project.current_state = yakka::project::state::PROJECT_HAS_MULTIPLE_ANSWERS_FOR_CHOICES;
   }
 }

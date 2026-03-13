@@ -925,7 +925,7 @@ bool ryml_has_child(ryml::ConstNodeRef node, c4::csubstr key)
 //       try {
 //         index = static_cast<size_t>(std::stoul(segment.data()));
 //       } catch (...) {
-//         spdlog::error("Non-numeric index '{}' used for sequence navigation", ryml_string(segment));
+//         spdlog::error("Non-numeric index '{}' used for sequence navigation", segment);
 //         return ryml::ConstNodeRef();
 //       }
 
