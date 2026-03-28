@@ -268,8 +268,9 @@ public:
         ConstImpl curr = *((ConstImpl const*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            curr = curr.find_child(ptr[i]);
-            if(!curr.valid())
+            if (curr.is_map() && curr.contains(ptr[i]))
+                curr = curr.find_child(ptr[i]);
+            else
                 return false;
         }
         return true;
@@ -422,12 +423,18 @@ public:
                     // Intermediate segment: create the node
                     ch = curr.append_child();
                     ch.set_key(ptr[i]);
+                    ch |= NodeType_e::MAP;
+                }
+            } else {
+                if (!ch.is_map() && i < ptr.size() - 1){
+                    // Segment exists but is not a map, cannot navigate further
+                    _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment is not a map");
                 }
             }
             curr = ch;
         }
-        // All segments exist: return as seed node for consistency
-        return NodeRef(curr.m_tree, curr.m_id, csubstr{});
+        // All segments exist
+        return curr;//NodeRef(curr.m_tree, curr.m_id, csubstr{});
     }
 
     /** Navigate to a node using a Pointer path. O(num_segments * num_children).

@@ -22,6 +22,7 @@
 #include "template.hpp"
 #include "throw.hpp"
 #include "utils.hpp"
+#include "spdlog/spdlog.h"
 
 namespace inja {
 
@@ -145,13 +146,10 @@ class Renderer : public NodeVisitor {
   ConstNodeRef data_input;
   std::ostream* output_stream {nullptr};
 
-  Tree additional_data_storage;
-  Tree* additional_data {nullptr};
-  NodeRef additional_root;
+  NodeRef additional_data;
   NodeRef current_loop_data;
   NodeRef tmp_sequence;
   detail::LoopFrameStackSketch loop_frames;
-  bool owns_additional_data {false};
 
   std::vector<NativeNodeRef> data_eval_stack;
   std::stack<const DataNode*> not_found_stack;
@@ -182,26 +180,6 @@ class Renderer : public NodeVisitor {
       return *l_num < *r_num;
     }
     return native_to_string(lhs) < native_to_string(rhs);
-  }
-
-  void setup_additional_data(Tree* shared_additional_data) {
-    if (shared_additional_data) {
-      additional_data = shared_additional_data;
-      owns_additional_data = false;
-    } else {
-      additional_data_storage = Tree();
-      additional_data = &additional_data_storage;
-      owns_additional_data = true;
-    }
-
-    additional_root = additional_data->rootref();
-    additional_root |= ryml::MAP;
-    current_loop_data = ensure_child_map(additional_root, "loop");
-    tmp_sequence = ensure_child_seq(additional_root, "_tmp");
-    loop_frames.clear();
-    if (owns_additional_data) {
-      tmp_sequence.clear_children();
-    }
   }
 
   void set_loop_meta_bool(NodeRef node, std::string_view key, bool value) {
@@ -337,21 +315,19 @@ class Renderer : public NodeVisitor {
     data_eval_stack.pop_back();
 
     if (!result.valid()) {
-      if (not_found_stack.empty()) {
-        throw_renderer_error("expression could not be evaluated", expression_list);
+      if (!not_found_stack.empty()) {
+        const auto missing_node = not_found_stack.top();
+        not_found_stack.pop();
+        throw_renderer_error("variable '" + static_cast<std::string>(missing_node->name) + "' not found", *missing_node);
       }
-
-      const auto node = not_found_stack.top();
-      not_found_stack.pop();
-
-      throw_renderer_error("variable '" + static_cast<std::string>(node->name) + "' not found", *node);
     }
     return result;
   }
 
   void throw_renderer_error(const std::string& message, const AstNode& node) {
     const SourceLocation loc = get_source_location(current_template->content, node.pos);
-    INJA_THROW(RenderError(message, loc));
+    //INJA_THROW(RenderError(message, loc));
+    spdlog::debug("[inja.exception.renderer] (at " + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ") " + message);
   }
 
   template <class T>
@@ -418,14 +394,14 @@ class Renderer : public NodeVisitor {
       result[N - i - 1] = data_eval_stack.back().node;
       data_eval_stack.pop_back();
 
-      if (!result[N - i - 1].valid()) {
-        const auto data_node = not_found_stack.top();
-        not_found_stack.pop();
+      // if (!result[N - i - 1].valid()) {
+      //   const auto data_node = not_found_stack.top();
+      //   not_found_stack.pop();
 
-        if (throw_not_found) {
-          throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
-        }
-      }
+      //   if (throw_not_found) {
+      //     throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
+      //   }
+      // }
     }
     return result;
   }
@@ -454,9 +430,13 @@ class Renderer : public NodeVisitor {
   }
 
   void visit(const DataNode& node) override {
-    const auto from_additional = resolve_pointer(additional_root, node.ptr);
-    if (from_additional.valid()) {
-      data_eval_stack.emplace_back(from_additional);
+    if (node.ptr.empty()) {
+      // root document
+      data_eval_stack.emplace_back(data_input);
+    } else if (additional_data.contains(node.ptr)) {
+    // const auto from_additional = resolve_pointer(additional_data, node.ptr);
+    // if (from_additional.valid()) {
+      data_eval_stack.emplace_back(resolve_pointer(additional_data, node.ptr));
       return;
     }
 
@@ -469,7 +449,7 @@ class Renderer : public NodeVisitor {
     const auto function_data = function_storage.find_function(node.name, 0);
     if (function_data.operation == FunctionStorage::Operation::Callback) {
       Arguments empty_args {};
-      const auto value = function_data.callback(empty_args, *additional_data);
+      const auto value = function_data.callback(empty_args, additional_data);
       data_eval_stack.emplace_back(value);
     } else {
       data_eval_stack.emplace_back(ConstNodeRef());
@@ -658,7 +638,9 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Length: {
       const auto val = get_arguments<1>(node)[0];
-      if (val.node.is_val() || val.node.is_keyval()) {
+      if (!val.node.valid()){
+        make_result(0);
+      } else if (val.node.is_val() || val.node.is_keyval()) {
         make_result(native_to_string(val).length());
       } else {
         make_result(val.node.num_children());
@@ -781,7 +763,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Callback: {
       auto args = get_argument_vector(node);
-      data_eval_stack.emplace_back(node.callback(args, *additional_data));
+      data_eval_stack.emplace_back(node.callback(args, additional_data));
     } break;
     case Op::Super: {
       const auto args = get_argument_vector(node);
@@ -828,6 +810,9 @@ class Renderer : public NodeVisitor {
       }
       make_result(os.str());
     } break;
+    case Op::Hex: {
+      make_result(std::format("{:x}", native_to_int(get_arguments<1>(node)[0]).value_or(0)));
+    } break;
     case Op::None:
       break;
     }
@@ -845,8 +830,14 @@ class Renderer : public NodeVisitor {
     restore_loop_frames_from_current_scope_if_needed();
 
     const auto result = eval_expression_list(node.condition);
-    if (!result.valid() || !result.node.is_seq()) {
+    if (!result.valid()) {
+      sync_current_loop_data_from_frames();
+      return;
+    }
+    if (!result.node.is_seq()) {
       throw_renderer_error("object must be an array", node);
+      sync_current_loop_data_from_frames();
+      return;
     }
 
     const size_t size = result.node.num_children();
@@ -855,17 +846,15 @@ class Renderer : public NodeVisitor {
     for (const auto& child : result.node.children()) {
       loop_frames.push_array(child, index, size);
       sync_current_loop_data_from_frames();
-
-      set_child_from_node(additional_root, node.value, child);
-
+      set_child_from_node(additional_data, node.value, child);
       node.body.accept(*this);
 
       loop_frames.pop();
       ++index;
     }
 
-    if (find_child_by_key(additional_root, to_csubstr(node.value)).valid()) {
-      additional_root.remove_child(to_csubstr(node.value));
+    if (find_child_by_key(additional_data, to_csubstr(node.value)).valid()) {
+      additional_data.remove_child(to_csubstr(node.value));
     }
 
     sync_current_loop_data_from_frames();
@@ -875,8 +864,14 @@ class Renderer : public NodeVisitor {
     restore_loop_frames_from_current_scope_if_needed();
 
     const auto result = eval_expression_list(node.condition);
-    if (!result.valid() || !result.node.is_map()) {
+    if (!result.valid()) {
+      sync_current_loop_data_from_frames();
+      return;
+    }
+    if (!result.node.is_map()) {
       throw_renderer_error("object must be an object", node);
+      sync_current_loop_data_from_frames();
+      return;
     }
 
     const size_t size = result.node.num_children();
@@ -897,8 +892,8 @@ class Renderer : public NodeVisitor {
 
       auto key_node = tmp_sequence.append_child();
       key_node << child.key();
-      set_child_from_node(additional_root, node.key, key_node);
-      set_child_from_node(additional_root, node.value, child);
+      set_child_from_node(additional_data, node.key, key_node);
+      set_child_from_node(additional_data, node.value, child);
 
       node.body.accept(*this);
 
@@ -906,11 +901,11 @@ class Renderer : public NodeVisitor {
       ++index;
     }
 
-    if (find_child_by_key(additional_root, to_csubstr(node.key)).valid()) {
-      additional_root.remove_child(to_csubstr(node.key));
+    if (find_child_by_key(additional_data, to_csubstr(node.key)).valid()) {
+      additional_data.remove_child(to_csubstr(node.key));
     }
-    if (find_child_by_key(additional_root, to_csubstr(node.value)).valid()) {
-      additional_root.remove_child(to_csubstr(node.value));
+    if (find_child_by_key(additional_data, to_csubstr(node.value)).valid()) {
+      additional_data.remove_child(to_csubstr(node.value));
     }
 
     sync_current_loop_data_from_frames();
@@ -963,40 +958,58 @@ class Renderer : public NodeVisitor {
   void visit(const SetStatementNode& node) override {
     const auto result = eval_expression_list(node.expression);
     const Pointer ptr(DataNode::convert_dot_to_ptr(node.key));
-    auto target = ensure_path(additional_root, ptr);
-    if (!target.valid()) {
+    if (ptr.empty()) {
+      throw_renderer_error("invalid variable name", node);
       return;
     }
+    const auto last_key = ptr.back();
+    auto target = additional_data[ptr];
+    
     if (!result.valid()) {
       target = nullptr;
       return;
     }
-    // target.clear();
-    if (result.node.has_children()) {
-      if (result.node.is_map()) {
-        target |= ryml::MAP;
-      } else if (result.node.is_seq()) {
-        target |= ryml::SEQ;
+
+    // Check if there is already a node, if so delete and recreate as seed node
+    if (!target.is_seed()) {
+      auto parent = target.parent();
+      parent.remove_child(last_key);
+      // target.tree()->remove(target.id());
+      target = additional_data[ptr];
+      if (parent.contains(last_key)) {
+        spdlog::error("failed to overwrite existing variable");
+        return;
       }
-      // Use tree's duplicate_children directly since result is ConstNodeRef
-      target.tree()->duplicate_children(result.node.tree(), result.node.id(), target.id(), NONE);
-    } else if (result.node.is_val() || result.node.is_keyval()) {
-      write_native_value(target, result.value());
-    } else if (node_is_null(result.node)) {
-      target = nullptr;
     }
+    auto parent = NodeRef(target.tree(), target.id()); // A seed node has the ID of the parent
+    if (parent.contains(last_key)) {
+        spdlog::error("failed to overwrite existing variable");
+        return;
+      }
+    auto new_index = parent.tree()->duplicate(result.node.tree(), result.node.id(), parent.id(), NONE);
+    auto new_node = NodeRef(parent.tree(), new_index);
+    new_node << ryml::key(last_key);
   }
 
 public:
   explicit Renderer(const RenderConfig& config, const TemplateStorage& template_storage, const FunctionStorage& function_storage)
       : config(config), template_storage(template_storage), function_storage(function_storage) {}
 
-  void render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data, Tree* shared_additional_data = nullptr) {
+  void render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data, NodeRef shared_additional_data) {
     output_stream = &os;
     current_template = &tmpl;
     data_input = data;
+    while (!not_found_stack.empty()) {
+      not_found_stack.pop();
+    }
 
-    setup_additional_data(shared_additional_data);
+    additional_data = shared_additional_data;
+    current_loop_data = additional_data["values"].append_child();// << ryml::key("loop");
+    current_loop_data |= ryml::MAP;
+    // current_loop_data.set_key("loop");
+    tmp_sequence = additional_data["values"].append_child();// << ryml::key("_tmp");
+    tmp_sequence |= ryml::SEQ;
+    // tmp_sequence.set_key("_tmp");
 
     template_stack.emplace_back(current_template);
     current_template->root.accept(*this);

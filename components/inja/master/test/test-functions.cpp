@@ -261,45 +261,45 @@ TEST_CASE("callbacks") {
   root |= ryml::MAP;
   root["age"] << "28";
 
-  env.add_callback("double", 1, [](inja::Arguments& args, inja::Tree& additional_data) {
+  env.add_callback("double", 1, [](inja::Arguments& args, inja::NodeRef additional_data) {
     int number = inja::node_to_int(args.at(0)).value();
-    return additional_data.rootref().append_child() << 2 * number;
+    return additional_data().append_child() << 2 * number;
   });
 
-  env.add_callback("half", 1, [](inja::Arguments args, inja::Tree& additional_data) {
+  env.add_callback("half", 1, [](inja::Arguments args, inja::NodeRef additional_data) {
     int number = inja::node_to_int(args.at(0)).value();
-    return additional_data.rootref().append_child() << number / 2;
+    return additional_data().append_child() << number / 2;
   });
 
   std::string greet = "Hello";
-  env.add_callback("double-greetings", 0, [greet](inja::Arguments, inja::Tree& additional_data) { 
-    return additional_data.rootref().append_child() << greet + " " + greet + "!";
+  env.add_callback("double-greetings", 0, [greet](inja::Arguments, inja::NodeRef additional_data) { 
+    return additional_data().append_child() << greet + " " + greet + "!";
   });
 
-  env.add_callback("multiply", 2, [](inja::Arguments args, inja::Tree& additional_data) {
+  env.add_callback("multiply", 2, [](inja::Arguments args, inja::NodeRef additional_data) {
     double number1 = inja::node_to_double(args.at(0)).value();
     double number2 = inja::node_to_double(args.at(1)).value();
-    return additional_data.rootref().append_child() << number1 * number2;
+    return additional_data().append_child() << number1 * number2;
   });
 
-  env.add_callback("multiply", 3, [](inja::Arguments args, inja::Tree& additional_data) {
+  env.add_callback("multiply", 3, [](inja::Arguments args, inja::NodeRef additional_data) {
     double number1 = inja::node_to_double(args.at(0)).value();
     double number2 = inja::node_to_double(args.at(1)).value();
     double number3 = inja::node_to_double(args.at(2)).value();
-    return additional_data.rootref().append_child() << number1 * number2 * number3;
+    return additional_data().append_child() << number1 * number2 * number3;
   });
 
-  env.add_callback("length", 1, [](inja::Arguments args, inja::Tree& additional_data) {
+  env.add_callback("length", 1, [](inja::Arguments args, inja::NodeRef additional_data) {
     auto str = inja::node_to_string(args.at(0));
-    return additional_data.rootref().append_child() << str.length();
+    return additional_data().append_child() << str.length();
   });
 
   env.add_void_callback("log", 1, [](inja::Arguments, inja::Tree&) {
 
   });
 
-  env.add_callback("multiply", 0, [](inja::Arguments, inja::Tree& additional_data) { 
-    return additional_data.rootref().append_child() << 1.0;
+  env.add_callback("multiply", 0, [](inja::Arguments, inja::NodeRef additional_data) { 
+    return additional_data().append_child() << 1.0;
   });
 
   CHECK(env.render("{{ double(age) }}", data.rootref()) == "56");
@@ -316,11 +316,11 @@ TEST_CASE("callbacks") {
   CHECK(env.render("{{ multiply }}", data.rootref()) == "1");
 
   SUBCASE("Variadic") {
-    env.add_callback("argmax", [](inja::Arguments& args, inja::Tree& additional_data) {
+    env.add_callback("argmax", [](inja::Arguments& args, inja::NodeRef additional_data) {
       auto result = std::max_element(args.begin(), args.end(), [](const inja::ConstNodeRef& a, const inja::ConstNodeRef& b) { 
         return inja::node_to_double(a) < inja::node_to_double(b);
       });
-      return additional_data.rootref().append_child() << std::distance(args.begin(), result);
+      return additional_data().append_child() << std::distance(args.begin(), result);
     });
 
     CHECK(env.render("{{ argmax(4, 2, 6) }}", data.rootref()) == "2");

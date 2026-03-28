@@ -17,6 +17,7 @@
 
 #include "exceptions.hpp"
 #include "json.hpp"
+#include "spdlog/spdlog.h"
 
 namespace inja {
 
@@ -549,7 +550,7 @@ inline NodeRef find_child_by_key(NodeRef node, ::ryml::csubstr key) {
     return NodeRef();
   }
   for (auto child : node.children()) {
-    if (child.key() == key) {
+    if (child.has_key() && child.key() == key) {
       return child;
     }
   }
@@ -557,28 +558,33 @@ inline NodeRef find_child_by_key(NodeRef node, ::ryml::csubstr key) {
 }
 
 inline ConstNodeRef resolve_pointer(ConstNodeRef root, const Pointer& ptr) {
-  ConstNodeRef current = root;
-  for (const auto& token : ptr.tokens()) {
-    if (!current.valid()) {
-      return ConstNodeRef();
-    }
-    if (current.is_map()) {
-      current = find_child_by_key(current, token);
-    } else if (current.is_seq()) {
-      const std::string_view view(token.str, token.len);
-      const auto index = parse_int(view);
-      if (!index || *index < 0) {
-        return ConstNodeRef();
-      }
-      if (static_cast<size_t>(*index) >= current.num_children()) {
-        return ConstNodeRef();
-      }
-      current = current.child(static_cast<size_t>(*index));
-    } else {
-      return ConstNodeRef();
-    }
+  if (root.contains(ptr)) {
+    return root[ptr];
   }
-  return current;
+  return ConstNodeRef{};
+  // ConstNodeRef current = root;
+  // for (const auto& token : ptr.tokens()) {
+  //   if (!current.valid()) {
+  //     return ConstNodeRef();
+  //   }
+  //   if (current.is_map()) {
+  //     current = current.find_child(token);
+  //     current = find_child_by_key(current, token);
+  //   } else if (current.is_seq()) {
+  //     const std::string_view view(token.str, token.len);
+  //     const auto index = parse_int(view);
+  //     if (!index || *index < 0) {
+  //       return ConstNodeRef();
+  //     }
+  //     if (static_cast<size_t>(*index) >= current.num_children()) {
+  //       return ConstNodeRef();
+  //     }
+  //     current = current.child(static_cast<size_t>(*index));
+  //   } else {
+  //     return ConstNodeRef();
+  //   }
+  // }
+  // return current;
 }
 
 inline NodeRef ensure_child_map(NodeRef parent, std::string_view key) {
@@ -627,20 +633,13 @@ inline void set_child_from_node(NodeRef parent, std::string_view key, ConstNodeR
     return;
   }
   const ::ryml::csubstr key_sub = to_csubstr(key);
-  auto existing = find_child_by_key(parent, key_sub);
-  if (existing.valid()) {
+  if (parent.contains(key_sub)) {
     parent.remove_child(key_sub);
   }
-  if (!src.valid()) {
-    auto node = parent.append_child();
-    node << ::ryml::key(key_sub);
-    node = nullptr;
-    return;
-  }
-  // Use tree's duplicate method directly since ConstNodeRef doesn't have duplicate
-  const size_t new_id = parent.tree()->duplicate(src.tree(), src.id(), parent.id(), NONE);
-  auto node = NodeRef(parent.tree(), new_id);
-  node << ::ryml::key(key_sub);
+
+  const size_t new_index = parent.tree()->duplicate(src.tree(), src.id(), parent.id(), /*parent.last_child().id());*/ c4::yml::NONE);
+  auto node = NodeRef(parent.tree(), new_index);
+  node << ryml::key(key_sub);
 }
 
 } // namespace inja

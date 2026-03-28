@@ -443,6 +443,20 @@ class RYML_EXPORT Tree
 {
 public:
 
+    /** @name tree behavior flags */
+    /** @{ */
+
+    using tree_flags = uint32_t;
+
+    enum TreeFlags_e : tree_flags {
+        TREEF_NONE             = 0u,
+        TREEF_NO_ARENA_REALLOC = 1u << 0,
+    };
+
+    /** @} */
+
+public:
+
     /** @name construction and assignment */
     /** @{ */
 
@@ -482,6 +496,31 @@ public:
 
     Callbacks const& callbacks() const { return m_callbacks; }
     void callbacks(Callbacks const& cb) { m_callbacks = cb; }
+
+    /** set all behavior flags at once */
+    void set_flags(tree_flags flags) { m_flags = flags; }
+    /** get the current behavior flags */
+    tree_flags flags() const { return m_flags; }
+    /** add one or more behavior flags */
+    void add_flags(tree_flags flags) { m_flags |= flags; }
+    /** remove one or more behavior flags */
+    void rem_flags(tree_flags flags) { m_flags &= ~flags; }
+
+    /** prevent arena reallocations when growing an already-allocated arena.
+     * To use this safely, reserve enough arena capacity first. */
+    void forbid_arena_reallocation(bool forbidden=true)
+    {
+        if(forbidden)
+            add_flags(TREEF_NO_ARENA_REALLOC);
+        else
+            rem_flags(TREEF_NO_ARENA_REALLOC);
+    }
+
+    /** true when arena reallocations are forbidden. */
+    bool is_arena_reallocation_forbidden() const
+    {
+        return (m_flags & TREEF_NO_ARENA_REALLOC) != 0;
+    }
 
     /** @} */
 
@@ -1137,11 +1176,19 @@ public:
     /** ensure the tree's internal string arena is at least the given capacity
      * @note This operation has a potential complexity of O(numNodes)+O(arenasize).
      * Growing the arena may cause relocation of the entire
-     * existing arena, and thus change the contents of individual nodes. */
+     * existing arena, and thus change the contents of individual nodes.
+     *
+     * @note If TREEF_NO_ARENA_REALLOC is set and the arena already has
+     * allocated storage, attempting to grow it will trigger the error
+     * callback. */
     void reserve_arena(size_t arena_cap)
     {
         if(arena_cap > m_arena.len)
         {
+            if(m_arena.str != nullptr && is_arena_reallocation_forbidden())
+            {
+                _RYML_CB_ERR(m_callbacks, "tree arena reallocation is forbidden by TREEF_NO_ARENA_REALLOC");
+            }
             substr buf;
             buf.str = (char*) m_callbacks.m_allocate(arena_cap, m_arena.str, m_callbacks.m_user_data);
             buf.len = arena_cap;
@@ -1480,6 +1527,8 @@ public:
     size_t m_arena_pos;
 
     Callbacks m_callbacks;
+
+    tree_flags m_flags;
 
     TagDirective m_tag_directives[RYML_MAX_TAG_DIRECTIVES];
 

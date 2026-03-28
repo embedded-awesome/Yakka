@@ -30,10 +30,11 @@ Try this
 }
 
 TEST_CASE("copy environment") {
-  inja::Environment env;
-  env.add_callback("double", 1, [](inja::Arguments& args, inja::Tree& additional_data) {
+  inja::Tree data;
+  inja::Environment env(data.rootref());
+  env.add_callback("double", 1, [](inja::Arguments& args, inja::NodeRef additional_data) {
     int number = inja::node_to_int(args.at(0)).value();
-    return additional_data.rootref().append_child() << 2 * number;
+    return additional_data.append_child() << 2 * number;
   });
 
   inja::Template t1 = env.parse("{{ double(2) }}");

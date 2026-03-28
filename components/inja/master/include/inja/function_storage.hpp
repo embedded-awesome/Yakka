@@ -13,8 +13,8 @@
 namespace inja {
 
 using Arguments = std::vector<ConstNodeRef>;
-using CallbackFunction = std::function<ConstNodeRef(Arguments& args, Tree& additional_data)>;
-using VoidCallbackFunction = std::function<void(Arguments& args, Tree& additional_data)>;
+using CallbackFunction = std::function<ConstNodeRef(Arguments& args, NodeRef additional_data)>;
+using VoidCallbackFunction = std::function<void(Arguments& args, NodeRef additional_data)>;
 
 /*!
  * \brief Class for builtin functions and user-defined callbacks.
@@ -70,6 +70,7 @@ public:
     Super,
     Join,
     Callback,
+    Hex,
     None,
   };
 
@@ -114,6 +115,7 @@ private:
       {std::make_pair("super", 0), FunctionData {Operation::Super}},
       {std::make_pair("super", 1), FunctionData {Operation::Super}},
       {std::make_pair("join", 2), FunctionData {Operation::Join}},
+      {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
   };
 
 public:

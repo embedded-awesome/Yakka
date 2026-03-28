@@ -34,10 +34,17 @@ protected:
   std::filesystem::path input_path;
   std::filesystem::path output_path;
 
+  inja::Tree temp_data_tree;
+
 public:
-  Environment(): Environment("") {}
-  explicit Environment(const std::filesystem::path& global_path): input_path(global_path), output_path(global_path) {}
-  Environment(const std::filesystem::path& input_path, const std::filesystem::path& output_path): input_path(input_path), output_path(output_path) {}
+  Environment() {setup_data();}
+  explicit Environment(const std::filesystem::path& global_path): input_path(global_path), output_path(global_path) { setup_data(); }
+  Environment(const std::filesystem::path& input_path, const std::filesystem::path& output_path): input_path(input_path), output_path(output_path) {setup_data();}
+
+  void setup_data() {
+    temp_data_tree.reserve_arena(2 * 1024 * 1024); // Reserve 2MB
+    temp_data_tree.add_flags(inja::Tree::TREEF_NO_ARENA_REALLOC);
+  }
 
   /// Sets the opener and closer for template statements
   void set_statement(const std::string& open, const std::string& close) {
@@ -156,7 +163,12 @@ public:
   }
 
   std::ostream& render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data) {
-    Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data);
+    NodeRef additional_data = temp_data_tree.rootref().append_child();
+    additional_data |= ryml::MAP;
+    additional_data["store"] |= ryml::MAP;
+    additional_data["values"] |= ryml::SEQ;
+    Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data, additional_data);
+    temp_data_tree.remove(additional_data.id());
     return os;
   }
 
@@ -211,9 +223,9 @@ public:
   @brief Adds a void callback with given number or arguments
   */
   void add_void_callback(const std::string& name, int num_args, const VoidCallbackFunction& callback) {
-    function_storage.add_callback(name, num_args, [callback](Arguments& args, Tree& additional_data) {
+    function_storage.add_callback(name, num_args, [callback](Arguments& args, NodeRef additional_data) {
       callback(args, additional_data);
-      auto root = additional_data.rootref();
+      auto root = additional_data;
       root |= ryml::MAP;
       auto tmp = ensure_child_seq(root, "_tmp");
       auto node = tmp.append_child();

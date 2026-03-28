@@ -78,7 +78,7 @@ class Parser {
     operator_stack.pop();
 
     if (static_cast<int>(arguments.size()) < function->number_args) {
-      throw_parser_error("too few arguments");
+      throw_parser_error("too few arguments in expression for operator '" + function->name + "'");
     }
 
     for (int i = 0; i < function->number_args; ++i) {
@@ -246,6 +246,12 @@ class Parser {
 
         // Operators
       } break;
+      case Token::Kind::Dot:
+        if (arguments.empty()) {
+          arguments.emplace_back(std::make_shared<DataNode>("", tok.text.data() - tmpl.content.c_str()));
+          break;
+        }
+        [[fallthrough]];
       case Token::Kind::Equal:
       case Token::Kind::NotEqual:
       case Token::Kind::GreaterThan:
@@ -257,8 +263,7 @@ class Parser {
       case Token::Kind::Times:
       case Token::Kind::Slash:
       case Token::Kind::Power:
-      case Token::Kind::Percent:
-      case Token::Kind::Dot: {
+      case Token::Kind::Percent: {
 
       parse_operator:
         FunctionStorage::Operation operation;

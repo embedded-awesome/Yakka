@@ -45,6 +45,13 @@ Pointer& Pointer::operator/ (csubstr fragment)
     return *this;
 }
 
+Pointer Pointer::operator/ (csubstr fragment) const
+{
+    Pointer result = *this;
+    result / fragment;
+    return result;
+}
+
 Pointer& Pointer::operator/ (std::string const& fragment)
 {
     RYML_ASSERT(!fragment.empty());
@@ -63,11 +70,25 @@ Pointer& Pointer::operator/ (std::string const& fragment)
     return *this;
 }
 
+Pointer Pointer::operator/ (std::string const& fragment) const
+{
+    Pointer result = *this;
+    result / fragment;
+    return result;
+}
+
 Pointer& Pointer::operator/ (Pointer const& fragment)
 {
     for(csubstr const segment : fragment.m_path)
         push(segment);
     return *this;
+}
+
+Pointer Pointer::operator/ (Pointer const& fragment) const
+{
+    Pointer result = *this;
+    result / fragment;
+    return result;
 }
 
 bool Pointer::pop()

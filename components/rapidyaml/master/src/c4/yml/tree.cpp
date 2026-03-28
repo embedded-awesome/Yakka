@@ -315,6 +315,7 @@ Tree::Tree(Callbacks const& cb)
     , m_arena()
     , m_arena_pos(0)
     , m_callbacks(cb)
+    , m_flags(TREEF_NONE)
 {
 }
 
@@ -387,6 +388,7 @@ void Tree::_clear()
     m_free_tail = 0;
     m_arena = {};
     m_arena_pos = 0;
+    m_flags = TREEF_NONE;
     for(size_t i = 0; i < RYML_MAX_TAG_DIRECTIVES; ++i)
         m_tag_directives[i] = {};
 }
@@ -403,6 +405,7 @@ void Tree::_copy(Tree const& that)
     m_free_head = that.m_free_head;
     m_free_tail = that.m_free_tail;
     m_arena_pos = that.m_arena_pos;
+    m_flags = that.m_flags;
     m_arena = that.m_arena;
     if(that.m_arena.str)
     {
@@ -429,6 +432,7 @@ void Tree::_move(Tree & that)
     m_free_tail = that.m_free_tail;
     m_arena = that.m_arena;
     m_arena_pos = that.m_arena_pos;
+    m_flags = that.m_flags;
     for(size_t i = 0; i < RYML_MAX_TAG_DIRECTIVES; ++i)
         m_tag_directives[i] = that.m_tag_directives[i];
     that._clear();

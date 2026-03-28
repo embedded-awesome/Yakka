@@ -96,6 +96,12 @@ public:
      */
     Pointer& operator/ (csubstr fragment);
 
+    /** Append a path fragment and return a new pointer, preserving this pointer.
+     *
+     * Example: const_ptr / "foo" / "bar";
+     */
+    Pointer operator/ (csubstr fragment) const;
+
     /** Append a path fragment from std::string and return this pointer,
      * enabling chaining.
      *
@@ -103,12 +109,26 @@ public:
      */
     Pointer& operator/ (std::string const& fragment);
 
+    /** Append a path fragment from std::string and return a new pointer,
+     * preserving this pointer.
+     *
+     * Example: const_ptr / std::string("foo") / std::string("bar");
+     */
+    Pointer operator/ (std::string const& fragment) const;
+
     /** Append a path fragment from another Pointer and return this pointer,
      * enabling chaining.
      *
      * Example: ptr / other_ptr;
      */
     Pointer& operator/ (Pointer const& fragment);
+
+    /** Append a path fragment from another Pointer and return a new pointer,
+     * preserving this pointer.
+     *
+     * Example: const_ptr / other_ptr;
+     */
+    Pointer operator/ (Pointer const& fragment) const;
 
     /** Remove the last path segment
      * @return true if a segment was removed, false if already empty */
