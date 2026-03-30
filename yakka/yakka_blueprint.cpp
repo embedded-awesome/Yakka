@@ -15,13 +15,13 @@ blueprint::blueprint(c4::csubstr target, ryml::ConstNodeRef blueprint_data, c4::
   if (root.has_child("regex"))
     this->regex = root["regex"].val();
 
-  if (auto r = root["requires"]; r.valid() && r.is_seq()) {
-    for (const auto d: r.children())
+  if (root.has_child("requires") && root["requires"].is_seq()) {
+    for (const auto d: root["requires"].children())
       this->requirements.push_back(d.val());
   }
 
-  if (const auto depends = root["depends"]; depends.valid() && depends.is_seq()) {
-    for (const auto &d: depends.children()) {
+  if (root.has_child("depends") && root["depends"].is_seq()) {
+    for (const auto &d: root["depends"].children()) {
       if (!d.is_map() && d.has_val()) {
         const auto dep_value = d.val();
         if (!dep_value.empty() && dep_value.front() == ':')

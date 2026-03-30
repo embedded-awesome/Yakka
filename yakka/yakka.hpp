@@ -22,7 +22,7 @@ const char data_dependency_identifier           = ':';
 const char data_wildcard_identifier             = '*';
 const std::string database_filename             = "yakka-components.json";
 const std::string projects_filename             = "yakka-projects.json";
-const std::string project_summary_filename      = "yakka_summary.json";
+const std::string project_summary_filename      = "yakka_summary.yaml";
 const std::string default_output_directory      = "output/";
 
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)

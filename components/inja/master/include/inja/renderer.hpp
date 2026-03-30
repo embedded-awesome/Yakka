@@ -12,6 +12,7 @@
 #include <sstream>
 #include <stack>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -155,6 +156,9 @@ class Renderer : public NodeVisitor {
   std::stack<const DataNode*> not_found_stack;
 
   bool break_rendering {false};
+  size_t macro_call_depth {0};
+
+  static constexpr size_t MAX_MACRO_CALL_DEPTH = 1000;
 
   static bool nodes_equal(const NativeNodeRef& lhs, const NativeNodeRef& rhs) {
     if (node_is_null(lhs.node) && node_is_null(rhs.node)) {
@@ -366,14 +370,14 @@ class Renderer : public NodeVisitor {
       result[N - i - 1] = data_eval_stack.back();
       data_eval_stack.pop_back();
 
-      if (!result[N - i - 1].valid()) {
-        const auto data_node = not_found_stack.top();
-        not_found_stack.pop();
+      // if (!result[N - i - 1].valid()) {
+      //   const auto data_node = not_found_stack.top();
+      //   not_found_stack.pop();
 
-        if (throw_not_found) {
-          throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
-        }
-      }
+      //   if (throw_not_found) {
+      //     throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
+      //   }
+      // }
     }
     return result;
   }
@@ -404,6 +408,91 @@ class Renderer : public NodeVisitor {
       // }
     }
     return result;
+  }
+
+  Arguments get_macro_argument_vector(const FunctionNode& node) {
+    const size_t N = node.arguments.size();
+    for (const auto& a : node.arguments) {
+      a->accept(*this);
+    }
+
+    if (data_eval_stack.size() < N) {
+      throw_renderer_error("function needs " + std::to_string(N) + " variables, but has only found " + std::to_string(data_eval_stack.size()), node);
+    }
+
+    Arguments result {N};
+    for (size_t i = 0; i < N; i += 1) {
+      const auto value = data_eval_stack.back();
+      data_eval_stack.pop_back();
+      result[N - i - 1] = value.node;
+
+      if (!value.valid()) {
+        if (!not_found_stack.empty()) {
+          const auto data_node = not_found_stack.top();
+          not_found_stack.pop();
+          throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
+        }
+        throw_renderer_error("invalid macro argument", node);
+      }
+    }
+    return result;
+  }
+
+  std::string evaluate_macro(const FunctionNode& node) {
+    if (macro_call_depth >= MAX_MACRO_CALL_DEPTH) {
+      throw_renderer_error("maximum macro call depth exceeded", node);
+      return std::string {};
+    }
+
+    const auto macro_it = current_template->macro_storage.find(std::make_pair(node.name, node.number_args));
+    if (macro_it == current_template->macro_storage.end()) {
+      throw_renderer_error("macro '" + node.name + "' with arity " + std::to_string(node.number_args) + " not found", node);
+      return std::string {};
+    }
+
+    const auto args = get_macro_argument_vector(node);
+    const auto& macro_node = *macro_it->second;
+
+    auto parent_scope = additional_data.parent();
+    const size_t macro_scope_id = additional_data.tree()->duplicate(additional_data.tree(), additional_data.id(), parent_scope.id(), NONE);
+    auto macro_scope = NodeRef(additional_data.tree(), macro_scope_id);
+
+    for (size_t i = 0; i < macro_node.parameters.size(); ++i) {
+      if (i >= args.size() || !args[i].valid()) {
+        auto target = macro_scope[Pointer(DataNode::convert_dot_to_ptr(macro_node.parameters[i]))];
+        target = nullptr;
+        continue;
+      }
+      set_child_from_node(macro_scope, macro_node.parameters[i], args[i]);
+    }
+
+    auto previous_additional_data = additional_data;
+    auto previous_current_loop_data = current_loop_data;
+    auto previous_tmp_sequence = tmp_sequence;
+    auto previous_output_stream = output_stream;
+    const bool previous_break_rendering = break_rendering;
+
+    std::ostringstream macro_output;
+    additional_data = macro_scope;
+    current_loop_data = additional_data["values"].append_child();
+    current_loop_data |= ryml::MAP;
+    tmp_sequence = additional_data["values"].append_child();
+    tmp_sequence |= ryml::SEQ;
+    output_stream = &macro_output;
+    break_rendering = false;
+
+    macro_call_depth += 1;
+    macro_node.body.accept(*this);
+    macro_call_depth -= 1;
+
+    output_stream = previous_output_stream;
+    break_rendering = previous_break_rendering;
+    additional_data = previous_additional_data;
+    current_loop_data = previous_current_loop_data;
+    tmp_sequence = previous_tmp_sequence;
+
+    additional_data.tree()->remove(macro_scope_id);
+    return macro_output.str();
   }
 
   void visit(const BlockNode& node) override {
@@ -452,7 +541,8 @@ class Renderer : public NodeVisitor {
       const auto value = function_data.callback(empty_args, additional_data);
       data_eval_stack.emplace_back(value);
     } else {
-      data_eval_stack.emplace_back(ConstNodeRef());
+      // Emplace a seed node
+      data_eval_stack.emplace_back(additional_data[node.ptr]);
       not_found_stack.emplace(&node);
     }
   }
@@ -563,7 +653,9 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::At: {
       const auto args = get_arguments<2>(node);
-      if (args[0].node.is_map()) {
+      if (!args[0].node.valid()) {
+        data_eval_stack.emplace_back(ConstNodeRef());
+      } else if (args[0].node.is_map()) {
         const auto key = native_to_string(args[1]);
         data_eval_stack.emplace_back(find_child_by_key(args[0].node, to_csubstr(key)));
       } else if (args[0].node.is_seq()) {
@@ -765,6 +857,9 @@ class Renderer : public NodeVisitor {
       auto args = get_argument_vector(node);
       data_eval_stack.emplace_back(node.callback(args, additional_data));
     } break;
+    case Op::Macro: {
+      make_result(evaluate_macro(node));
+    } break;
     case Op::Super: {
       const auto args = get_argument_vector(node);
       const size_t old_level = current_level;
@@ -812,6 +907,104 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Hex: {
       make_result(std::format("{:x}", native_to_int(get_arguments<1>(node)[0]).value_or(0)));
+    } break;
+    case Op::Store: {
+      const auto num_args = get_argument_vector(node).size();
+      if (num_args == 2) {
+        // store(path, value)
+        const auto args = get_arguments<2>(node);
+        ryml::Pointer ptr{ native_to_string(args[0]) };
+        if (args[1].node.is_map()) {
+          additional_data["store"][ptr] |= ryml::MAP;
+          additional_data.tree()->duplicate(args[1].node.tree(), args[1].node.id(), additional_data["store"][ptr].id(), additional_data["store"][ptr].last_child().id());
+        } else if (args[1].node.is_seq()) {
+          additional_data["store"][ptr] |= ryml::SEQ;
+          additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), additional_data["store"][ptr].id(), additional_data["store"][ptr].last_child().id());
+        } else {
+          additional_data["store"][ptr] << args[1].node.val();
+        }
+      } else if (num_args == 3) {
+        // store(path, key, value)
+        const auto args = get_arguments<3>(node);
+        ryml::Pointer ptr{ native_to_string(args[0]) };
+        auto key = native_to_string(args[1]);
+        if (key.front() == '/')
+          ptr = ptr / key;
+        else
+          ptr = ptr / key;
+        additional_data["store"][ptr] << args[2].node.val();
+      }
+      make_null_result();
+    } break;
+    case Op::Fetch: {
+      const auto num_args = get_argument_vector(node).size();
+      if (num_args == 1) {
+        // fetch(path)
+        const auto args = get_arguments<1>(node);
+        ryml::Pointer ptr{ native_to_string(args[0]) };
+        data_eval_stack.emplace_back(additional_data["store"][ptr]);
+      } else if (num_args == 2) {
+        // fetch(path, key)
+        const auto args = get_arguments<2>(node);
+        ryml::Pointer ptr{ native_to_string(args[0]) };
+        auto key = args[1].node.val();
+        data_eval_stack.emplace_back(additional_data["store"][ptr][key]);
+      }
+    } break;
+    case Op::PushBack: {
+      const auto num_args = get_argument_vector(node).size();
+      if (num_args == 2) {
+        // push_back(path, value)
+        const auto args = get_arguments<2>(node);
+        ryml::Pointer ptr{ native_to_string(args[0]) };
+        auto temp = additional_data["store"];
+        if (!temp.contains(ptr)) {
+          temp[ptr] |= ryml::SEQ;
+        }
+        if (args[1].node.is_map()) {
+          additional_data.tree()->duplicate(args[1].node.tree(), args[1].node.id(), additional_data["store"][ptr].id(), additional_data["store"][ptr].last_child().id());
+        } else if (args[1].node.is_seq()) {
+          additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), additional_data["store"][ptr].id(), additional_data["store"][ptr].last_child().id());
+        } else {
+          additional_data["store"][ptr].append_child() << args[1].node.val();
+        }
+      } else if (num_args == 3) {
+        // push_back(path, key, value)
+        const auto args = get_arguments<3>(node);
+        ryml::Pointer ptr{ native_to_string(args[0]) };
+        auto key = native_to_string(args[1]);
+        if (key.front() == '/')
+          ptr = ptr / ryml::Pointer{ key };
+        else
+          ptr = ptr / key;
+        if (!additional_data["store"].contains(ptr)) {
+          additional_data["store"][ptr] |= ryml::SEQ;
+        }
+        additional_data["store"][ptr].append_child() << args[2].node.val();
+      }
+      make_null_result();
+    } break;
+    case Op::Erase: {
+      const auto args = get_arguments<1>(node);
+      ryml::Pointer ptr{ native_to_string(args[0]) };
+      if (additional_data["store"].contains(ptr))
+        additional_data.tree()->remove(additional_data["store"][ptr].id());
+      make_null_result();
+    } break;
+    case Op::Unique: {
+      const auto args = get_arguments<1>(node);
+      auto filtered = tmp_sequence.append_child();
+      filtered |= ryml::SEQ;
+      std::unordered_set<std::string> seen;
+      for (const auto& i : args[0].node.children()) {
+        auto val_str = native_to_string(NativeNodeRef(i));
+        if (seen.find(val_str) == seen.end()) {
+          seen.insert(val_str);
+          size_t last_append = NONE;
+          last_append = filtered.tree()->duplicate(i.tree(), i.id(), filtered.id(), last_append);
+        }
+      }
+      data_eval_stack.emplace_back(filtered);
     } break;
     case Op::None:
       break;
@@ -991,6 +1184,15 @@ class Renderer : public NodeVisitor {
     new_node << ryml::key(last_key);
   }
 
+  void visit(const MacroStatementNode&) override {
+    // Macro declarations do not produce output during normal rendering.
+  }
+
+  void visit(const ExpressionStatementNode& node) override {
+    // Statement expressions are evaluated for side effects only.
+    eval_expression_list(node.expression);
+  }
+
 public:
   explicit Renderer(const RenderConfig& config, const TemplateStorage& template_storage, const FunctionStorage& function_storage)
       : config(config), template_storage(template_storage), function_storage(function_storage) {}
@@ -1004,12 +1206,10 @@ public:
     }
 
     additional_data = shared_additional_data;
-    current_loop_data = additional_data["values"].append_child();// << ryml::key("loop");
+    current_loop_data = additional_data.append_child() << ryml::key("loop");
     current_loop_data |= ryml::MAP;
-    // current_loop_data.set_key("loop");
-    tmp_sequence = additional_data["values"].append_child();// << ryml::key("_tmp");
+    tmp_sequence = additional_data.append_child() << ryml::key("_tmp");
     tmp_sequence |= ryml::SEQ;
-    // tmp_sequence.set_key("_tmp");
 
     template_stack.emplace_back(current_template);
     current_template->root.accept(*this);
@@ -1017,7 +1217,6 @@ public:
     data_eval_stack.clear();
   }
 };
-
 } // namespace inja
 
 #endif // INCLUDE_INJA_RENDERER_HPP_

@@ -42,8 +42,8 @@ public:
   Environment(const std::filesystem::path& input_path, const std::filesystem::path& output_path): input_path(input_path), output_path(output_path) {setup_data();}
 
   void setup_data() {
-    temp_data_tree.reserve_arena(2 * 1024 * 1024); // Reserve 2MB
-    temp_data_tree.add_flags(inja::Tree::TREEF_NO_ARENA_REALLOC);
+    // temp_data_tree.reserve_arena(2 * 1024 * 1024); // Reserve 2MB
+    // temp_data_tree.add_flags(inja::Tree::TREEF_NO_ARENA_REALLOC);
   }
 
   /// Sets the opener and closer for template statements

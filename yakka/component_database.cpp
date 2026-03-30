@@ -54,13 +54,13 @@ component_database::~component_database()
 
 void component_database::insert(ryml::csubstr id, const path &config_file)
 {
-  auto pointer         = ryml::Pointer{ ryml::csubstr{ "components" } } / id;
+  auto pointer         = ryml::Pointer{ "components" } / id;
   auto components_node = database.rootref()[pointer]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "components", std::string{ id } }, true);
-  if (!components_node.is_seq()) {
+  if (components_node.is_seed() || !components_node.is_seq()) {
     components_node |= ryml::SEQ;
   }
   auto entry = components_node.append_child();
-  entry.set_val(c4::to_csubstr(config_file.generic_string()));
+  entry << config_file.generic_string();
   database_is_dirty = true;
 }
 

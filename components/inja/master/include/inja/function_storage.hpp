@@ -69,8 +69,14 @@ public:
     Upper,
     Super,
     Join,
+    Macro,
     Callback,
     Hex,
+    Store,
+    Fetch,
+    PushBack,
+    Erase,
+    Unique,
     None,
   };
 
@@ -116,6 +122,14 @@ private:
       {std::make_pair("super", 1), FunctionData {Operation::Super}},
       {std::make_pair("join", 2), FunctionData {Operation::Join}},
       {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
+      {std::make_pair("store", 2), FunctionData {Operation::Store}},
+      {std::make_pair("store", 3), FunctionData {Operation::Store}},
+      {std::make_pair("fetch", 1), FunctionData {Operation::Fetch}},
+      {std::make_pair("fetch", 2), FunctionData {Operation::Fetch}},
+      {std::make_pair("push_back", 2), FunctionData {Operation::PushBack}},
+      {std::make_pair("push_back", 3), FunctionData {Operation::PushBack}},
+      {std::make_pair("erase", 1), FunctionData {Operation::Erase}},
+      {std::make_pair("unique", 1), FunctionData {Operation::Unique}},
   };
 
 public:

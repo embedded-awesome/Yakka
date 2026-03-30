@@ -23,9 +23,5 @@ std::string try_render_file(inja::Environment &env, const std::string &filename,
   }
 }
 
-void add_common_commands(inja::Environment &env)
-{
-  
-}
 
 } // namespace yakka

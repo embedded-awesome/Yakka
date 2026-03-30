@@ -395,7 +395,17 @@ public:
         ConstImpl curr = *((ConstImpl const*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            curr = curr.find_child(ptr[i]);
+            csubstr seg = ptr[i];
+            if(curr.is_seq())
+            {
+                size_t pos = 0;
+                _RYML_CB_ASSERT(tree__->m_callbacks, seg.is_number() && from_chars(seg, &pos));
+                curr = curr.child(pos);
+            }
+            else
+            {
+                curr = curr.find_child(seg);
+            }
             _RYML_CB_ASSERT(tree__->m_callbacks, curr.valid());
         }
         return curr;
@@ -410,31 +420,54 @@ public:
         Impl curr = *((Impl*)this);
         for(size_t i = 0; i < ptr.size(); ++i)
         {
-            Impl ch = curr.find_child(ptr[i]);
-            if(!ch.valid())
+            csubstr seg = ptr[i];
+            if(curr.is_seq())
             {
-                if(i == ptr.size() - 1)
+                size_t pos = 0;
+                if(!(seg.is_number() && from_chars(seg, &pos)))
                 {
-                    // Last segment: return a seed node
-                    return NodeRef(curr.m_tree, curr.m_id, ptr[i]);
+                    _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment for sequence is not a non-negative integer");
+                }
+
+                size_t ch_id = curr.m_tree->child(curr.m_id, pos);
+                if(ch_id == NONE)
+                {
+                    if(i == ptr.size() - 1)
+                    {
+                        // Last segment: return a seed node at sequence position
+                        return NodeRef(curr.m_tree, curr.m_id, pos);
+                    }
+                    _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment not found");
+                }
+
+                curr = Impl(curr.m_tree, ch_id);
+            }
+            else
+            {
+                size_t ch_id = curr.m_tree->find_child(curr.m_id, seg);
+                if(ch_id == NONE)
+                {
+                    if(i == ptr.size() - 1)
+                    {
+                        // Last segment: return a seed node
+                        return NodeRef(curr.m_tree, curr.m_id, seg);
+                    }
+
+                    // Intermediate segment: create a map node
+                    Impl ch = curr.append_child();
+                    ch.set_key(seg);
+                    ch |= NodeType_e::MAP;
+                    curr = ch;
                 }
                 else
                 {
-                    // Intermediate segment: create the node
-                    ch = curr.append_child();
-                    ch.set_key(ptr[i]);
-                    ch |= NodeType_e::MAP;
-                }
-            } else {
-                if (!ch.is_map() && i < ptr.size() - 1){
-                    // Segment exists but is not a map, cannot navigate further
-                    _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment is not a map");
+                    Impl ch(curr.m_tree, ch_id);
+                    curr = ch;
                 }
             }
-            curr = ch;
         }
         // All segments exist
-        return curr;//NodeRef(curr.m_tree, curr.m_id, csubstr{});
+        return curr;
     }
 
     /** Navigate to a node using a Pointer path. O(num_segments * num_children).

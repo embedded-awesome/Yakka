@@ -31,6 +31,8 @@ class IncludeStatementNode;
 class ExtendsStatementNode;
 class BlockStatementNode;
 class SetStatementNode;
+class MacroStatementNode;
+class ExpressionStatementNode;
 
 class NodeVisitor {
 public:
@@ -52,6 +54,8 @@ public:
   virtual void visit(const ExtendsStatementNode& node) = 0;
   virtual void visit(const BlockStatementNode& node) = 0;
   virtual void visit(const SetStatementNode& node) = 0;
+  virtual void visit(const MacroStatementNode& node) = 0;
+  virtual void visit(const ExpressionStatementNode& node) = 0;
 };
 
 /*!
@@ -365,6 +369,32 @@ public:
   ExpressionListNode expression;
 
   explicit SetStatementNode(const std::string& key, size_t pos): StatementNode(pos), key(key) {}
+
+  void accept(NodeVisitor& v) const override {
+    v.visit(*this);
+  }
+};
+
+class MacroStatementNode : public StatementNode {
+public:
+  const std::string name;
+  std::vector<std::string> parameters;
+  BlockNode body;
+  BlockNode* const parent;
+
+  explicit MacroStatementNode(BlockNode* const parent, const std::string& name, size_t pos)
+      : StatementNode(pos), name(name), parent(parent) {}
+
+  void accept(NodeVisitor& v) const override {
+    v.visit(*this);
+  }
+};
+
+class ExpressionStatementNode : public StatementNode {
+public:
+  ExpressionListNode expression;
+
+  explicit ExpressionStatementNode(size_t pos): StatementNode(pos) {}
 
   void accept(NodeVisitor& v) const override {
     v.visit(*this);

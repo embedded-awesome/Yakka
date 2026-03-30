@@ -153,7 +153,8 @@ public:
   const ryml::Pointer _replaces_components_pointer = ryml::Pointer("/replaces/components");
 
   // SLC specific
-  ryml::Tree template_contributions;
+  // ryml::Tree template_contributions;
+  ryml::NodeRef template_contributions;
   std::unordered_set<c4::csubstr> slc_required;
   std::unordered_set<c4::csubstr> slc_provided;
   std::map<c4::csubstr, ryml::ConstNodeRef> slc_recommended;

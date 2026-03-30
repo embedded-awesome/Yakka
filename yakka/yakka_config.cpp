@@ -163,10 +163,13 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
           res.status = 500;
           return;
         }
-        ryml::Tree node = ryml::parse_in_arena(ryml::to_csubstr(*file_content));
+        // ryml::Tree node = ryml::parse_in_arena(ryml::to_csubstr(*file_content));
         // Merge data from the project file
         // const auto project_json = ryml_to_json(node.crootref());
-        json_node_merge(ryml::Pointer{"/data"}, project_summary, node.rootref());
+        auto node = project_summary["temp"].append_child();
+        node |= ryml::MAP;
+        ryml::parse_in_arena(ryml::to_csubstr(*file_content), node);
+        json_node_merge(ryml::Pointer{"/data"}, project_summary["data"], node);
       }
 
       // std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

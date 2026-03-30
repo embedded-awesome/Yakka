@@ -47,6 +47,7 @@ class Parser {
   std::stack<IfStatementNode*> if_statement_stack;
   std::stack<ForStatementNode*> for_statement_stack;
   std::stack<BlockStatementNode*> block_statement_stack;
+  std::stack<MacroStatementNode*> macro_statement_stack;
 
   void throw_parser_error(const std::string& message) const {
     INJA_THROW(ParserError(message, lexer.current_position()));
@@ -231,11 +232,16 @@ class Parser {
 
           auto function_data = function_storage.find_function(func->name, func->number_args);
           if (function_data.operation == FunctionStorage::Operation::None) {
-            throw_parser_error("unknown function " + func->name);
-          }
-          func->operation = function_data.operation;
-          if (function_data.operation == FunctionStorage::Operation::Callback) {
-            func->callback = function_data.callback;
+            const auto macro_it = tmpl.macro_storage.find(std::make_pair(func->name, func->number_args));
+            if (macro_it == tmpl.macro_storage.end()) {
+              throw_parser_error("unknown function " + func->name);
+            }
+            func->operation = FunctionStorage::Operation::Macro;
+          } else {
+            func->operation = function_data.operation;
+            if (function_data.operation == FunctionStorage::Operation::Callback) {
+              func->callback = function_data.callback;
+            }
           }
           arguments.emplace_back(func);
 
@@ -388,11 +394,16 @@ class Parser {
         // search store for defined function with such name and number of args
         auto function_data = function_storage.find_function(func->name, func->number_args);
         if (function_data.operation == FunctionStorage::Operation::None) {
-          throw_parser_error("unknown function " + func->name);
-        }
-        func->operation = function_data.operation;
-        if (function_data.operation == FunctionStorage::Operation::Callback) {
-          func->callback = function_data.callback;
+          const auto macro_it = tmpl.macro_storage.find(std::make_pair(func->name, func->number_args));
+          if (macro_it == tmpl.macro_storage.end()) {
+            throw_parser_error("unknown function " + func->name);
+          }
+          func->operation = FunctionStorage::Operation::Macro;
+        } else {
+          func->operation = function_data.operation;
+          if (function_data.operation == FunctionStorage::Operation::Callback) {
+            func->callback = function_data.callback;
+          }
         }
         arguments.emplace_back(func);
       } break;
@@ -598,8 +609,82 @@ class Parser {
       if (!parse_expression(tmpl, closing)) {
         return false;
       }
+    } else if (tok.text == static_cast<decltype(tok.text)>("macro")) {
+      get_next_token();
+
+      if (tok.kind != Token::Kind::Id) {
+        throw_parser_error("expected macro name, got '" + tok.describe() + "'");
+      }
+
+      const Token name_token = tok;
+      const std::string macro_name = static_cast<std::string>(tok.text);
+
+      get_next_token();
+      if (tok.kind != Token::Kind::LeftParen) {
+        throw_parser_error("expected left parenthesis, got '" + tok.describe() + "'");
+      }
+
+      std::vector<std::string> parameters;
+      get_next_token();
+      if (tok.kind != Token::Kind::RightParen) {
+        for (;;) {
+          if (tok.kind != Token::Kind::Id) {
+            throw_parser_error("expected parameter name, got '" + tok.describe() + "'");
+          }
+          parameters.emplace_back(static_cast<std::string>(tok.text));
+
+          get_next_token();
+          if (tok.kind == Token::Kind::Comma) {
+            get_next_token();
+            continue;
+          }
+
+          if (tok.kind != Token::Kind::RightParen) {
+            throw_parser_error("expected right parenthesis, got '" + tok.describe() + "'");
+          }
+          break;
+        }
+      }
+
+      auto macro_statement_node =
+          std::make_shared<MacroStatementNode>(current_block, macro_name, name_token.text.data() - tmpl.content.c_str());
+      macro_statement_node->parameters = std::move(parameters);
+
+      auto success = tmpl.macro_storage.emplace(std::make_pair(macro_statement_node->name, static_cast<int>(macro_statement_node->parameters.size())),
+                                                macro_statement_node);
+      if (!success.second) {
+        throw_parser_error("macro with the name '" + macro_statement_node->name + "' and arity " +
+                           std::to_string(macro_statement_node->parameters.size()) + " does already exist");
+      }
+
+      current_block->nodes.emplace_back(macro_statement_node);
+      macro_statement_stack.emplace(macro_statement_node.get());
+      current_block = &macro_statement_node->body;
+
+      get_next_token();
+    } else if (tok.text == static_cast<decltype(tok.text)>("endmacro")) {
+      if (macro_statement_stack.empty()) {
+        throw_parser_error("endmacro without matching macro");
+      }
+
+      auto& macro_statement_data = macro_statement_stack.top();
+      get_next_token();
+
+      current_block = macro_statement_data->parent;
+      macro_statement_stack.pop();
     } else {
-      return false;
+      // Allow side-effect function calls in statement blocks, e.g. {% store(...) %}
+      get_peek_token();
+      if (tok.kind == Token::Kind::Id && peek_tok.kind == Token::Kind::LeftParen) {
+        auto expression_statement_node = std::make_shared<ExpressionStatementNode>(tok.text.data() - tmpl.content.c_str());
+        current_block->nodes.emplace_back(expression_statement_node);
+        current_expression_list = &expression_statement_node->expression;
+        if (!parse_expression(tmpl, closing)) {
+          return false;
+        }
+      } else {
+        return false;
+      }
     }
     return true;
   }
@@ -617,6 +702,9 @@ class Parser {
         }
         if (!for_statement_stack.empty()) {
           throw_parser_error("unmatched for");
+        }
+        if (!macro_statement_stack.empty()) {
+          throw_parser_error("unmatched macro");
         }
       }
         current_block = nullptr;

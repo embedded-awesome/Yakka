@@ -327,10 +327,11 @@ int main(int argc, char **argv)
   if (result["data"].count() != 0) {
     spdlog::info("Processing additional data: {}", result["data"].as<std::string>());
     const auto additional_data = "{" + result["data"].as<std::string>() + "}";
-    ryml::Tree data       = ryml::parse_in_arena(ryml::to_csubstr(additional_data));
-    // ryml::Tree json_data   = ryml_to_json(yaml_data.crootref());
-    // spdlog::info("Additional data: {}", json_data.dump());
-    yakka::json_node_merge(ryml::Pointer{ "data" }, project.project_summary, data.crootref(), &project.project_schema);
+    // ryml::Tree data       = ryml::parse_in_arena(ryml::to_csubstr(additional_data));
+    auto node = project.project_summary["temp"].append_child();
+    node |= ryml::MAP;
+    ryml::parse_in_arena(ryml::to_csubstr(additional_data), node);
+    yakka::merge_nodes(project.project_summary["data"], node);
   }
 
   t1 = std::chrono::high_resolution_clock::now();

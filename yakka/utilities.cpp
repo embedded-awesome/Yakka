@@ -24,7 +24,6 @@
 
 namespace yakka {
 
-
 /*
 // Execute with admin
 if(0 == CreateProcess(argv[2], params, NULL, NULL, false, 0, NULL, NULL, &si, &pi)) {
@@ -235,8 +234,6 @@ std::string generate_project_name(const component_list_t &components, const feat
   return project_name;
 }
 
-
-
 /**
  * @brief Merges a node into a merge_target node according to the rules defined in the provided schema, if any.
  *       If no schema is provided, the node is merged according to the default rules: scalars are overwritten, sequences are concatenated, and maps are merged with new keys added and existing keys overwritten.
@@ -248,20 +245,17 @@ std::string generate_project_name(const component_list_t &components, const feat
 static void copy_node_recursive(ryml::ConstNodeRef source, ryml::NodeRef destination)
 {
   if (source.is_map()) {
-    destination.clear();
     destination |= ryml::MAP;
     destination.tree()->duplicate_children(source.tree(), source.id(), destination.id(), c4::yml::NONE);
     return;
   }
 
   if (source.is_seq()) {
-    destination.clear();
     destination |= ryml::SEQ;
     destination.tree()->duplicate_children(source.tree(), source.id(), destination.id(), c4::yml::NONE);
     return;
   }
 
-  destination.clear();
   if (source.has_val()) {
     destination.set_val(source.val());
   }
@@ -277,6 +271,56 @@ static void append_duplicate_node(ryml::ConstNodeRef source, ryml::NodeRef desti
 {
   const auto after = destination_parent.num_children() > 0 ? destination_parent.last_child().id() : c4::yml::NONE;
   destination_parent.tree()->duplicate(source.tree(), source.id(), destination_parent.id(), after);
+}
+
+void merge_nodes(ryml::NodeRef dst, ryml::ConstNodeRef src)
+{
+  // If src is a map
+  if (src.is_map()) {
+    // dst.to_map(); // ensure type
+    if (!dst.has_val() && !dst.is_seq())
+      dst |= ryml::MAP;
+    
+    if (!dst.is_map()) {
+      spdlog::error("Merging map into non-map node. Source: '{}', Destination: '{}'", src.key(), dst.key());
+      return;
+    }
+
+    for (auto const &ch: src.children()) {
+      auto key       = ch.key();
+      auto dst_child = dst.has_child(key) ? dst.at(key) : dst.append_child();
+      dst_child << ryml::key(key);
+
+      merge_nodes(dst_child, ch);
+    }
+  }
+  // If src is a sequence
+  else if (src.is_seq()) {
+    // dst.to_seq(); // ensure type
+    if (!dst.has_val() && !dst.is_map())
+      dst |= ryml::SEQ;
+    if (!dst.is_seq()) {
+      spdlog::error("Merging sequence into non-sequence node. Source: '{}', Destination: '{}'", src.key(), dst.key());
+      return;
+    }
+
+    for (auto const &ch: src.children()) {
+      auto dst_child = dst.append_child();
+      merge_nodes(dst_child, ch);
+    }
+  }
+  // Scalar
+  else if (src.has_val()) {
+    if (dst.is_seq()) {
+      dst.append_child() << src.val();
+    } else if (dst.is_map()) {
+      spdlog::error("Merging scalar into map. Source: '{}', Destination: '{}'", src.key(), dst.key());
+    } else {
+      dst.set_val(src.val());
+    }
+  } else {
+    spdlog::error("Merging node with unknown type. Source: '{}', Destination: '{}'", src.key(), dst.key());
+  }
 }
 
 static void merge_node_default(ryml::NodeRef target, ryml::ConstNodeRef source)
@@ -331,12 +375,11 @@ void json_node_merge(ryml::Pointer path, ryml::NodeRef merge_target, ryml::Const
     return;
   }
 
-  auto target = path.empty() ? merge_target : merge_target[path];
-  if (!target.valid()) {
-    return;
-  }
-
-  merge_node_default(target, node);
+  // auto target = path.empty() ? merge_target : merge_target[path];
+  // if (!target.valid()) {
+  //   return;
+  // }
+  merge_node_default(merge_target, node);
 }
 
 ryml::csubstr component_dotname_to_id(const ryml::csubstr dotname)
@@ -386,18 +429,19 @@ std::string try_render_file(inja::Environment &env, const std::filesystem::path 
 
 void add_common_template_commands(inja::Environment &inja_env)
 {
-  inja_env.add_callback("dir", 1, [](inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     auto path = std::filesystem::path{ args[0].val<std::string>().value() };
-    return additional_data.rootref().append_child() << (path.has_filename() ? path.parent_path().string() : path.string());
+    return additional_data["values"].append_child() << (path.has_filename() ? path.parent_path().string() : path.string());
   });
-  inja_env.add_callback("not_dir", 1, [](inja::Arguments &args, inja::Tree &additional_data) {
-    return additional_data.rootref().append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.filename().string();
+  inja_env.add_callback("not_dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
+    return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.filename().string();
   });
-  inja_env.add_callback("parent_path", 1, [](inja::Arguments &args, inja::Tree &additional_data) {
-    return additional_data.rootref().append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.parent_path().string();
+  inja_env.add_callback("parent_path", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
+    return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.parent_path().string();
   });
-  inja_env.add_callback("glob", [](inja::Arguments &args, inja::Tree &additional_data) {
-    ryml::NodeRef aggregate = additional_data.rootref().append_child() << ryml::SEQ;
+  inja_env.add_callback("glob", [](inja::Arguments &args, inja::NodeRef additional_data) {
+    ryml::NodeRef aggregate = additional_data["values"].append_child();
+    aggregate |= ryml::SEQ;
     std::vector<std::string> string_args;
     for (const auto i: args)
       string_args.push_back(i.val<std::string>().value());
@@ -405,53 +449,53 @@ void add_common_template_commands(inja::Environment &inja_env)
       aggregate.append_child() << p.generic_string();
     return aggregate;
   });
-  inja_env.add_callback("absolute_dir", 1, [](inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("absolute_dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     const auto path = std::filesystem::path{ args[0].val<std::string>().value() };
-    return additional_data.rootref().append_child() << std::filesystem::absolute(path).generic_string();
+    return additional_data["values"].append_child() << std::filesystem::absolute(path).generic_string();
   });
-  inja_env.add_callback("absolute_path", 1, [](inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("absolute_path", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     const auto path = std::filesystem::path{ args[0].val<std::string>().value() };
-    return additional_data.rootref().append_child() << std::filesystem::absolute(path).generic_string();
+    return additional_data["values"].append_child() << std::filesystem::absolute(path).generic_string();
   });
-  inja_env.add_callback("relative_path", 1, [](inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("relative_path", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     auto path          = std::filesystem::path{ args[0].val<std::string>().value() };
     const auto current = std::filesystem::current_path();
     auto new_path      = std::filesystem::relative(path, current);
-    return additional_data.rootref().append_child() << new_path.generic_string();
+    return additional_data["values"].append_child() << new_path.generic_string();
   });
-  inja_env.add_callback("relative_path", 2, [](inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("relative_path", 2, [](inja::Arguments &args, inja::NodeRef additional_data) {
     const auto path1 = args[0].val<std::string>().value();
     const auto path2 = std::filesystem::absolute(args[1].val<std::string>().value());
-    return additional_data.rootref().append_child() << std::filesystem::relative(path1, path2).generic_string();
+    return additional_data["values"].append_child() << std::filesystem::relative(path1, path2).generic_string();
   });
-  inja_env.add_callback("extension", 1, [](inja::Arguments &args, inja::Tree &additional_data) {
-    return additional_data.rootref().append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.extension().string().substr(1);
+  inja_env.add_callback("extension", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
+    return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.extension().string().substr(1);
   });
-  inja_env.add_callback("filesize", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
-    return additional_data.rootref().append_child() << fs::file_size(args[0].val<std::string>().value());
+  inja_env.add_callback("filesize", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+    return additional_data["values"].append_child() << fs::file_size(args[0].val<std::string>().value());
   });
-  inja_env.add_callback("file_exists", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
-    return additional_data.rootref().append_child() << fs::exists(args[0].val<std::string>().value());
+  inja_env.add_callback("file_exists", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+    return additional_data["values"].append_child() << fs::exists(args[0].val<std::string>().value());
   });
-  inja_env.add_callback("hex2dec", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("hex2dec", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     std::string hex_string = args[0].val<std::string>().value();
-    return additional_data.rootref().append_child() << std::stoul(hex_string, nullptr, 16);
+    return additional_data["values"].append_child() << std::stoul(hex_string, nullptr, 16);
   });
-  inja_env.add_callback("read_file", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("read_file", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto file = std::ifstream(args[0].val<std::string>().value());
-    return additional_data.rootref().append_child() << std::string{ std::istreambuf_iterator<char>{ file }, {} };
+    return additional_data["values"].append_child() << std::string{ std::istreambuf_iterator<char>{ file }, {} };
   });
-  inja_env.add_callback("load_yaml", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("load_yaml", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
     if (std::filesystem::exists(file_path)) {
       auto file_content = yakka::get_file_contents<std::string>(file_path);
-      auto new_node     = additional_data.rootref().append_child();
+      auto new_node     = additional_data["values"].append_child();
       ryml::parse_in_arena(ryml::to_csubstr(*file_content), new_node);
       return new_node;
     }
     return ryml::NodeRef{};
   });
-  inja_env.add_callback("load_xml", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("load_xml", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
     if (std::filesystem::exists(file_path)) {
       pugi::xml_document doc;
@@ -464,52 +508,53 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return ryml::NodeRef{};
   });
-  inja_env.add_callback("load_json", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("load_json", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
     if (std::filesystem::exists(file_path)) {
       auto file_content = yakka::get_file_contents<std::string>(file_path);
-      auto new_node     = additional_data.rootref().append_child();
+      auto new_node     = additional_data["values"].append_child();
       ryml::parse_in_arena(ryml::to_csubstr(*file_content), new_node);
       return new_node;
     }
     return ryml::NodeRef{};
   });
-  inja_env.add_callback("quote", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("quote", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     std::stringstream ss;
     ss << std::quoted(args[0].val<std::string>().value());
-    return additional_data.rootref().append_child() << ss.str();
+    return additional_data["values"].append_child() << ss.str();
   });
-  inja_env.add_callback("replace", 3, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("replace", 3, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input  = args[0].val<std::string>().value();
     auto target = std::regex(args[1].val<std::string>().value());
     auto match  = args[2].val<std::string>().value();
-    return additional_data.rootref().append_child() << std::regex_replace(input, target, match);
+    return additional_data["values"].append_child() << std::regex_replace(input, target, match);
   });
-  inja_env.add_callback("regex_escape", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("regex_escape", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     const std::regex metacharacters(R"([\.\^\$\+\(\)\[\]\{\}\|\?])");
-    return additional_data.rootref().append_child() << std::regex_replace(input, metacharacters, "\\$&");
+    return additional_data["values"].append_child() << std::regex_replace(input, metacharacters, "\\$&");
   });
-  inja_env.add_callback("split", 2, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("split", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input  = args[0].val<std::string>().value();
     auto delim  = args[1].val<std::string>().value();
-    auto output = additional_data.rootref().append_child() << ryml::SEQ;
+    auto output = additional_data["values"].append_child();
+    output |= ryml::SEQ;
     for (auto word: std::views::split(input, delim)) {
       output.append_child() << std::string{ word.begin(), word.end() };
     }
     return output;
   });
-  inja_env.add_callback("starts_with", 2, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("starts_with", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     auto start = args[1].val<std::string>().value();
-    return additional_data.rootref().append_child() << (input.rfind(start, 0) == 0);
+    return additional_data["values"].append_child() << (input.rfind(start, 0) == 0);
   });
-  inja_env.add_callback("substring", 2, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("substring", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     auto index = args[1].val<int>().value();
-    return additional_data.rootref().append_child() << input.substr(index);
+    return additional_data["values"].append_child() << input.substr(index);
   });
-  inja_env.add_callback("trim", 1, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("trim", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) {
                   return !std::isspace(ch);
@@ -521,11 +566,11 @@ void add_common_template_commands(inja::Environment &inja_env)
                              })
                   .base(),
                 input.end());
-    return additional_data.rootref().append_child() << input;
+    return additional_data["values"].append_child() << input;
   });
-  inja_env.add_callback("filter", 2, [](const inja::Arguments &args, inja::Tree &additional_data) {
-    auto output = additional_data.rootref().append_child();
-    output << ryml::SEQ;
+  inja_env.add_callback("filter", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+    auto output = additional_data["values"].append_child();
+    output |= ryml::SEQ;
     const auto input       = args[0];
     const auto regex_match = std::regex(args[1].val<std::string>().value());
     for (const auto &item: input.children()) {
@@ -535,7 +580,7 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return output;
   });
-  inja_env.add_callback("join", 2, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("join", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto input = args[0];
     if (!input.valid() || !input.is_seq()) {
       spdlog::error("join() expects an array as the first argument");
@@ -549,28 +594,29 @@ void add_common_template_commands(inja::Environment &inja_env)
     for (it = it.next_sibling(); it.valid(); it = it.next_sibling()) {
       output += separator + it.val<std::string>().value();
     }
-    auto result = additional_data.rootref().append_child() << output;
+    auto result = additional_data["values"].append_child() << output;
     return result;
   });
-  inja_env.add_callback("find_json", 2, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("find_json", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input            = args[0];
     const auto search_key = args[1].val<std::string>().value();
-    auto output           = additional_data.rootref().append_child() << ryml::SEQ;
+    auto output           = additional_data["values"].append_child();
+    output |= ryml::SEQ;
     find_json_keys(input, search_key, "", output);
     return output;
   });
-  inja_env.add_callback("merge", 2, [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("merge", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto target = args[0];
     // const auto data = args[1];
     // TODO:
     // target.update(data, true);
     return target;
   });
-  inja_env.add_callback("concatenate", [](const inja::Arguments &args, inja::Tree &additional_data) {
+  inja_env.add_callback("concatenate", [](const inja::Arguments &args, inja::NodeRef additional_data) {
     std::string aggregate;
     for (const auto i: args)
       aggregate.append(i.val<std::string>().value());
-    auto result = additional_data.rootref().append_child() << aggregate;
+    auto result = additional_data["values"].append_child() << aggregate;
     return result;
   });
 }
@@ -629,7 +675,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
   auto right_root = right;
 
   // Early return if left data is missing
-  if (!left_root.valid()) {
+  if (!left_root.valid() || !left_root.contains("components")) {
     return true;
   }
 
@@ -647,11 +693,11 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
     remaining_pointer = ryml::Pointer{ std::vector<ryml::csubstr>(parts.begin() + 2, parts.end()) };
   }
 
+  const auto left_components  = left_root["components"];
+  const auto right_components = right_root["components"];
+
   // Define a lambda to process a component name using the captured 'left' and 'right' json objects
   const auto process_component = [&](ryml::csubstr component_name, const ryml::Pointer &pointer) -> ComparisonResult {
-    auto left_components  = left_root["components"];
-    auto right_components = right_root["components"];
-
     if (!left_components.valid() || !right_components.valid() || !left_components.is_map() || !right_components.is_map()) {
       return { true, "" };
     }
@@ -780,8 +826,8 @@ void xml_to_json(const pugi::xml_node &node, ryml::NodeRef &target)
   // Add attributes
   for (auto &attr: node.attributes()) {
     std::string key = "_" + std::string(attr.name());
-    target[c4::to_csubstr(key)] << attr.value();
-    // target.append_child() << ryml::key(key) << c4::to_csubstr(attr.value());
+    // target[c4::to_csubstr(key)] << attr.value();
+    target.append_child() << ryml::key(key) << attr.value();
   }
 
   // Add children
@@ -790,12 +836,11 @@ void xml_to_json(const pugi::xml_node &node, ryml::NodeRef &target)
       continue;
     }
 
-    ryml::csubstr key      = c4::to_csubstr(child.name());
-    ryml::NodeRef seq_node = target[key];
+    ryml::NodeRef seq_node = target[child.name()];
     if (!seq_node.valid()) {
       seq_node = target.append_child();
-      seq_node << ryml::key(key);
       seq_node |= ryml::SEQ;
+      seq_node.set_key_serialized(child.name());
     }
 
     auto new_child = seq_node.append_child();
@@ -993,8 +1038,8 @@ void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const sche
         // In a full implementation, would need to properly copy the entire subtree
         if (child.has_val()) {
           ryml::NodeRef new_child = target.append_child();
-          new_child.set_key(key);
-          new_child.set_val(child.val());
+          new_child << ryml::key(key);
+          new_child << child.val();
         }
       }
     }
@@ -1003,7 +1048,7 @@ void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const sche
     for (const auto &child: source.children()) {
       if (child.has_val()) {
         ryml::NodeRef new_child = target.append_child();
-        new_child.set_val(child.val());
+        new_child << child.val();
       }
     }
   }
@@ -1096,7 +1141,6 @@ void ryml_save_file(const std::filesystem::path &path, ryml::ConstNodeRef node)
       return;
     }
     file << ryml::emitrs_yaml<std::string>(node);
-    spdlog::info("Successfully saved ryml tree to file: {}", path.generic_string());
   } catch (const std::exception &e) {
     spdlog::error("Error saving ryml tree to file {}: {}", path.generic_string(), e.what());
   }

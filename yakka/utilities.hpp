@@ -40,6 +40,7 @@ namespace yakka {
 void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const schema* schema = nullptr);
 // void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema* schema = nullptr);
 void json_node_merge(ryml::Pointer path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema* schema = nullptr);
+void merge_nodes(ryml::NodeRef dst, ryml::ConstNodeRef src);
 
 std::pair<std::string, int> exec(const std::string &command_text, const std::string &arg_text);
 int exec(const std::string &command_text, const std::string &arg_text, std::function<void(std::string &)> function);

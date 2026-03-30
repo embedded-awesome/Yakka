@@ -346,3 +346,37 @@ $$ endif
     CHECK(env.render(string_template, data.rootref()) == "Hello Peter\n    You really are Peter\n");
   }
 }
+
+TEST_CASE("macros") {
+  inja::Environment env;
+  inja::Tree data;
+  auto root = data.rootref();
+  root |= ryml::MAP;
+  root["name"] << "Peter";
+
+  SUBCASE("basic invocation") {
+    CHECK(env.render("{% macro greet(name) %}Hello {{ name }}!{% endmacro %}{{ greet(\"Jeff\") }}", data.rootref()) == "Hello Jeff!");
+    CHECK(env.render("{% macro pair(a, b) %}[{{ a }},{{ b }}]{% endmacro %}{{ pair(1 + 1, upper(name)) }}", data.rootref()) == "[2,PETER]");
+  }
+
+  SUBCASE("declaration must appear before call") {
+    CHECK_THROWS(env.render("{{ greet(\"Jeff\") }}{% macro greet(name) %}Hello {{ name }}{% endmacro %}", data.rootref()));
+  }
+
+  SUBCASE("scope isolation") {
+    CHECK(env.render("{% set outside=\"outer\" %}{% macro demo(v) %}{% set outside=\"inner\" %}{% set local=v %}{{ local }}{% endmacro %}{{ demo(\"ok\") }}|{{ outside }}",
+                     data.rootref()) == "ok|outer");
+  }
+
+  SUBCASE("duplicate macro declaration") {
+    CHECK_THROWS(env.parse("{% macro demo(a) %}{{ a }}{% endmacro %}{% macro demo(a) %}{{ a }}{% endmacro %}"));
+  }
+
+  SUBCASE("arity mismatch") {
+    CHECK_THROWS(env.render("{% macro greet(name) %}Hello {{ name }}{% endmacro %}{{ greet() }}", data.rootref()));
+  }
+
+  SUBCASE("recursive macro is bounded") {
+    CHECK(env.render("{% macro repeat() %}{{ repeat() }}{% endmacro %}{{ repeat() }}", data.rootref()) == "");
+  }
+}

@@ -228,96 +228,30 @@ void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakk
 std::pair<std::string, int> task_engine::run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::NodeRef project_data)
 {
   std::string captured_output = "";
-  inja::Environment inja_env  = inja::Environment();
+  inja::Environment inja_env;
   auto curdir_path     = blueprint->blueprint->parent_path;
 
   add_common_template_commands(inja_env);
-
-  inja_env.add_callback("store", 3, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    if (args[0].valid() && args[1].valid()) {
-      ryml::Pointer ptr{ args[0].val() };
-      auto key = args[1].val<std::string>().value();
-      if (key.front() == '/')
-        ptr = ptr / key;
-      else
-        ptr = ptr / key;
-
-      additional_data.rootref()["store"][ptr] << args[2].val();
-    }
-    return ryml::NodeRef{};
+  inja_env.add_callback("$", 1, [&blueprint](inja::Arguments &args, ryml::NodeRef additional_data) {
+    return additional_data["values"].append_child() << blueprint->regex_matches[args[0].val<int>().value()];
   });
-  inja_env.add_callback("store", 2, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    ryml::Pointer ptr{ args[0].val() };
-    additional_data.rootref()["store"][ptr] << args[1].val();
-    return ryml::NodeRef{};
+  inja_env.add_callback("curdir", 0, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
+    return additional_data["values"].append_child() << curdir_path;
   });
-  inja_env.add_callback("push_back", 2, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    ryml::Pointer ptr{ args[0].val() };
-    if (!additional_data.rootref()["store"].contains(ptr)) {
-      additional_data.rootref()["store"][ptr] << ryml::SEQ;
-    }
-    additional_data.rootref()["store"][ptr].append_child() << args[1].val();
-    return ryml::NodeRef{};
+  inja_env.add_callback("render", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
+    return additional_data["values"].append_child() << try_render(inja_env, args[0].val<std::string>().value(), project.project_summary);
   });
-  inja_env.add_callback("push_back", 3, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    if (args[0].valid() && args[1].valid()) {
-      ryml::Pointer ptr{ args[0].val() };
-      auto key = args[1].val<std::string>().value();
-      if (key.front() == '/')
-        ptr = ptr / ryml::Pointer{ key };
-      else
-        ptr = ptr / key;
-
-      if (!additional_data.rootref()["store"].contains(ptr)) {
-        additional_data.rootref()["store"][ptr] << ryml::SEQ;
-      }
-      additional_data.rootref()["store"][ptr].append_child() << args[2].val();
-    }
-    return ryml::NodeRef{};
-  });
-  inja_env.add_callback("unique", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    auto filtered = additional_data.rootref().append_child() << ryml::SEQ;
-    std::unordered_set<ryml::csubstr> seen;
-    for (auto i: args[0].children())
-      seen.insert(i.val());
-    for (auto i: seen)
-      filtered.append_child() << i;
-    return filtered;
-  });
-
-  inja_env.add_callback("fetch", 2, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    ryml::Pointer ptr{ args[0].val() };
-    auto key = args[1].val();
-    return additional_data.rootref()["store"][ptr][key];
-  });
-  inja_env.add_callback("fetch", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    ryml::Pointer ptr{ args[0].val()};
-    return additional_data.rootref()["store"][ptr];
-  });
-  inja_env.add_callback("erase", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    ryml::Pointer ptr{ args[0].val() };
-    additional_data.rootref()["store"][ptr].clear();
-    return ryml::NodeRef{};
-  });
-  inja_env.add_callback("$", 1, [&blueprint](inja::Arguments &args, ryml::Tree &additional_data) {
-    return additional_data.rootref().append_child() << blueprint->regex_matches[args[0].val<int>().value()];
-  });
-  inja_env.add_callback("curdir", 0, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    return additional_data.rootref().append_child() << curdir_path;
-  });
-  inja_env.add_callback("render", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    return additional_data.rootref().append_child() << try_render(inja_env, args[0].val<std::string>().value(), project.project_summary);
-  });
-  inja_env.add_callback("render", 2, [&curdir_path, &inja_env, &project](inja::Arguments &args, ryml::Tree &additional_data) {
+  inja_env.add_callback("render", 2, [&curdir_path, &inja_env, &project](inja::Arguments &args, ryml::NodeRef additional_data) {
     auto backup               = curdir_path;
     curdir_path               = args[1].val();
     std::string render_output = try_render(inja_env, args[0].val<std::string>().value(), project.project_summary);
     curdir_path               = backup;
-    return additional_data.rootref().append_child() << render_output;
+    return additional_data["values"].append_child() << render_output;
   });
 
-  inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-    ryml::NodeRef aggregate = additional_data.rootref().append_child() << ryml::MAP;
+  inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
+    ryml::NodeRef aggregate = additional_data["values"].append_child();
+    aggregate |= ryml::MAP;
     auto path = ryml::Pointer{ args[0].val() };
     // Loop through components, check if object path exists, if so add it to the aggregate
     for (const auto node: project.project_summary["components"].children()) {
@@ -353,7 +287,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     }
     return aggregate;
   });
-  inja_env.add_callback("load_component", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
+  inja_env.add_callback("load_component", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
     // const auto component_name     = args[0].val<std::string>().value();
     const auto component_location = project.workspace.find_component(args[0].val());
     if (!component_location.has_value()) {

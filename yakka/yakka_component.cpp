@@ -26,7 +26,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
 
     // Parse with ryml (zero-copy parser)
     if (parent_node.valid()) {
-      ryml::parse_in_place(c4::to_substr(yaml_buffer), parent_node);
+      ryml::parse_in_arena(c4::to_csubstr(yaml_buffer), parent_node);
       root = parent_node;
     } else {
       tree = ryml::parse_in_place(c4::to_substr(yaml_buffer));

@@ -9,7 +9,7 @@ namespace yakka {
 
 process_return echo_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (command.valid() && command.has_val())
+  if (command.valid() && command.has_val() && !command.val().empty())
     captured_output = try_render(inja_env, command.val<std::string>().value(), project_summary);
 
   spdlog::get("console")->info("{}", captured_output);
@@ -100,8 +100,8 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
         std::string new_output      = prefix_node.valid() ? prefix_node.val<std::string>().value() : "";
         inja::Environment local_env = inja_env; // Create copy and override `$()` function
         const auto match_string     = command.find_child("match");
-        local_env.add_callback("reg", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-          auto node = additional_data.rootref().append_child() << sm[args[0].val<int>().value()].str();
+        local_env.add_callback("reg", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
+          auto node = additional_data["values"].append_child() << sm[args[0].val<int>().value()].str();
           return node;
         });
         for (; std::regex_search(captured_output, sm, regex_search);) {
@@ -159,8 +159,8 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
     std::string new_output      = prefix;
     inja::Environment local_env = inja_env; // Create copy and override `$()` function
     const auto match_string     = command.find_child("match");
-    local_env.add_callback("reg", 1, [&](inja::Arguments &args, ryml::Tree &additional_data) {
-      auto node = additional_data.rootref().append_child() << sm[args[0].val<int>().value()].str();
+    local_env.add_callback("reg", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
+      auto node = additional_data["values"].append_child() << sm[args[0].val<int>().value()].str();
       return node;
     });
     for (; std::regex_search(captured_output, sm, regex_search);) {
@@ -221,8 +221,8 @@ process_return template_command(std::string target, ryml::ConstNodeRef command, 
       }
 
       if (command.has_child("template")) {
-        template_string = try_render(inja_env, command["template"], project_summary);
-        captured_output = try_render(inja_env, template_string, render_data());
+        // template_string = try_render(inja_env, command["template"], project_summary);
+        captured_output = try_render(inja_env, command["template"], render_data());
         return { captured_output, 0 };
       }
     }
@@ -248,7 +248,7 @@ process_return save_command(std::string target, ryml::ConstNodeRef command, std:
 {
   std::string save_filename;
 
-  if (!command.valid() || (!command.has_val() && command.num_children() == 0))
+  if (!command.valid() || (command.val().empty() && command.num_children() == 0))
     save_filename = target;
   else
     save_filename = try_render(inja_env, command.val<std::string>().value(), project_summary);
@@ -260,7 +260,7 @@ process_return save_command(std::string target, ryml::ConstNodeRef command, std:
       return { "", -1 };
     }
     auto pointer     = ryml::Pointer{ save_filename.substr(6) };
-    auto target_node = project_data[pointer]; //ryml_navigate_path(project_data, pointer, true);
+    auto target_node = project_data.at(pointer); //ryml_navigate_path(project_data, pointer, true);
     if (target_node.valid()) {
       target_node << captured_output;
     }
@@ -290,7 +290,7 @@ process_return save_command(std::string target, ryml::ConstNodeRef command, std:
 // blueprint_commands["create_directory"] = [](std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env) -> yakka::process_return {
 process_return create_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (command.valid() && command.has_val()) {
+  if (command.valid() && !command.val().empty()) {
     std::string filename = "";
     try {
       filename = command.val<std::string>().value();
@@ -310,7 +310,7 @@ process_return create_command(std::string target, ryml::ConstNodeRef command, st
 // blueprint_commands["verify"] = [](std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env) -> yakka::process_return {
 process_return verify_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (!command.valid() || !command.has_val()) {
+  if (!command.valid() || command.val().empty()) {
     return { "", -1 };
   }
   std::string filename = command.val<std::string>().value();
@@ -327,7 +327,7 @@ process_return verify_command(std::string target, ryml::ConstNodeRef command, st
 // blueprint_commands["rm"] = [](std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env) -> yakka::process_return {
 process_return rm_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (!command.valid() || !command.has_val()) {
+  if (!command.valid() || command.val().empty()) {
     return { "", -1 };
   }
   std::string filename = command.val<std::string>().value();
@@ -353,7 +353,7 @@ process_return rm_command(std::string target, ryml::ConstNodeRef command, std::s
 // blueprint_commands["rmdir"] = [](std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env) -> yakka::process_return {
 process_return rmdir_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (!command.valid() || !command.has_val()) {
+  if (!command.valid() || command.val().empty()) {
     return { "", -1 };
   }
   std::string path = command.val<std::string>().value();
@@ -378,7 +378,7 @@ process_return pack_command(std::string target, ryml::ConstNodeRef command, std:
     spdlog::error("'pack' command requires 'data'\n");
     return { "", -1 };
   }
-  if (!format_node.valid() || !format_node.has_val()) {
+  if (!format_node.valid() || format_node.val().empty()) {
     spdlog::error("'pack' command requires 'format'\n");
     return { "", -1 };
   }
@@ -447,7 +447,7 @@ process_return copy_command(std::string target, ryml::ConstNodeRef command, std:
   ryml::ConstNodeRef source;
   try {
     auto destination_node = command.find_child("destination");
-    if (!destination_node.valid() || !destination_node.has_val()) {
+    if (!destination_node.valid() || destination_node.val().empty()) {
       spdlog::error("'copy' command missing 'destination'");
       return { "", -1 };
     }
@@ -457,7 +457,7 @@ process_return copy_command(std::string target, ryml::ConstNodeRef command, std:
       source = command.find_child("source");
     } else if (command.has_child("yaml_list")) {
       auto yaml_list_node = command.find_child("yaml_list");
-      if (!yaml_list_node.has_val()) {
+      if (yaml_list_node.val().empty()) {
         spdlog::error("'copy' command 'yaml_list' is not a string");
         return { "", -1 };
       }
@@ -479,7 +479,7 @@ process_return copy_command(std::string target, ryml::ConstNodeRef command, std:
       return { "", -1 };
     }
 
-    if (source.has_val() && !source.is_map() && !source.is_seq()) {
+    if (!source.val().empty() && !source.is_map() && !source.is_seq()) {
       auto source_string = try_render(inja_env, source.val<std::string>().value(), project_summary);
       std::filesystem::copy(source_string, destination, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
     } else if (source.is_seq()) {
@@ -526,7 +526,7 @@ process_return copy_command(std::string target, ryml::ConstNodeRef command, std:
 // blueprint_commands["cat"] = [](std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env) -> yakka::process_return {
 process_return cat_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (!command.valid() || !command.has_val()) {
+  if (!command.valid() || command.val().empty()) {
     return { "", -1 };
   }
   std::string filename = try_render(inja_env, command.val<std::string>().value(), project_summary);
