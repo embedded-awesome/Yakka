@@ -147,6 +147,7 @@ class Renderer : public NodeVisitor {
   ConstNodeRef data_input;
   std::ostream* output_stream {nullptr};
 
+  NodeRef template_scope_data;
   NodeRef additional_data;
   NodeRef current_loop_data;
   NodeRef tmp_sequence;
@@ -283,6 +284,26 @@ class Renderer : public NodeVisitor {
     for (const auto& frame : chain) {
       loop_frames.push_existing(frame);
     }
+  }
+
+  ConstNodeRef resolve_global_scope_reference(const DataNode& node) const {
+    constexpr std::string_view global_scope_name = "scope.global";
+    constexpr std::string_view global_scope_prefix = "scope.global.";
+
+    const std::string_view name = node.name;
+    if (name == global_scope_name) {
+      return ConstNodeRef(template_scope_data.tree(), template_scope_data.id());
+    }
+    if (!inja::string_view::starts_with(name, global_scope_prefix)) {
+      return ConstNodeRef{};
+    }
+
+    const auto suffix = name.substr(global_scope_prefix.size());
+    const auto ptr = Pointer(DataNode::convert_dot_to_ptr(suffix));
+    if (const auto from_template_scope = resolve_pointer(template_scope_data, ptr); from_template_scope.valid()) {
+      return from_template_scope;
+    }
+    return resolve_pointer(data_input, ptr);
   }
 
   void print_data(const NativeNodeRef& value) {
@@ -474,10 +495,18 @@ class Renderer : public NodeVisitor {
 
     std::ostringstream macro_output;
     additional_data = macro_scope;
-    current_loop_data = additional_data["values"].append_child();
+    current_loop_data = find_child_by_key(additional_data, to_csubstr("loop"));
+    if (!current_loop_data.valid()) {
+      current_loop_data = additional_data.append_child() << ryml::key("loop");
+    }
     current_loop_data |= ryml::MAP;
-    tmp_sequence = additional_data["values"].append_child();
+    current_loop_data.clear_children();
+    tmp_sequence = find_child_by_key(additional_data, to_csubstr("_tmp"));
+    if (!tmp_sequence.valid()) {
+      tmp_sequence = additional_data.append_child() << ryml::key("_tmp");
+    }
     tmp_sequence |= ryml::SEQ;
+    tmp_sequence.clear_children();
     output_stream = &macro_output;
     break_rendering = false;
 
@@ -522,6 +551,9 @@ class Renderer : public NodeVisitor {
     if (node.ptr.empty()) {
       // root document
       data_eval_stack.emplace_back(data_input);
+    } else if (const auto from_global_scope = resolve_global_scope_reference(node); from_global_scope.valid()) {
+      data_eval_stack.emplace_back(from_global_scope);
+      return;
     } else if (additional_data.contains(node.ptr)) {
     // const auto from_additional = resolve_pointer(additional_data, node.ptr);
     // if (from_additional.valid()) {
@@ -652,21 +684,43 @@ class Renderer : public NodeVisitor {
       data_eval_stack.emplace_back(resolve_pointer(container.node, child_ptr));
     } break;
     case Op::At: {
-      const auto args = get_arguments<2>(node);
-      if (!args[0].node.valid()) {
-        data_eval_stack.emplace_back(ConstNodeRef());
-      } else if (args[0].node.is_map()) {
-        const auto key = native_to_string(args[1]);
-        data_eval_stack.emplace_back(find_child_by_key(args[0].node, to_csubstr(key)));
-      } else if (args[0].node.is_seq()) {
-        const auto index = native_to_int(args[1]);
-        if (!index || *index < 0 || static_cast<size_t>(*index) >= args[0].node.num_children()) {
+      if (node.arguments.size() == 1) {
+        const auto arg = get_arguments<1>(node)[0];
+        const auto ptr_text = native_to_string(arg);
+        if (ptr_text.empty()) {
           data_eval_stack.emplace_back(ConstNodeRef());
         } else {
-          data_eval_stack.emplace_back(args[0].node.child(static_cast<size_t>(*index)));
+          const auto ptr = Pointer(ptr_text);
+          data_eval_stack.emplace_back(resolve_pointer(additional_data, ptr));
         }
       } else {
-        data_eval_stack.emplace_back(ConstNodeRef());
+        const auto args = get_arguments<2>(node);
+        ConstNodeRef container;
+
+        if (args[0].valid() && (args[0].node.is_map() || args[0].node.is_seq())) {
+          container = args[0].node;
+        } else {
+          const auto ptr_text = native_to_string(args[0]);
+          if (!ptr_text.empty()) {
+            container = resolve_pointer(additional_data, Pointer(ptr_text));
+          }
+        }
+
+        if (!container.valid()) {
+          data_eval_stack.emplace_back(ConstNodeRef());
+        } else if (container.is_map()) {
+          const auto key = native_to_string(args[1]);
+          data_eval_stack.emplace_back(find_child_by_key(container, to_csubstr(key)));
+        } else if (container.is_seq()) {
+          const auto index = native_to_int(args[1]);
+          if (!index || *index < 0 || static_cast<size_t>(*index) >= container.num_children()) {
+            data_eval_stack.emplace_back(ConstNodeRef());
+          } else {
+            data_eval_stack.emplace_back(container.child(static_cast<size_t>(*index)));
+          }
+        } else {
+          data_eval_stack.emplace_back(ConstNodeRef());
+        }
       }
     } break;
     case Op::Capitalize: {
@@ -908,31 +962,44 @@ class Renderer : public NodeVisitor {
     case Op::Hex: {
       make_result(std::format("{:x}", native_to_int(get_arguments<1>(node)[0]).value_or(0)));
     } break;
-    case Op::Store: {
-      const auto num_args = get_argument_vector(node).size();
+    case Op::SetAt: {
+      const auto args = get_argument_vector(node);
+      const auto num_args = args.size();
+      // Check the type of arg 0
+      const auto arg0 = args[0];
+      NodeRef arg0_ref;
+      if (!arg0.valid()) {
+        spdlog::error("setAt: invalid first path argument");
+        make_null_result();
+        break;
+      } else if (arg0.is_val()) {
+        arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
+      } else if (arg0.tree() == additional_data.tree()) {
+        // If the referenced node is already in the additional_data tree, we can use it directly
+        arg0_ref = NodeRef{additional_data.tree(), arg0.id()};
+      } else {
+        // Otherwise, we need to duplicate the node into the additional_data tree
+        arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
+      }
+
       if (num_args == 2) {
-        // store(path, value)
-        const auto args = get_arguments<2>(node);
-        ryml::Pointer ptr{ native_to_string(args[0]) };
-        if (args[1].node.is_map()) {
-          additional_data["store"][ptr] |= ryml::MAP;
-          additional_data.tree()->duplicate(args[1].node.tree(), args[1].node.id(), additional_data["store"][ptr].id(), additional_data["store"][ptr].last_child().id());
-        } else if (args[1].node.is_seq()) {
-          additional_data["store"][ptr] |= ryml::SEQ;
-          additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), additional_data["store"][ptr].id(), additional_data["store"][ptr].last_child().id());
+        // setAt(path, value)
+        if (args[1].is_map()) {
+          arg0_ref |= ryml::MAP;
+          additional_data.tree()->duplicate(args[1].tree(), args[1].id(), arg0_ref.id(), NONE);
+        } else if (args[1].is_seq()) {
+          arg0_ref |= ryml::SEQ;
+          additional_data.tree()->duplicate_children(args[1].tree(), args[1].id(), arg0_ref.id(), NONE);
         } else {
-          additional_data["store"][ptr] << args[1].node.val();
+          arg0_ref << args[1].val();
+          arg0_ref.set_key_serialized(arg0.val());
         }
       } else if (num_args == 3) {
         // store(path, key, value)
-        const auto args = get_arguments<3>(node);
-        ryml::Pointer ptr{ native_to_string(args[0]) };
-        auto key = native_to_string(args[1]);
-        if (key.front() == '/')
-          ptr = ptr / key;
-        else
-          ptr = ptr / key;
-        additional_data["store"][ptr] << args[2].node.val();
+        ryml::Pointer ptr{ args[1].val() };
+        arg0_ref[ptr] << args[2].val();
+        if (arg0_ref[ptr].is_map())
+          arg0_ref[ptr].set_key_serialized(ptr.back());
       }
       make_null_result();
     } break;
@@ -942,53 +1009,64 @@ class Renderer : public NodeVisitor {
         // fetch(path)
         const auto args = get_arguments<1>(node);
         ryml::Pointer ptr{ native_to_string(args[0]) };
-        data_eval_stack.emplace_back(additional_data["store"][ptr]);
+        data_eval_stack.emplace_back(additional_data[ptr]);
       } else if (num_args == 2) {
         // fetch(path, key)
         const auto args = get_arguments<2>(node);
         ryml::Pointer ptr{ native_to_string(args[0]) };
         auto key = args[1].node.val();
-        data_eval_stack.emplace_back(additional_data["store"][ptr][key]);
+        data_eval_stack.emplace_back(additional_data[ptr][key]);
       }
     } break;
     case Op::PushBack: {
-      const auto num_args = get_argument_vector(node).size();
+      const auto args = get_argument_vector(node);
+      const auto num_args = args.size();
+      // Check the type of arg 0
+      const auto arg0 = args[0];
+      NodeRef arg0_ref;
+      if (!arg0.valid()) {
+        spdlog::error("pushBack: invalid first path argument");
+        make_null_result();
+        break;
+      } else if (arg0.is_val()) {
+        arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
+      } else if (arg0.tree() == additional_data.tree()) {
+        // If the referenced node is already in the additional_data tree, we can use it directly
+        arg0_ref = NodeRef{additional_data.tree(), arg0.id()};
+      } else {
+        // Otherwise, we need to duplicate the node into the additional_data tree
+        arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
+      }
+
       if (num_args == 2) {
         // push_back(path, value)
         const auto args = get_arguments<2>(node);
-        ryml::Pointer ptr{ native_to_string(args[0]) };
-        auto temp = additional_data["store"];
-        if (!temp.contains(ptr)) {
-          temp[ptr] |= ryml::SEQ;
-        }
         if (args[1].node.is_map()) {
-          additional_data.tree()->duplicate(args[1].node.tree(), args[1].node.id(), additional_data["store"][ptr].id(), additional_data["store"][ptr].last_child().id());
+          additional_data.tree()->duplicate(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), NONE);
         } else if (args[1].node.is_seq()) {
-          additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), additional_data["store"][ptr].id(), additional_data["store"][ptr].last_child().id());
+          additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), NONE);
         } else {
-          additional_data["store"][ptr].append_child() << args[1].node.val();
+          if (!arg0_ref.is_seq()) {
+            arg0_ref |= ryml::SEQ;
+          }
+          arg0_ref.append_child() << args[1].node.val();
         }
       } else if (num_args == 3) {
         // push_back(path, key, value)
         const auto args = get_arguments<3>(node);
-        ryml::Pointer ptr{ native_to_string(args[0]) };
-        auto key = native_to_string(args[1]);
-        if (key.front() == '/')
-          ptr = ptr / ryml::Pointer{ key };
-        else
-          ptr = ptr / key;
-        if (!additional_data["store"].contains(ptr)) {
-          additional_data["store"][ptr] |= ryml::SEQ;
+        ryml::Pointer ptr{ native_to_string(args[1]) };
+        if (!arg0_ref.contains(ptr)) {
+          arg0_ref[ptr] |= ryml::SEQ;
         }
-        additional_data["store"][ptr].append_child() << args[2].node.val();
+        arg0_ref[ptr].append_child() << args[2].node.val();
       }
       make_null_result();
     } break;
     case Op::Erase: {
       const auto args = get_arguments<1>(node);
       ryml::Pointer ptr{ native_to_string(args[0]) };
-      if (additional_data["store"].contains(ptr))
-        additional_data.tree()->remove(additional_data["store"][ptr].id());
+      if (additional_data.contains(ptr))
+        additional_data.tree()->remove(additional_data[ptr].id());
       make_null_result();
     } break;
     case Op::Unique: {
@@ -1150,13 +1228,22 @@ class Renderer : public NodeVisitor {
 
   void visit(const SetStatementNode& node) override {
     const auto result = eval_expression_list(node.expression);
-    const Pointer ptr(DataNode::convert_dot_to_ptr(node.key));
+    constexpr std::string_view global_scope_prefix = "scope.global.";
+
+    NodeRef target_scope = additional_data;
+    std::string target_key = node.key;
+    if (inja::string_view::starts_with(target_key, global_scope_prefix)) {
+      target_scope = template_scope_data;
+      target_key = target_key.substr(global_scope_prefix.size());
+    }
+
+    const Pointer ptr(DataNode::convert_dot_to_ptr(target_key));
     if (ptr.empty()) {
       throw_renderer_error("invalid variable name", node);
       return;
     }
     const auto last_key = ptr.back();
-    auto target = additional_data[ptr];
+    auto target = target_scope[ptr];
     
     if (!result.valid()) {
       target = nullptr;
@@ -1168,7 +1255,7 @@ class Renderer : public NodeVisitor {
       auto parent = target.parent();
       parent.remove_child(last_key);
       // target.tree()->remove(target.id());
-      target = additional_data[ptr];
+      target = target_scope[ptr];
       if (parent.contains(last_key)) {
         spdlog::error("failed to overwrite existing variable");
         return;
@@ -1205,6 +1292,7 @@ public:
       not_found_stack.pop();
     }
 
+    template_scope_data = shared_additional_data;
     additional_data = shared_additional_data;
     current_loop_data = additional_data.append_child() << ryml::key("loop");
     current_loop_data |= ryml::MAP;

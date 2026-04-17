@@ -426,18 +426,29 @@ public:
                 size_t pos = 0;
                 if(!(seg.is_number() && from_chars(seg, &pos)))
                 {
-                    _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment for sequence is not a non-negative integer");
+                    // _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment for sequence is not a non-negative integer");
+                    return Impl(curr.m_tree, NONE); // to silence "control reaches end of non-void function" warning
+                }
+
+                // Avoid pathological growth from pointer paths while still
+                // allowing sparse sequence access to materialize missing items.
+                const size_t max_seq_index = curr.num_children() + 100;
+                if(pos > max_seq_index)
+                {
+                    // _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment for sequence exceeds max index");
+                    return Impl(curr.m_tree, NONE); // to silence "control reaches end of non-void function" warning
                 }
 
                 size_t ch_id = curr.m_tree->child(curr.m_id, pos);
                 if(ch_id == NONE)
                 {
-                    if(i == ptr.size() - 1)
+                    size_t n = curr.num_children();
+                    while(n <= pos)
                     {
-                        // Last segment: return a seed node at sequence position
-                        return NodeRef(curr.m_tree, curr.m_id, pos);
+                        curr.append_child();
+                        ++n;
                     }
-                    _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment not found");
+                    ch_id = curr.m_tree->child(curr.m_id, pos);
                 }
 
                 curr = Impl(curr.m_tree, ch_id);
@@ -455,7 +466,7 @@ public:
 
                     // Intermediate segment: create a map node
                     Impl ch = curr.append_child();
-                    ch.set_key(seg);
+                    ch.set_key_serialized(seg);
                     ch |= NodeType_e::MAP;
                     curr = ch;
                 }

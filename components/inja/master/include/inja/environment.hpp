@@ -165,7 +165,7 @@ public:
   std::ostream& render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data) {
     NodeRef additional_data = temp_data_tree.rootref().append_child();
     additional_data |= ryml::MAP;
-    additional_data["store"] |= ryml::MAP;
+    // additional_data["store"] |= ryml::MAP;
     additional_data["values"] |= ryml::SEQ;
     Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data, additional_data);
     temp_data_tree.remove(additional_data.id());

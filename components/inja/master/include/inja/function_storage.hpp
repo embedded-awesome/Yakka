@@ -72,7 +72,7 @@ public:
     Macro,
     Callback,
     Hex,
-    Store,
+    SetAt,
     Fetch,
     PushBack,
     Erase,
@@ -90,6 +90,7 @@ private:
   const int VARIADIC {-1};
 
   std::map<std::pair<std::string, int>, FunctionData> function_storage = {
+      {std::make_pair("at", 1), FunctionData {Operation::At}},
       {std::make_pair("at", 2), FunctionData {Operation::At}},
       {std::make_pair("capitalize", 1), FunctionData {Operation::Capitalize}},
       {std::make_pair("default", 2), FunctionData {Operation::Default}},
@@ -122,8 +123,8 @@ private:
       {std::make_pair("super", 1), FunctionData {Operation::Super}},
       {std::make_pair("join", 2), FunctionData {Operation::Join}},
       {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
-      {std::make_pair("store", 2), FunctionData {Operation::Store}},
-      {std::make_pair("store", 3), FunctionData {Operation::Store}},
+      {std::make_pair("setAt", 2), FunctionData {Operation::SetAt}},
+      {std::make_pair("setAt", 3), FunctionData {Operation::SetAt}},
       {std::make_pair("fetch", 1), FunctionData {Operation::Fetch}},
       {std::make_pair("fetch", 2), FunctionData {Operation::Fetch}},
       {std::make_pair("push_back", 2), FunctionData {Operation::PushBack}},
