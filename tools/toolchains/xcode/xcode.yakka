@@ -18,6 +18,7 @@ flags:
       - -ffunction-sections
       - -fdata-sections
       - -Werror -Wpedantic -Wall
+      - -Wno-deprecated-literal-operator
       - -g
 
   ld:
