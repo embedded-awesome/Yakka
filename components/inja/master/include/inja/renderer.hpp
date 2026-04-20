@@ -970,6 +970,7 @@ class Renderer : public NodeVisitor {
       NodeRef arg0_ref;
       if (!arg0.valid()) {
         spdlog::error("setAt: invalid first path argument");
+        throw_renderer_error("invalid first path argument", node);
         make_null_result();
         break;
       } else if (arg0.is_val()) {
@@ -1057,8 +1058,18 @@ class Renderer : public NodeVisitor {
         ryml::Pointer ptr{ native_to_string(args[1]) };
         if (!arg0_ref.contains(ptr)) {
           arg0_ref[ptr] |= ryml::SEQ;
+          arg0_ref[ptr].set_key_serialized(ptr.back());
         }
-        arg0_ref[ptr].append_child() << args[2].node.val();
+        if (args[2].node.is_map()) {
+          additional_data.tree()->duplicate(args[2].node.tree(), args[2].node.id(), arg0_ref[ptr].id(), NONE);
+        } else if (args[2].node.is_seq()) {
+          additional_data.tree()->duplicate_children(args[2].node.tree(), args[2].node.id(), arg0_ref[ptr].id(), NONE);
+        } else {
+          if (!arg0_ref[ptr].is_seq()) {
+            arg0_ref[ptr] |= ryml::SEQ;
+          }
+          arg0_ref[ptr].append_child() << args[2].node.val();
+        }
       }
       make_null_result();
     } break;
@@ -1158,6 +1169,10 @@ class Renderer : public NodeVisitor {
     });
 
     for (const auto& child : children) {
+      if (!child.valid() || !child.has_parent()) {
+        throw_renderer_error("child is not valid", node);
+        continue;
+      }
       loop_frames.push_object(child.key(), child, index, size);
       sync_current_loop_data_from_frames();
 
