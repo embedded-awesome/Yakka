@@ -34,6 +34,7 @@ requires:
     - rapidyaml_json
     - rapidtoml
     - blake3
+    - libsodium
     - pugixml
 
 supports:

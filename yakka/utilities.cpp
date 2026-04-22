@@ -5,8 +5,11 @@
 #include "glob/glob.h"
 #include "yakka_schema.hpp"
 #include "blake3.h"
+#include "sodium/crypto_hash_sha256.h"
 #include "pugixml.hpp"
 #include "rapidyaml_json.hpp"
+#define XXH_INLINE_ALL
+#include "../components/rapidhash/v3/collisions/allcodecs/xxhash.h"
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 #include <concepts>
@@ -21,6 +24,7 @@
 #include <iomanip>
 #include <cctype>
 #include <filesystem>
+#include <sstream>
 
 namespace yakka {
 
@@ -427,8 +431,52 @@ std::string try_render_file(inja::Environment &env, const std::filesystem::path 
   return try_render_file(env, file_path.string(), data);
 }
 
+static std::string bytes_to_hex(const unsigned char *bytes, std::size_t len)
+{
+  std::ostringstream out;
+  out << std::hex << std::setfill('0');
+  for (std::size_t i = 0; i < len; ++i) {
+    out << std::setw(2) << static_cast<unsigned int>(bytes[i]);
+  }
+  return out.str();
+}
+
+static std::string u64_to_hex(uint64_t value)
+{
+  std::ostringstream out;
+  out << std::hex << std::setfill('0') << std::setw(16) << value;
+  return out.str();
+}
+
+static std::string template_arg_to_string(ryml::ConstNodeRef arg)
+{
+  if (!arg.valid()) {
+    return {};
+  }
+  if (arg.has_val()) {
+    return arg.val<std::string>().value();
+  }
+  return ryml::emitrs_json<std::string>(arg);
+}
+
 void add_common_template_commands(inja::Environment &inja_env)
 {
+  inja_env.add_callback("sha256sum", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+    const auto input = template_arg_to_string(args[0]);
+    unsigned char digest[crypto_hash_sha256_BYTES];
+    if (crypto_hash_sha256(digest,
+                           reinterpret_cast<const unsigned char *>(input.data()),
+                           static_cast<unsigned long long>(input.size())) != 0) {
+      spdlog::error("sha256sum() failed to hash input");
+      return additional_data["values"].append_child() << "";
+    }
+    return additional_data["values"].append_child() << bytes_to_hex(digest, crypto_hash_sha256_BYTES);
+  });
+  inja_env.add_callback("xxh64sum", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+    const auto input = template_arg_to_string(args[0]);
+    const auto hash  = XXH64(input.data(), input.size(), 0);
+    return additional_data["values"].append_child() << u64_to_hex(hash);
+  });
   inja_env.add_callback("dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     auto path = std::filesystem::path{ args[0].val<std::string>().value() };
     return additional_data["values"].append_child() << (path.has_filename() ? path.parent_path().string() : path.string());
