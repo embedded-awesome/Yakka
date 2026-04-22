@@ -1,0 +1,15 @@
+name: Inja Test
+
+includes:
+  global:
+    - ../components/spdlog/master/include
+
+sources:
+  - test/inja_test.cpp
+
+requires:
+  components:
+    - inja
+    - rapidyaml
+    - spdlog
+    # - rapidyaml_json

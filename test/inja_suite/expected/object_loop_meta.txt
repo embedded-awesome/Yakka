@@ -1,0 +1,1 @@
+0:ant=ant=colony:true:false;1:moose=moose=antlers:false:false;2:zebra=zebra=stripes:false:true;

@@ -1,0 +1,3 @@
+{%- set name="outer" -%}
+{%- macro greet(name, suffix) -%}{{ name }}|{{ scope.global.name }}|{{ scope.global.neighbour }}|{{ suffix }}|{%- set name="inner" -%}{{ name }}|{{ scope.global.name }}{%- endmacro -%}
+{{ greet("local", upper(neighbour)) }}|{{ name }}

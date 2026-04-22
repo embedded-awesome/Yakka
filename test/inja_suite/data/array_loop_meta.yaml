@@ -1,0 +1,8 @@
+groups:
+  - name: alpha
+    items:
+      - a
+      - b
+  - name: beta
+    items:
+      - c

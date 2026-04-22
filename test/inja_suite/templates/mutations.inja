@@ -1,0 +1,5 @@
+{%- set scratch = {} -%}
+{%- set scratch.name = payload_name -%}
+{%- setAt(scratch, "meta", extra) -%}
+{%- for n in numbers -%}{%- push_back(scratch, "numbers", n) -%}{%- endfor -%}
+name={{ fetch("/scratch", "name") }}|meta={{ fetch("/scratch/meta") }}|nums={{ join(fetch("/scratch/numbers"), ",") }}|uniq={{ join(sort(unique(fetch("/scratch/numbers"))), ",") }}|at={{ at("/scratch/meta") }}{%- erase("/scratch/meta") -%}|has_meta={{ existsIn(fetch("/scratch"), "meta") }}

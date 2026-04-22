@@ -1,0 +1,2 @@
+{%- for group in groups -%}
+G{{ loop.index1 }}={{ group.name }}[{%- for item in group.items -%}{{ loop.parent.index }}.{{ loop.index1 }}:{{ item }}:{{ loop.is_first }}:{{ loop.is_last }};{%- endfor -%}]{%- endfor -%}

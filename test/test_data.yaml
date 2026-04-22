@@ -1,0 +1,11 @@
+sequence:
+  - 'one'
+  - 2
+  - 3.14159
+  - true
+  - null
+
+map:
+  key1: value1
+  key2: 42
+  key3: false
