@@ -115,3 +115,17 @@ TEST_CASE("loop parent integration") {
 
   CHECK(result == "0-0:a;0-1:b;1-0:c;");
 }
+
+TEST_CASE("macro global scope access") {
+  inja::Environment env;
+  inja::Tree data;
+  auto root = data.rootref();
+  root |= ryml::MAP;
+  root["neighbour"] << "Peter";
+
+  const auto result = env.render(
+      R"({% set name="outer" %}{% macro greet(name) %}{{ name }}|{{ scope.global.name }}{% set name="inner" %}|{{ name }}|{{ scope.global.name }}|{{ scope.global.neighbour }}{% endmacro %}{{ greet("local") }}|{{ name }})",
+      data.rootref());
+
+  CHECK(result == "local|outer|inner|outer|Peter|outer");
+}

@@ -203,6 +203,25 @@ render("{% set time.start=18 %}{{ time.start }}pm", data); // using json pointer
 
 Assignments only set the value within the rendering context; they do not modify the json object passed into the `render` call.
 
+#### Macros
+
+Macros define reusable template snippets that can be invoked like regular functions.
+
+```.cpp
+render(R"({% macro greet(name) %}Hello {{ name }}!{% endmacro %}{{ greet("Peter") }})", data); // "Hello Peter!"
+render(R"({% macro pair(a, b) %}[{{ a }},{{ b }}]{% endmacro %}{{ pair(1 + 1, upper(neighbour)) }})", data); // "[2,PETER]"
+```
+
+Macro declarations are statements and therefore use `{% ... %}` syntax. A declaration does not emit output by itself.
+
+Macros are resolved during parsing, so a macro must be declared before its first invocation in the same template.
+
+Macro arguments are positional and must match the declared number of parameters.
+
+Macros run with local assignment scope: parameters and `set` statements inside a macro do not leak into the caller scope.
+
+Inside a macro, use `scope.global.<name>` to reference variables from the template-wide scope even when a parameter or local `set` shadows the same name. This lookup first checks template assignments and then falls back to the original input data.
+
 ### Functions
 
 A few functions are implemented within the inja template syntax. They can be called with

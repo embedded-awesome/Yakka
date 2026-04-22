@@ -4,6 +4,10 @@ includes:
   global:
     - master/include/inja
 
+requires:
+  components:
+    - spdlog
+
 defines:
   global:
     # - INJA_DATA_TYPE=inja::ryml_json
