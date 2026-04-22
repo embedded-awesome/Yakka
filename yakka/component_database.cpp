@@ -1,5 +1,6 @@
 #include "yakka.hpp"
 #include "component_database.hpp"
+#include "toml_parser_ryml.hpp"
 #include "spdlog/spdlog.h"
 #include "ryml.hpp"
 #include "ryml_std.hpp"
@@ -15,6 +16,30 @@ namespace yakka {
 static void process_blueprint(ryml::Tree &database, ryml::csubstr id_string, const c4::yml::ConstNodeRef blueprint_node);
 namespace fs = std::filesystem;
 using error  = std::error_code;
+
+namespace {
+
+bool has_component_toml_extension(const fs::path &path)
+{
+  const auto filename = path.filename().string();
+  return filename.ends_with(yakka_component_toml_extension);
+}
+
+bool is_yakka_component_file(const fs::path &path)
+{
+  return path.extension() == yakka_component_extension || path.extension() == yakka_component_old_extension || has_component_toml_extension(path);
+}
+
+std::string component_id_from_path(const fs::path &path)
+{
+  const auto filename = path.filename().string();
+  if (filename.ends_with(yakka_component_toml_extension)) {
+    return filename.substr(0, filename.size() - yakka_component_toml_extension.size());
+  }
+  return path.stem().string();
+}
+
+} // namespace
 
 static void initialize_database(ryml::Tree &database)
 {
@@ -164,11 +189,11 @@ void component_database::scan_for_components(std::optional<path> search_start_pa
   const auto process_entry = [this](const fs::directory_entry &entry) {
     const auto &path     = entry.path();
     const auto ext       = path.extension();
-    const auto id        = path.stem().string();
+    const auto id        = component_id_from_path(path);
     const auto id_substr = c4::to_csubstr(id);
 
     if (auto result = add_component(id, path); result && *result) {
-      if (ext == yakka_component_extension || ext == yakka_component_old_extension) {
+      if (is_yakka_component_file(path)) {
         parse_yakka_file(path, id_substr);
       } else if (ext == slcc_component_extension) {
         spdlog::info("Found {}", path.string());
@@ -187,7 +212,7 @@ void component_database::scan_for_components(std::optional<path> search_start_pa
                      return false;
                    }
                    return e.exists(ec) && !e.is_directory() && e.path().filename().string().front() != '.'
-                          && (e.path().extension() == yakka::yakka_component_extension || e.path().extension() == yakka::yakka_component_old_extension || e.path().extension() == yakka::slcc_component_extension
+                          && (is_yakka_component_file(e.path()) || e.path().extension() == yakka::slcc_component_extension
                               || e.path().extension() == yakka::slcp_component_extension);
                  });
   try {
@@ -221,7 +246,7 @@ std::expected<path, error> component_database::get_component(ryml::csubstr id, f
     const auto extension = path.extension();
     if (flags == flag::IGNORE_ALL_SLC && ((extension == slcc_component_extension) || (extension == slce_component_extension) || (extension == slcp_component_extension)))
       return std::nullopt;
-    if (flags == flag::IGNORE_YAKKA && extension == yakka_component_extension)
+    if (flags == flag::IGNORE_YAKKA && (extension == yakka_component_extension || has_component_toml_extension(path)))
       return std::nullopt;
     if (flags == flag::ONLY_SLCC && ((extension == slce_component_extension) || (extension == slcp_component_extension)))
       return std::nullopt;
@@ -302,7 +327,12 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
   if (!result) {
     return std::unexpected(result.error());
   }
-  ryml::Tree tree = ryml::parse_in_place(ryml::to_substr(*result));
+  ryml::Tree tree;
+  if (has_component_toml_extension(path)) {
+    tree = toml_ryml::parse_toml(std::string_view(result->data(), result->size()), path.generic_string());
+  } else {
+    tree = ryml::parse_in_place(ryml::to_substr(*result));
+  }
   auto root       = tree.crootref();
 
   // Check for blueprints and process them

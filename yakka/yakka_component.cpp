@@ -1,6 +1,7 @@
 #include "yakka_component.hpp"
 // #include "yakka_schema.hpp"
 #include "utilities.hpp"
+#include "toml_parser_ryml.hpp"
 #include "spdlog/spdlog.h"
 #include "semver/semver.hpp"
 #include <fstream>
@@ -8,6 +9,25 @@
 using namespace semver::literals;
 
 namespace yakka {
+namespace {
+
+bool has_component_toml_extension(const std::filesystem::path &file_path)
+{
+  const auto filename = file_path.filename().string();
+  return filename.ends_with(yakka_component_toml_extension);
+}
+
+std::string component_id_from_path(const std::filesystem::path &file_path)
+{
+  const auto filename = file_path.filename().string();
+  if (filename.ends_with(yakka_component_toml_extension)) {
+    return filename.substr(0, filename.size() - yakka_component_toml_extension.size());
+  }
+  return file_path.stem().string();
+}
+
+} // namespace
+
 yakka_status component::parse_file(std::filesystem::path file_path, std::filesystem::path package_path, ryml::NodeRef parent_node)
 {
   this->file_path         = file_path;
@@ -24,13 +44,25 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
     }
     yaml_buffer = std::move(result.value());
 
-    // Parse with ryml (zero-copy parser)
-    if (parent_node.valid()) {
-      ryml::parse_in_arena(c4::to_csubstr(yaml_buffer), parent_node);
-      root = parent_node;
+    const bool is_toml_component = has_component_toml_extension(file_path);
+
+    if (is_toml_component) {
+      tree = toml_ryml::parse_toml(yaml_buffer, path_string);
+      if (parent_node.valid()) {
+        merge_nodes(parent_node, tree.crootref());
+        root = parent_node;
+      } else {
+        root = tree.rootref();
+      }
     } else {
-      tree = ryml::parse_in_place(c4::to_substr(yaml_buffer));
-      root = tree.rootref();
+      // Parse with ryml (zero-copy parser)
+      if (parent_node.valid()) {
+        ryml::parse_in_arena(c4::to_csubstr(yaml_buffer), parent_node);
+        root = parent_node;
+      } else {
+        tree = ryml::parse_in_place(c4::to_substr(yaml_buffer));
+        root = tree.rootref();
+      }
     }
 
   } catch (std::exception &e) {
@@ -199,7 +231,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
       }
     }
 
-    this->root["id"] << file_path.stem().string();
+    this->root["id"] << component_id_from_path(file_path);
     this->id = this->root["id"].val();
   }
 
