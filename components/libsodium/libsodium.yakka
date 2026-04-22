@@ -1,0 +1,17 @@
+name: LibSodium
+
+description: Minimal libsodium integration for SHA-256 helpers used by templates
+
+includes:
+  global:
+    - src/libsodium/include
+    - src/libsodium/include/sodium
+
+sources:
+  - src/libsodium/crypto_hash/sha256/hash_sha256.c
+  - src/libsodium/crypto_hash/sha256/cp/hash_sha256_cp.c
+  - minimal/sodium_compat.c
+
+defines:
+  global:
+    - CONFIGURED=1
