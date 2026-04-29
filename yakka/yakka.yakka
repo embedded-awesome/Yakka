@@ -36,6 +36,7 @@ requires:
     - blake3
     - libsodium
     - pugixml
+    - valijson
 
 supports:
   components:

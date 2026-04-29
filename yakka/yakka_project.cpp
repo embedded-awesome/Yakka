@@ -1026,7 +1026,6 @@ void project::update_project_data()
 
 bool project::is_disqualified_by_unless(ryml::ConstNodeRef node)
 {
-  // TODO: Implement ryml version - needs .contains(), array iteration, .get<>()
   if (node.contains("unless"))
     for (const auto &u: node["unless"])
       if (required_features.contains(u.val()))
@@ -1037,7 +1036,6 @@ bool project::is_disqualified_by_unless(ryml::ConstNodeRef node)
 
 bool project::condition_is_fulfilled(ryml::ConstNodeRef node)
 {
-  // TODO: Implement ryml version - needs .contains(), array iteration, .get<>()
   if (node.contains("condition"))
     for (const auto &condition: node["condition"])
       if (!required_features.contains(condition.val()))
@@ -1048,7 +1046,6 @@ bool project::condition_is_fulfilled(ryml::ConstNodeRef node)
 
 void project::create_config_file(const std::shared_ptr<yakka::component> component, ryml::ConstNodeRef config, const std::string &prefix, std::string instance_name)
 {
-  // TODO: Implement ryml version - needs .contains(), .get<>(), array iteration
   std::string config_filename            = config["path"].val<std::string>().value();
   std::filesystem::path config_file_path = component->component_path / config_filename;
 
@@ -1091,7 +1088,6 @@ void project::create_config_file(const std::shared_ptr<yakka::component> compone
   }
 
   // Create blueprints
-  // TODO: Implement ryml version - needs json object construction syntax { { "key", value } }
   ryml::NodeRef blueprint = component->blueprints.append_child();
   blueprint.set_key_serialized(destination_path.string());
   blueprint |= ryml::MAP;

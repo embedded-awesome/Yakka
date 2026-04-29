@@ -3,18 +3,95 @@
 #include "utilities.hpp"
 #include "slcc_schema.hpp"
 
+#include <valijson/adapters/rapidyaml_adapter.hpp>
+#include <valijson/schema.hpp>
+#include <valijson/schema_parser.hpp>
+#include <valijson/validation_results.hpp>
+#include <valijson/validator.hpp>
+
 namespace yakka {
+
+schema::schema(const std::string &schema_yaml) : schema_data()
+{
+  if (schema_yaml.empty()) {
+    return;
+  }
+
+  try {
+    schema_data = ryml::parse_in_arena(c4::to_csubstr(schema_yaml));
+  } catch (const std::exception &e) {
+    spdlog::error("Failed to parse schema YAML string: {}", e.what());
+  }
+}
+
+schema::schema(const std::filesystem::path &schema_path) : schema_data()
+{
+  const auto loaded_schema = ryml_load_file(schema_path);
+  if (!loaded_schema.has_value()) {
+    spdlog::error("Failed to load schema file '{}': {}", schema_path.generic_string(), loaded_schema.error().message());
+    return;
+  }
+
+  schema_data = std::move(loaded_schema.value());
+}
 
 void schema::add_schema_data(ryml::ConstNodeRef schema_data)
 {
-  // const auto schema_ryml::Pointer = ryml::Pointer("/properties");
-  // json_node_merge(schema_ryml::Pointer, this->schema_data["properties"], schema_data);
+  if (!schema_data.valid()) {
+    return;
+  }
+
+  auto root = this->schema_data.rootref();
+  if (!root.has_children()) {
+    root |= ryml::MAP;
+    root.append_child() << ryml::key("type") << "object";
+    auto properties = root.append_child() << ryml::key("properties");
+    properties |= ryml::MAP;
+  }
+  merge_nodes(root["properties"], schema_data);
   validator_updated = false;
 }
 
 bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id)
 {
-  return true;
+  if (!data.valid()) {
+    spdlog::error("Schema validation failed for '{}': input data node is invalid", ryml_string(id));
+    return false;
+  }
+
+  const auto schema_root = schema_data.crootref();
+  if (!schema_root.valid() || !schema_root.is_map()) {
+    return true;
+  }
+
+  try {
+    valijson::Schema parsed_schema;
+    valijson::SchemaParser parser;
+    parser.populateSchema(valijson::adapters::RymlAdapter(schema_root), parsed_schema);
+    validator_updated = true;
+
+    valijson::Validator validator(valijson::Validator::kWeakTypes);
+    valijson::ValidationResults results;
+    const bool is_valid = validator.validate(parsed_schema, valijson::adapters::RymlAdapter(data), &results);
+    if (is_valid) {
+      return true;
+    }
+
+    valijson::ValidationResults::Error error;
+    while (results.popError(error)) {
+      if (error.jsonPointer.empty()) {
+        spdlog::error("Validation error in '{}': {}", ryml_string(id), error.description);
+      } else {
+        spdlog::error("Validation error in '{}': {} ({})", ryml_string(id), error.description, error.jsonPointer);
+      }
+    }
+
+    return false;
+  } catch (const std::exception &e) {
+    validator_updated = false;
+    spdlog::error("Schema validation failed for '{}': {}", ryml_string(id), e.what());
+    return false;
+  }
 }
 
 // bool schema::validate(ryml::ConstNodeRef data, std::string id)
@@ -125,29 +202,36 @@ schema::merge_strategy schema::get_merge_strategy(const ryml::Pointer &path) con
   return schema::merge_strategy::Default;
 }
 
-yakka_schema_validator::yakka_schema_validator() /*: yakka_validator(nullptr, ryml_schema::default_string_format_check), slcc_validator(nullptr, ryml_schema::default_string_format_check)*/
+yakka_schema_validator::yakka_schema_validator() : 
+  yakka_component_schema(yakka_component_schema_yaml), 
+  slcc_component_schema(slcc_schema_yaml)
 {
-  // This should be straight JSON without conversion
-  // yakka_schema = YAML::Load(yakka_component_schema_yaml).as<ryml::Tree>();
-  // slcc_schema  = YAML::Load(slcc_schema_yaml).as<ryml::Tree>();
-  // yakka_validator.set_root_schema(yakka_schema);
-  // slcc_validator.set_root_schema(slcc_schema);
 }
 
 bool yakka_schema_validator::validate(yakka::component *component)
 {
-  // custom_error_handler err;
-  // err.component = component;
-  // if (component->type == component::YAKKA_FILE)
-  //   auto patch = yakka_validator.validate(component->json, err);
-  // else if (component->type == component::SLCC_FILE)
-  //   auto patch = slcc_validator.validate(component->json, err);
-  // if (err) {
-  //   return false;
-  // } else {
-  //   return true;
-  // }
-  return true;
+  if (component == nullptr) {
+    spdlog::error("Cannot validate null component");
+    return false;
+  }
+
+  if (!component->root.valid()) {
+    spdlog::error("Cannot validate component '{}': invalid root node", component->file_path.generic_string());
+    return false;
+  }
+
+  switch (component->type) {
+  case component::YAKKA_FILE:
+    return yakka_component_schema.validate(component->root, component->id);
+
+  case component::SLCC_FILE: {
+    const std::string component_name = component->file_path.filename().generic_string();
+    return slcc_component_schema.validate(component->root, c4::to_csubstr(component_name));
+  }
+
+  default:
+    return true;
+  }
 }
 
 } // namespace yakka

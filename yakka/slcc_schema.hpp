@@ -50,7 +50,7 @@ properties:
     required: [ prefix ]
   config_file:
     description: List of configuration files to be included in the project.
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -76,7 +76,7 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
@@ -84,7 +84,7 @@ properties:
           type: boolean
       required: [ path ]
   source:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properites:
@@ -104,13 +104,13 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
       required: [ path ]
   include:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properites:
@@ -129,7 +129,7 @@ properties:
                 items:
                   type: string
               unless:
-                type: [array, null]
+                type: [array, 'null']
                 uniqueItems: true
                 items:
                   type: string
@@ -140,13 +140,13 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
       required: [ path ]
   library:
-    type: [array, null]
+    type: [array, 'null']
     items:
       anyOf:
         - type: object
@@ -159,7 +159,7 @@ properties:
               items:
                 type: string
             unless:
-              type: [array, null]
+              type: [array, 'null']
               uniqueItems: true
               items:
                 type: string
@@ -173,12 +173,12 @@ properties:
                 items:
                   type: string
               unless:
-                type: [array, null]
+                type: [array, 'null']
                 uniqueItems: true
                 items:
                   type: string
   define:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -192,13 +192,13 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
       required: [ name ]
   template_contribution:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -214,13 +214,13 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
       required: [ name, value ]
   template_file:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -232,7 +232,7 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
@@ -240,7 +240,7 @@ properties:
           type: boolean
       required: [ path ]
   toolchain_settings:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -254,13 +254,13 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
       required: [ option, value ]
   other_file:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -279,13 +279,13 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
       required: [ path ]
   requires:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -298,7 +298,7 @@ properties:
             type: string
       required: [ name ]
   provides:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -313,7 +313,7 @@ properties:
           type: boolean
       required: [ name ]
   conflicts:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -326,7 +326,7 @@ properties:
             type: string
       required: [ name ]
   validation_helper:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -338,13 +338,13 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
       required: [ path ]
   validation_library:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -358,13 +358,13 @@ properties:
           items:
             type: string
         unless:
-          type: [array, null]
+          type: [array, 'null']
           uniqueItems: true
           items:
             type: string
       required: [ path, name ]
   recommends:
-    type: [array, null]
+    type: [array, 'null']
     items:
       type: object
       properties:
@@ -401,7 +401,7 @@ properties:
                       items:
                         type: string
                     unless:
-                      type: [array, null]
+                      type: [array, 'null']
                       uniqueItems: true
                       items:
                         type: string
@@ -418,7 +418,7 @@ properties:
             type: string
         required: [ url ]
   ui_hints:
-    type: [object, null]
+    type: [object, 'null']
     properties:
       visibility:
         type: string
