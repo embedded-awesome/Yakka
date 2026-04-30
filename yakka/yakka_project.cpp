@@ -824,7 +824,7 @@ void project::generate_project_summary()
 {
   // Add standard information into the project summary
   project_summary["project_name"] << project_name;
-  project_summary["project_file"] << project_file;
+  project_summary["project_file"] << project_file.string();
   project_summary["project_output"] << default_output_directory + project_name;
   // project_summary["configuration"]  << workspace.summary["configuration"];
   workspace.summary["configuration"].duplicate(project_summary, project_summary.last_child());
