@@ -5,6 +5,7 @@
  * @see NodeRef */
 
 #include <cstddef>
+#include <optional>
 
 #include "c4/yml/tree.hpp"
 #include "c4/yml/pointer.hpp"
