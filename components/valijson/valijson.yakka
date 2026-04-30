@@ -6,7 +6,7 @@ includes:
 
 requires:
   features:
-    - c++20
+    - cpp20
   components:
     - rapidyaml
 

@@ -19,7 +19,7 @@ includes:
 
 requires:
   features:
-    - c++23
+    - cpp23
   components:
     - yaml-cpp
     - cpp-subprocess

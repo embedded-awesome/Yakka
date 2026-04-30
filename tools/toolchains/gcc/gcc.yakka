@@ -12,7 +12,7 @@ flags:
   cpp:
     global:
       - -Os
-      - -std=c++2b
+      - -std=c++23
       - -MD
       - -ffunction-sections
       - -fdata-sections
