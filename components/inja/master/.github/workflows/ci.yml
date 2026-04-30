@@ -19,6 +19,11 @@ jobs:
             os: ubuntu-22.04
             compiler: clang
 
+          - name: ubuntu-22.04-clang-tidy
+            os: ubuntu-22.04
+            compiler: clang
+            cmake_vars: "-DINJA_ENABLE_CLANG_TIDY=ON"
+
           - name: ubuntu-22.04-clang-15-no-exceptions
             os: ubuntu-22.04
             compiler: clang-15
@@ -28,35 +33,35 @@ jobs:
             os: ubuntu-24.04
             compiler: gcc
 
-          - name: windows-2019-msvc
-            os: windows-2019
-            compiler: msvc
-
-          - name: windows-2019-clang
-            os: windows-2019
-            compiler: clang
-
-          - name: windows-2019-gcc
-            os: windows-2019
-            compiler: gcc
-
           - name: windows-2022-msvc
             os: windows-2022
             compiler: msvc
 
-          - name: macOS-13-gcc
-            os: macOS-13
+          - name: windows-2022-clang
+            os: windows-2022
+            compiler: clang
+
+          - name: windows-2022-gcc
+            os: windows-2022
             compiler: gcc
 
-          - name: macOS-13-clang
-            os: macOS-13
+          - name: windows-2025-msvc
+            os: windows-2025
+            compiler: msvc
+
+          - name: macOS-14-gcc
+            os: macOS-14
+            compiler: gcc
+
+          - name: macOS-14-clang
+            os: macOS-14
             compiler: clang
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Cpp
-        uses: aminya/setup-cpp@v0.44.0
+        uses: aminya/setup-cpp@v1.3.0
         with:
           compiler: ${{ matrix.compiler }}
 
@@ -78,7 +83,7 @@ jobs:
   check-single-include:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Update single include
       run: |
