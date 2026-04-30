@@ -83,6 +83,7 @@ std::abort();                 \
 #define INCLUDE_INJA_UTILS_HPP_
 
 #include <algorithm>
+#include <cerrno>
 #include <charconv>
 #include <cctype>
 #include <cstddef>
@@ -272,9 +273,13 @@ inline std::optional<double> parse_float(std::string_view view) {
   if (view.empty()) {
     return std::nullopt;
   }
-  double result;
-  auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
-  if (ec != std::errc() || ptr != view.data() + view.size()) {
+  // Use strtod for portability - std::from_chars for floating-point is not
+  // available on all platforms (e.g. older macOS/libc++ versions).
+  std::string str(view);
+  char* end = nullptr;
+  errno = 0;
+  double result = std::strtod(str.c_str(), &end);
+  if (errno != 0 || end != str.c_str() + str.size()) {
     return std::nullopt;
   }
   return result;
