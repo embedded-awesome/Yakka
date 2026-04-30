@@ -412,7 +412,7 @@ std::expected<void, std::error_code> workspace::execute_git_command(ryml::csubst
 std::expected<void, std::error_code> workspace::fetch_registry(ryml::csubstr url)
 {
   constexpr auto GIT_STRING = "git";
-  const auto fetch_string   = std::format("-C .yakka/registries/ clone {} --progress --single-branch", url);
+  const auto fetch_string   = std::format("-C .yakka/registries/ clone {} --progress --single-branch", ryml_string(url));
 
   auto [output, result] = yakka::exec(GIT_STRING, fetch_string);
   spdlog::info("{}\n", output);
@@ -456,8 +456,10 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
   static constexpr std::array phase_names = { "Counting", "Compressing", "Receiving", "Resolving", "Updating", "Fetch LFS" };
 
   try {
+    const auto name_string = ryml_string(name);
+
     // Setup logging with RAII
-    auto fetch_log = spdlog::basic_logger_mt(std::format("fetchlog-{}", name), std::format("yakka-fetch-{}.log", name));
+    auto fetch_log = spdlog::basic_logger_mt(std::format("fetchlog-{}", name_string), std::format("yakka-fetch-{}.log", name_string));
     fetch_log->flush_on(spdlog::level::info);
 
     // Directory setup using ranges and modern fs operations
@@ -484,9 +486,10 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     // Helper function to handle Git command execution
     auto execute_git_command = [&fetch_log](std::string cmd, std::string args, const auto &progress_callback) -> std::expected<int, std::error_code> {
       auto start_time = std::chrono::steady_clock::now();
+      auto logger     = fetch_log;
 
       auto result = yakka::exec(cmd, args, [&](std::string data) {
-        fetch_log->info(data);
+        logger->info(data);
         progress_callback(data);
       });
 
@@ -538,7 +541,7 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     };
 
     // Execute clone command
-    const auto clone_args = std::format(R"(-C "{}" clone {} {} -b {} --progress --single-branch --no-checkout)", git_location.string(), url, name, branch);
+    const auto clone_args = std::format(R"(-C "{}" clone {} {} -b {} --progress --single-branch --no-checkout)", git_location.string(), url, name_string, branch);
 
     auto clone_result = execute_git_command("git", clone_args, handle_progress);
     if (!clone_result) {
@@ -550,7 +553,7 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     progress_state = {};
 
     // Execute checkout command
-    const auto checkout_args = std::format(R"(--git-dir "{}/{}/.git" --work-tree "{}" checkout {} --progress --force)", git_location.string(), name, checkout_location.string(), branch);
+    const auto checkout_args = std::format(R"(--git-dir "{}/{}/.git" --work-tree "{}" checkout {} --progress --force)", git_location.string(), name_string, checkout_location.string(), branch);
 
     auto checkout_result = execute_git_command("git", checkout_args, handle_progress);
     if (!checkout_result) {
@@ -559,7 +562,7 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     spdlog::info("{}: checkout in {}ms", name, *checkout_result);
 
     // Signal completion
-    spdlog::drop(std::format("fetchlog-{}", name));
+    spdlog::drop(std::format("fetchlog-{}", name_string));
     progress_handler("Complete", 100);
     return checkout_location;
 

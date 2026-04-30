@@ -102,7 +102,7 @@ inline std::optional<int64_t> parse_int(std::string_view view) {
   }
 
   if (view[0] == '-') {
-    int64_t result;
+    int64_t result{};
     auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
     if (ec != std::errc() || ptr != view.data() + view.size()) {
       return std::nullopt;
@@ -110,7 +110,7 @@ inline std::optional<int64_t> parse_int(std::string_view view) {
     return result;
   }
 
-  uint64_t result;
+  uint64_t result{};
   auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
   if (ec != std::errc() || ptr != view.data() + view.size()) {
     return std::nullopt;
@@ -127,7 +127,7 @@ inline std::optional<uint64_t> parse_uint(std::string_view view) {
     return std::nullopt;
   }
 
-  uint64_t result;
+  uint64_t result{};
   auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
   if (ec != std::errc() || ptr != view.data() + view.size()) {
     return std::nullopt;
