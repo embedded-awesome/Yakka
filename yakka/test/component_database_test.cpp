@@ -70,6 +70,21 @@ TEST_F(ComponentDatabaseTest, ComponentScanning)
   EXPECT_TRUE(db.get_component("comp2").has_value());
 }
 
+TEST_F(ComponentDatabaseTest, ComponentScanningTomlExtension)
+{
+  component_database db;
+  db.load(test_path).value();
+
+  fs::create_directories(test_path / "comp_toml");
+  std::ofstream component_file(test_path / "comp_toml" / "comp_toml.yakka.toml");
+  component_file << "id = \"comp_toml\"\n";
+  component_file.close();
+
+  db.scan_for_components();
+
+  EXPECT_TRUE(db.get_component("comp_toml").has_value());
+}
+
 TEST_F(ComponentDatabaseTest, SaveAndReload)
 {
   {

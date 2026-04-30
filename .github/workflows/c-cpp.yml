@@ -10,7 +10,7 @@ jobs:
   build_linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ./yakka-linux link! yakka_cli gcc
       - run: mv ${{github.workspace}}/output/yakka_cli-gcc/yakka_cli-gcc ${{github.workspace}}/output/yakka_cli-gcc/yakka-linux
       - uses: actions/upload-artifact@v4
@@ -24,9 +24,9 @@ jobs:
           name: Linux build log
           path: ${{github.workspace}}/yakka.log
   build_windows:
-    runs-on: windows-2022
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: amd64
@@ -46,7 +46,7 @@ jobs:
   build_macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: ./yakka-macos link! yakka_cli xcode
       - run: mv ${{github.workspace}}/output/yakka_cli-xcode/yakka_cli-xcode ${{github.workspace}}/output/yakka_cli-xcode/yakka-macos
       - uses: actions/upload-artifact@v4

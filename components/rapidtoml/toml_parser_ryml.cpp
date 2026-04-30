@@ -8,7 +8,7 @@
  * Adapted to use ryml classes for tree/node representation.
  */
 
-#include "ryml.hpp"
+#include "toml_parser_ryml.hpp"
 #include "c4/std/string.hpp"
 #include <string>
 #include <string_view>
@@ -975,63 +975,127 @@ namespace toml_ryml
         advance(); // skip second ']'
       }
 
-      // Create or find the table node in the tree
-      // Handle dotted table names by creating nested structure
-      std::string table_path = recording_buffer;
+      // Create or find the table node in the tree.
+      // Arrays-of-tables ([[x]]) must append a new table, and dotted table paths
+      // should resolve through the latest element when a segment is an array node.
+      std::string table_path   = recording_buffer;
       ryml::NodeRef table_node = tree.rootref();
-      
-      // Split the table path by dots and create nested tables
-      size_t start = 0;
-      size_t dot_pos = table_path.find('.');
-      
-      while (dot_pos != std::string::npos)
-      {
-        std::string segment = table_path.substr(start, dot_pos - start);
-        
-        // Look for existing child with this key
-        ryml::NodeRef child;
-        for (auto c : table_node.children())
-        {
-          if (c.has_key() && c.key() == ryml::csubstr(segment.c_str(), segment.length()))
-          {
-            child = c;
-            break;
+
+      auto find_child_by_key = [](ryml::NodeRef parent, const std::string &key) -> ryml::NodeRef {
+        for (auto c: parent.children()) {
+          if (c.has_key() && c.key() == ryml::csubstr(key.c_str(), key.length())) {
+            return c;
           }
         }
-        
-        // Create child if not found
-        if (!child.valid())
-        {
-          child = table_node.append_child();
-          child << ryml::key(segment);
-          child |= ryml::MAP;
+        return {};
+      };
+
+      auto ensure_last_array_table = [this](ryml::NodeRef seq_node) -> ryml::NodeRef {
+        if (!seq_node.valid() || !seq_node.is_seq()) {
+          set_error("internal parser state error: expected array-of-tables sequence node");
+          return {};
         }
-        
-        table_node = child;
-        start = dot_pos + 1;
-        dot_pos = table_path.find('.', start);
-      }
-      
-      // Handle the last segment
-      std::string last_segment = table_path.substr(start);
-      
-      // Look for existing child with this key
-      ryml::NodeRef final_node;
-      for (auto c : table_node.children())
-      {
-        if (c.has_key() && c.key() == ryml::csubstr(last_segment.c_str(), last_segment.length()))
-        {
-          final_node = c;
+        if (seq_node.num_children() == 0) {
+          auto created = seq_node.append_child();
+          created |= ryml::MAP;
+          return created;
+        }
+        auto last = seq_node.last_child();
+        if (!last.is_map()) {
+          set_error("invalid TOML structure: array-of-tables entry is not a table");
+          return {};
+        }
+        return last;
+      };
+
+      // Split path into segments.
+      std::vector<std::string> segments;
+      size_t start = 0;
+      while (true) {
+        const size_t dot_pos = table_path.find('.', start);
+        if (dot_pos == std::string::npos) {
+          segments.push_back(table_path.substr(start));
           break;
         }
+        segments.push_back(table_path.substr(start, dot_pos - start));
+        start = dot_pos + 1;
       }
-      
-      // Create final node if not found
-      if (!final_node.valid())
-      {
+
+      if (segments.empty()) {
+        set_error("empty table header");
+        return {};
+      }
+
+      // Resolve all parent segments.
+      for (size_t i = 0; i + 1 < segments.size(); ++i) {
+        if (table_node.is_seq()) {
+          table_node = ensure_last_array_table(table_node);
+          if (is_error()) {
+            return {};
+          }
+        }
+
+        if (!table_node.is_map()) {
+          set_error("invalid TOML structure while resolving table path");
+          return {};
+        }
+
+        auto child = find_child_by_key(table_node, segments[i]);
+        if (!child.valid()) {
+          child = table_node.append_child();
+          child << ryml::key(segments[i]);
+          child |= ryml::MAP;
+        }
+
+        table_node = child;
+      }
+
+      const std::string &last_segment = segments.back();
+
+      if (table_node.is_seq()) {
+        table_node = ensure_last_array_table(table_node);
+        if (is_error()) {
+          return {};
+        }
+      }
+
+      if (!table_node.is_map()) {
+        set_error("invalid TOML structure while resolving final table segment");
+        return {};
+      }
+
+      auto final_node = find_child_by_key(table_node, last_segment);
+
+      if (is_array) {
+        // [[a.b]] -> ensure `b` exists as a sequence and append a new table item.
+        if (!final_node.valid()) {
+          final_node = table_node.append_child();
+          final_node << ryml::key(last_segment);
+          final_node |= ryml::SEQ;
+        } else if (!final_node.is_seq()) {
+          set_error("invalid TOML structure: array-of-tables redefined as non-array");
+          return {};
+        }
+
+        auto new_table = final_node.append_child();
+        new_table |= ryml::MAP;
+        return new_table;
+      }
+
+      // [a.b] -> ensure map node exists.
+      if (!final_node.valid()) {
         final_node = table_node.append_child();
         final_node << ryml::key(last_segment);
         final_node |= ryml::MAP;
+      } else if (final_node.is_seq()) {
+        // If the segment is an array-of-tables, bind to its latest table.
+        final_node = ensure_last_array_table(final_node);
+        if (is_error()) {
+          return {};
+        }
+      } else if (!final_node.is_map()) {
+        set_error("invalid TOML structure: table redefined as scalar value");
+        return {};
       }
 
       return final_node;
@@ -1216,7 +1280,7 @@ namespace toml_ryml
   // Public API
   //-----------------------------------------------------------------------------
 
-  ryml::Tree parse_toml(std::string_view source, const std::string &source_path = "")
+  ryml::Tree parse_toml(std::string_view source, const std::string &source_path)
   {
     toml_parser parser(source, source_path);
 

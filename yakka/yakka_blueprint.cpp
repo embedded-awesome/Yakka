@@ -1,82 +1,53 @@
 #include "yakka_blueprint.hpp"
+#include "utilities.hpp"
 #include <iostream>
 
 namespace yakka {
-blueprint::blueprint(const std::string &target, const nlohmann::json &blueprint, const std::string &parent_path)
+blueprint::blueprint(c4::csubstr target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path)
 {
   this->target      = target;
   this->parent_path = parent_path;
+  this->data        = blueprint_data;
+  this->process     = ryml::ConstNodeRef();
 
-  if (blueprint.contains("regex"))
-    this->regex = blueprint["regex"].get<std::string>();
+  auto root = data;
 
-  if (blueprint.contains("requires"))
-    for (auto &d: blueprint["requires"])
-      this->requirements.push_back(d.get<std::string>());
+  if (root.has_child("regex"))
+    this->regex = root["regex"].val();
 
-  if (blueprint.contains("depends"))
-    for (auto &d: blueprint["depends"]) {
-      if (d.is_primitive()) {
-        if (d.front() == ':')
-          this->dependencies.push_back({ dependency::DATA_DEPENDENCY, d.get<std::string>() });
+  if (root.has_child("requires") && root["requires"].is_seq()) {
+    for (const auto d: root["requires"].children())
+      this->requirements.push_back(d.val());
+  }
+
+  if (root.has_child("depends") && root["depends"].is_seq()) {
+    for (const auto &d: root["depends"].children()) {
+      if (!d.is_map() && d.has_val()) {
+        const auto dep_value = d.val();
+        if (!dep_value.empty() && dep_value.front() == ':')
+          this->dependencies.push_back({ dependency::DATA_DEPENDENCY, dep_value });
         else
-          this->dependencies.push_back({ dependency::DEFAULT_DEPENDENCY, d.get<std::string>() });
-      }
-      else if (d.is_object()) {
-        if (d.contains("data")) {
-          if (d["data"].is_array())
-            for (auto &i: d["data"])
-              this->dependencies.push_back({ dependency::DATA_DEPENDENCY, i.get<std::string>() });
+          this->dependencies.push_back({ dependency::DEFAULT_DEPENDENCY, dep_value });
+      } else if (d.is_map()) {
+        if (d.has_child("data")) {
+          const auto data_node = d["data"];
+          if (data_node.is_seq())
+            for (const auto &i: data_node.children())
+              this->dependencies.push_back({ dependency::DATA_DEPENDENCY, i.val() });
           else
-            this->dependencies.push_back({ dependency::DATA_DEPENDENCY, d["data"].get<std::string>() });
-        } else if (d.contains("dependency_file")) {
-          this->dependencies.push_back({ dependency::DEPENDENCY_FILE_DEPENDENCY, d["dependency_file"].get<std::string>() });
+            this->dependencies.push_back({ dependency::DATA_DEPENDENCY, data_node.val() });
+        } else if (d.has_child("dependency_file")) {
+          this->dependencies.push_back({ dependency::DEPENDENCY_FILE_DEPENDENCY, d["dependency_file"].val() });
         }
       }
     }
-
-  if (blueprint.contains("process"))
-    process = blueprint["process"];
-
-  if (blueprint.contains("group"))
-    this->task_group = blueprint["group"].get<std::string>();
-}
-
-nlohmann::json blueprint::as_json() const
-{
-  nlohmann::json j;
-  j["target"] = target;
-
-  if (!regex.has_value())
-    j["regex"] = regex.value();
-
-  if (!requirements.empty())
-    j["requires"] = requirements;
-
-  if (!dependencies.empty()) {
-    nlohmann::json deps = nlohmann::json::array();
-    for (const auto &dep: dependencies) {
-      if (dep.type == dependency::DATA_DEPENDENCY) {
-        nlohmann::json d;
-        d["data"] = dep.name;
-        deps.push_back(d);
-      } else if (dep.type == dependency::DEPENDENCY_FILE_DEPENDENCY) {
-        nlohmann::json d;
-        d["dependency_file"] = dep.name;
-        deps.push_back(d);
-      } else {
-        deps.push_back(dep.name);
-      }
-    }
-    j["depends"] = deps;
   }
 
-  if (!process.empty())
-    j["process"] = process;
+  if (root.has_child("process"))
+    process = root["process"];
 
-  if (!task_group.empty())
-    j["group"] = task_group;
-
-  return j;
+  if (root.has_child("group"))
+    this->task_group = root["group"].val();
 }
+
 } // namespace yakka

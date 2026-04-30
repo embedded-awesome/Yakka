@@ -16,10 +16,10 @@ int register_action(workspace &workspace, const cxxopts::ParseResult &result)
     spdlog::error("Must provide URL of component registry");
     return -1;
   }
-  // Ensure the BOB registries directory exists
+  // Ensure the Yakka registries directory exists
   std::filesystem::create_directories(".yakka/registries");
   spdlog::info("Adding component registry...");
-  auto status = workspace.add_component_registry(result.unmatched()[0]);
+  auto status = workspace.add_component_registry(c4::to_csubstr(result.unmatched()[0]));
   if (!status.has_value()) {
     spdlog::error("Failed to add component registry. See yakka.log for details: {}", status.error().message());
     return -1;
@@ -35,11 +35,28 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
   for (auto registry: workspace.registries) {
     // Group components by type
     std::multimap<std::string, std::string> components_by_type;
-    for (auto c: registry.second["provides"]["components"])
-      components_by_type.insert({c.second["type"] ? c.second["type"].as<std::string>() : "component", c.first.as<std::string>()});
+    auto registry_root = registry.second.crootref();
+    auto provides_node = registry_root.find_child("provides");
+    auto components_node = provides_node.find_child("components");
+    if (components_node.valid() && components_node.is_map()) {
+      for (const auto &component : components_node.children()) {
+        if (!component.has_key()) {
+          continue;
+        }
+        std::string component_name;
+        c4::from_chars(component.key(), &component_name);
+        std::string type = "component";
+        auto type_node = component.find_child("type");
+        if (type_node.valid() && type_node.has_val()) {
+          type = type_node.val<std::string>().value();
+        }
+        components_by_type.insert({type, component_name});
+      }
+    }
 
     // Print registry name
-    std::cout << registry.second["name"] << "\n";
+    auto registry_name = registry_root.find_child("name");
+    std::cout << registry_name << "\n";
 
     // Print components grouped by type
     for (auto it = components_by_type.begin(); it != components_by_type.end(); ) {
@@ -59,8 +76,14 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
 
   // Print components found locally
   std::cout << "Local components:\n";
-  for (const auto &c: workspace.local_database.database["components"].items()) {
-    std::cout << "  - " << c.key() << "\n";
+  auto local_components = workspace.local_database.database.crootref().find_child("components");
+  if (local_components.valid() && local_components.is_map()) {
+    for (const auto &c: local_components.children()) {
+      if (!c.has_key()) {
+        continue;
+      }
+      std::cout << "  - " << c.key() << "\n";
+    }
   }
   return 0;
 }
@@ -82,7 +105,7 @@ int update_action(workspace &workspace, const cxxopts::ParseResult &result)
 int remove_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   for (auto &i: result.unmatched()) {
-    auto optional_location = workspace.find_component(i);
+    auto optional_location = workspace.find_component(c4::to_csubstr(i));
     if (optional_location) {
       auto [path, package] = optional_location.value();
       spdlog::info("Removing {}", path.string());
@@ -97,7 +120,7 @@ int git_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   auto iter                 = result.unmatched().begin();
   const auto component_name = *iter;
-  auto component_path = workspace.find_component(component_name);
+  auto component_path = workspace.find_component(c4::to_csubstr(component_name));
   if (!component_path) {
     spdlog::error("Component '{}' not found in workspace", component_name);
     return -1;
@@ -130,13 +153,13 @@ int git_action(workspace &workspace, const cxxopts::ParseResult &result)
 
 int fetch_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
-  yakka::project project("", workspace);
+  yakka::project project(workspace);
   // Identify components named on command line and add to unknown components
   for (auto s: result.unmatched()) {
     if (s.front() == '+' || s.back() == '!')
       continue;
     else
-      project.unknown_components.insert(s);
+      project.unknown_components.insert(c4::to_csubstr(s));
   }
 
   // Fetch the components
@@ -175,9 +198,9 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
 
     show_console_cursor(false);
     DynamicProgress<ProgressBar> fetch_progress_ui;
-    std::map<std::string, std::shared_ptr<ProgressBar>> fetch_progress_bars;
+    std::map<ryml::csubstr, std::shared_ptr<ProgressBar>> fetch_progress_bars;
 
-    std::map<std::string, std::future<std::filesystem::path>> fetch_list;
+    std::map<ryml::csubstr, std::future<std::filesystem::path>> fetch_list;
     int largest_name_length = 16;
     do {
       // Ask the workspace to fetch them
@@ -188,7 +211,7 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
         // Check if component is in the registry
         auto node = workspace.find_registry_component(i);
         if (node) {
-          auto prefix_test = "Fetching " + i + " ";
+          auto prefix_test = "Fetching " + std::string(i.str, i.len) + " ";
           if (prefix_test.size() > largest_name_length) {
             largest_name_length = prefix_test.size();
           }
@@ -201,9 +224,9 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
           fetch_progress_bars.insert({i, new_progress_bar});
           size_t id = fetch_progress_ui.push_back(*new_progress_bar);
           
-          auto result = workspace.fetch_component(i, *node, [&fetch_progress_ui, &largest_name_length, id, i](std::string_view postfix, size_t number) {
+          auto result = workspace.fetch_component(i, *node, [&fetch_progress_ui, &largest_name_length, id, i](std::string postfix, size_t number) {
             fetch_progress_ui[id].set_option(option::PostfixText{ postfix });
-            auto prefix_test = "Fetching " + i + " ";
+            auto prefix_test = "Fetching " + std::string(i.str, i.len) + " ";
             if (prefix_test.size() < largest_name_length) {
               prefix_test.append(largest_name_length - prefix_test.size(), ' ');
               fetch_progress_ui[id].set_option(option::PrefixText{ prefix_test });
@@ -223,7 +246,7 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
       // Check if we haven't been able to fetch any of the unknown components
       if (fetch_list.empty()) {
         for (const auto &i: project.unknown_components)
-          spdlog::error("Cannot fetch {}", i);
+          spdlog::error("Cannot fetch {}", std::string(i.str, i.len));
         spdlog::shutdown();
         exit(0);
       }
@@ -240,7 +263,7 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
 
       // Check if the fetch worked
       if (new_component_path.empty()) {
-        spdlog::error("Failed to fetch {}", completed_fetch->first);
+        spdlog::error("Failed to fetch {}", std::string(completed_fetch->first.str, completed_fetch->first.len));
         project.unknown_components.erase(completed_fetch->first);
         fetch_list.erase(completed_fetch);
         continue;

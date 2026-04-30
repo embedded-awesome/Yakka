@@ -43,8 +43,8 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
     }
 
     for (auto &i: task_engine.todo_task_groups) {
-      std::string spaces(largest_name_length - i.second->name.size(), ' ');
-      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ i.second->name + spaces }, option::MaxProgress{ i.second->total_count });
+      std::string spaced_name = yakka::ryml_string(i.second->name) + std::string(largest_name_length - i.second->name.size(), ' ');
+      std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ spaced_name }, option::MaxProgress{ i.second->total_count });
       task_progress_bars.push_back(new_task_bar);
       i.second->ui_id = task_progress_ui.push_back(*new_task_bar);
       task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
@@ -191,48 +191,43 @@ int main(int argc, char **argv)
   }
 
   // Process the command line options
-  std::string project_name;
-  std::string feature_suffix;
-  std::vector<std::string> components;
-  std::vector<std::string> features;
-  std::unordered_set<std::string> commands;
-  for (auto s: result.unmatched()) {
-    // Identify features, commands, and components
-    if (s.front() == '+') {
-      feature_suffix += s;
-      features.push_back(s.substr(1));
-    } else if (s.back() == '!')
-      commands.insert(s.substr(0, s.size() - 1));
-    else {
-      components.push_back(s);
+  // std::string project_name;
+  // std::string feature_suffix;
+  // for (auto s: result.unmatched()) {
+  //   // Identify features, commands, and components
+  //   if (s.front() == '+') {
+  //     feature_suffix += s;
+  //     features.push_back(c4::to_csubstr(s.substr(1)));
+  //   } else if (s.back() == '!')
+  //     commands.insert(c4::to_csubstr(s.substr(0, s.size() - 1)));
+  //   else {
+  //     components.push_back(c4::to_csubstr(s));
 
-      // Compose the project name by concatenation all the components in CLI order.
-      // The features will be added at the end
-      project_name += s + "-";
-    }
-  }
+  //     // Compose the project name by concatenation all the components in CLI order.
+  //     // The features will be added at the end
+  //     project_name += s + "-";
+  //   }
+  // }
 
-  if (components.size() == 0) {
-    spdlog::error("No components identified");
-    return -1;
-  }
+  // if (components.size() == 0) {
+  //   spdlog::error("No components identified");
+  //   return -1;
+  // }
 
   // Remove the extra "-" and add the feature suffix
-  project_name.pop_back();
-  project_name += feature_suffix;
+  // project_name.pop_back();
+  // project_name += feature_suffix;
 
+  // cli_set_project_name can override the generated project name but will be empty if not set (default value of project name arg in project constructor)
   auto cli_set_project_name = result["project-name"].as<std::string>();
-  if (!cli_set_project_name.empty())
-    project_name = cli_set_project_name;
 
   // Create a project and output
-  yakka::project project(project_name, workspace);
-
-  // Add the action as a command
-  commands.insert(action);
+  yakka::project project(workspace, cli_set_project_name);
 
   // Init the project
-  project.init_project(components, features, commands);
+  project.init_project(result.unmatched());
+  
+  project.add_command(action);
 
   // Check if we don't want Yakka files
   if (result["no-yakka"].count() != 0) {
@@ -247,7 +242,7 @@ int main(int argc, char **argv)
     if (result["with"].count() != 0) {
       const auto slc_features = result["with"].as<std::vector<std::string>>();
       for (const auto &f: slc_features)
-        project.slc_required.insert(f);
+        project.slc_required.insert(c4::to_csubstr(f));
     }
   }
 
@@ -272,31 +267,31 @@ int main(int argc, char **argv)
   } else {
     spdlog::info("Skipping project evalutaion");
 
-    for (const auto &i: components) {
-      // Convert string to id
-      const auto component_id = yakka::component_dotname_to_id(i);
-      // Find the component in the project component database
-      auto component_location = workspace.find_component(component_id, project.component_flags);
-      if (!component_location) {
-        continue;
-      }
+    // for (const auto &i: components) {
+    //   // Convert string to id
+    //   const auto component_id = yakka::component_dotname_to_id(i);
+    //   // Find the component in the project component database
+    //   auto component_location = workspace.find_component(component_id, project.component_flags);
+    //   if (!component_location) {
+    //     continue;
+    //   }
 
-      // Add component to the required list and continue if this is not a new component
-      // Insert component and continue if this is not new
-      if (project.required_components.insert(component_id).second == false)
-        continue;
+    //   // Add component to the required list and continue if this is not a new component
+    //   // Insert component and continue if this is not new
+    //   if (project.required_components.insert(component_id).second == false)
+    //     continue;
 
-      auto [component_path, package_path]             = component_location.value();
-      std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
-      if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
-        project.components.push_back(new_component);
-      } else {
-        if (!result["ignore-eval"].as<bool>()) {
-          spdlog::error("Failed to parse {}", component_path.generic_string());
-          exit(-1);
-        }
-      }
-    }
+    //   auto [component_path, package_path]             = component_location.value();
+    //   std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
+    //   if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
+    //     project.components.push_back(new_component);
+    //   } else {
+    //     if (!result["ignore-eval"].as<bool>()) {
+    //       spdlog::error("Failed to parse {}", component_path.generic_string());
+    //       exit(-1);
+    //     }
+    //   }
+    // }
   }
 
   if (result["no-slcc"].count() == 0)
@@ -332,10 +327,11 @@ int main(int argc, char **argv)
   if (result["data"].count() != 0) {
     spdlog::info("Processing additional data: {}", result["data"].as<std::string>());
     const auto additional_data = "{" + result["data"].as<std::string>() + "}";
-    YAML::Node yaml_data       = YAML::Load(additional_data);
-    nlohmann::json json_data   = yaml_data.as<nlohmann::json>();
-    spdlog::info("Additional data: {}", json_data.dump());
-    yakka::json_node_merge("/data"_json_pointer, project.project_summary["data"], json_data, &project.project_schema);
+    // ryml::Tree data       = ryml::parse_in_arena(ryml::to_csubstr(additional_data));
+    auto node = project.project_summary["temp"].append_child();
+    node |= ryml::MAP;
+    ryml::parse_in_arena(ryml::to_csubstr(additional_data), node);
+    yakka::merge_nodes(project.project_summary["data"], node);
   }
 
   t1 = std::chrono::high_resolution_clock::now();
@@ -353,8 +349,8 @@ int main(int argc, char **argv)
     auto result = workspace.find_blueprint(c);
     if (result) {
       const auto blueprint_options = result.value();
-      if (blueprint_options.size() == 1) {
-        const auto &component_name = blueprint_options[0].get<std::string>();
+      if (blueprint_options.num_children() == 1) {
+        auto component_name = blueprint_options[0].val();
         auto component_paths       = workspace.find_component(component_name);
         if (component_paths) {
           auto [component_path, db_path] = component_paths.value();
@@ -366,7 +362,7 @@ int main(int argc, char **argv)
       } else {
         spdlog::error("Multiple options for missing blueprint {}", c);
         for (const auto &o: blueprint_options)
-          spdlog::error("- {}", o.get<std::string>());
+          spdlog::error("- {}", o.val<std::string>().value());
         return -1;
       }
     } else {
@@ -433,11 +429,11 @@ static void print_project_choice_errors(yakka::project &project)
     spdlog::error("Component '{}' has a choice '{}' - Must choose from the following", i.first, i.second);
     for (const auto &b: project.project_summary["choices"][i.second]["options"]) {
       if (b.contains("feature"))
-        spdlog::error("  - feature '{}'", b["feature"].get<std::string>());
+        spdlog::error("  - feature '{}'", b["feature"].val<std::string>().value());
       else if (b.contains("component"))
-        spdlog::error("  - component '{}'", b["component"].get<std::string>());
+        spdlog::error("  - component '{}'", b["component"].val<std::string>().value());
       else {
-        spdlog::error("Invalid choice {}: Invalid format");
+        spdlog::error("Invalid choice {}: Invalid format", b.val<std::string>().value());
         project.current_state = yakka::project::state::PROJECT_HAS_INVALID_COMPONENT;
         return;
       }

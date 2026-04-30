@@ -1,0 +1,1 @@
+{% extends "../layouts/mid.inja" %}{% block title %}child>{{ super(2) }}/{{ super() }}{% endblock %}{% block body %}child>{{ super() }}{% endblock %}

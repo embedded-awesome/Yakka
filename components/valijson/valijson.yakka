@@ -1,0 +1,12 @@
+name: Valijson
+
+includes:
+  global:
+    - include
+
+requires:
+  features:
+    - cpp20
+  components:
+    - rapidyaml
+

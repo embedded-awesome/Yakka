@@ -1,14 +1,16 @@
 #ifndef INCLUDE_INJA_JSON_HPP_
 #define INCLUDE_INJA_JSON_HPP_
 
-#include <nlohmann/json.hpp>
+#include <ryml.hpp>
+#include "ryml_std.hpp"
 
 namespace inja {
-#ifndef INJA_DATA_TYPE
-using json = nlohmann::json;
-#else
-using json = INJA_DATA_TYPE;
-#endif
+namespace ryml = ::ryml;
+using Tree = ryml::Tree;
+using NodeRef = ryml::NodeRef;
+using ConstNodeRef = ryml::ConstNodeRef;
+using Pointer = ryml::Pointer;
+constexpr size_t NONE = size_t(-1);
 } // namespace inja
 
 #endif // INCLUDE_INJA_JSON_HPP_

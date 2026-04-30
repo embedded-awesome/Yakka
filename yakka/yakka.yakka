@@ -18,6 +18,8 @@ includes:
     - '.'
 
 requires:
+  features:
+    - cpp23
   components:
     - yaml-cpp
     - cpp-subprocess
@@ -29,10 +31,14 @@ requires:
     - spdlog
     - taskflow
     - glob
-    - json-schema-validator
+#    - json-schema-validator
     - rapidyaml
+    - rapidyaml_json
+    - rapidtoml
     - blake3
+    - libsodium
     - pugixml
+    - valijson
 
 supports:
   components:

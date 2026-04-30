@@ -1,0 +1,8 @@
+name: RapidTOML
+
+includes:
+  global:
+    - .
+
+sources:
+  - toml_parser_ryml.cpp

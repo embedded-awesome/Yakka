@@ -2,11 +2,143 @@
 
 #include "yakka_component.hpp"
 #include "yaml-cpp/yaml.h"
-#include <nlohmann/json-schema.hpp>
+#include <ryml.hpp>
+#include <ryml_std.hpp>
+// #include <ryml/json-schema.hpp>
 #include "spdlog.h"
+#include <filesystem>
 #include <ranges>
 
 namespace yakka {
+
+// clang-format off
+const std::string yakka_component_schema_yaml = R"(
+title: Yakka file
+type: object
+properties:
+  name:
+    description: Name
+    type: string
+
+  requires:
+    type: object
+    description: Requires relationships
+    properties:
+      features:
+        type: [array, 'null']
+        merge: concatenate
+        description: Collection of features
+        uniqueItems: true
+        items:
+          type: [string, object]
+      components:
+        type: [array, 'null']
+        merge: concatenate
+        description: Collection of components
+        uniqueItems: true
+        items:
+          type: [string, object]
+
+  supports:
+    type: object
+    description: Supporting relationships
+    properties:
+      features:
+        type: object
+        description: Collection of features
+        patternProperties:
+          '.*':
+            type: object
+      components:
+        type: object
+        description: Collection of components
+        patternProperties:
+          '.*':
+            type: object
+
+  blueprints:
+    type: object
+    description: Blueprints
+    propertyNames:
+      pattern: "^[A-Za-z_.:{][A-Za-z0-9.{}/\\\\_-]*$"
+    patternProperties:
+      '.*':
+        type: object
+        additionalProperties: false
+        minProperties: 1
+        properties:
+          regex:
+            type: string
+          group:
+            type: string
+          depends:
+            type: array
+          process:
+            type: array
+            items:
+              type: object
+  choices:
+    type: object
+    description: Choices
+    propertyNames:
+      pattern: "^[A-Za-z0-9_.]*$"
+    patternProperties:
+      '.*':
+        type: object
+        additionalProperties: false
+        minProperties: 1
+        required:
+          - description
+        properties:
+          description:
+            type: string
+          exclusive:
+            type: boolean
+          options:
+            type: array
+            items:
+              type: object
+              oneOf:
+                - properties:
+                    feature:
+                      type: string
+                    label:
+                      type: string
+                    description:
+                      type: string
+                  required:
+                    - feature
+                - properties:
+                    component:
+                      type: string
+                    label:
+                      type: string
+                    description:
+                      type: string
+                  required:
+                    - component
+          default:
+            oneOf:
+              - type: object
+                properties:
+                  feature:
+                    type: string
+                required:
+                  - feature
+              - type: object
+                properties:
+                  component:
+                    type: string
+                required:
+                  - component
+              - type: array
+                items:
+                  type: object
+
+required: 
+  - name
+)";
+// clang-format on
 
 class schema {
 public:
@@ -22,165 +154,41 @@ public:
   };
 
 public:
-  schema() : schema_data("{ \"properties\": {} }"_json), validator(nullptr, nlohmann::json_schema::default_string_format_check)
+  schema() : schema_data()
   {
   }
+  explicit schema(const std::string &schema_yaml);
+  explicit schema(const std::filesystem::path &schema_path);
+  
 
-  void add_schema_data(const nlohmann::json &schema_data);
-  bool validate(const nlohmann::json &data, std::string id = "");
-  schema::merge_strategy get_merge_strategy(const nlohmann::json::json_pointer &path) const;
+  void add_schema_data(ryml::ConstNodeRef schema_data);
+  // bool validate(ryml::ConstNodeRef data, std::string id = "");
+  bool validate(ryml::ConstNodeRef data, ryml::csubstr id);
+  ryml::ConstNodeRef operator[](const ryml::Pointer &path) const;
+  ryml::ConstNodeRef operator[](const std::string &path) const;
+  schema::merge_strategy get_merge_strategy(const ryml::Pointer &path) const;
 
 private:
-  nlohmann::json schema_data;
-  nlohmann::json_schema::json_validator validator;
+  ryml::Tree schema_data;
+  // ryml_schema::json_validator validator;
   bool validator_updated = false;
 };
 
 class yakka_schema_validator {
-  nlohmann::json yakka_schema;
-  nlohmann::json slcc_schema;
-  nlohmann::json_schema::json_validator yakka_validator;
-  nlohmann::json_schema::json_validator slcc_validator;
+  schema yakka_component_schema;
+  schema slcc_component_schema;
+  // ryml_schema::json_validator yakka_validator;
+  // ryml_schema::json_validator slcc_validator;
 
-  // clang-format off
-  const std::string yakka_component_schema_yaml = R"(
-  title: Yakka file
-  type: object
-  properties:
-    name:
-      description: Name
-      type: string
-
-    requires:
-      type: object
-      description: Requires relationships
-      properties:
-        features:
-          type: [array, null]
-          merge: concatenate
-          description: Collection of features
-          uniqueItems: true
-          items:
-            type: [string, object]
-        components:
-          type: [array, null]
-          merge: concatenate
-          description: Collection of components
-          uniqueItems: true
-          items:
-            type: [string, object]
-
-    supports:
-      type: object
-      description: Supporting relationships
-      properties:
-        features:
-          type: object
-          description: Collection of features
-          patternProperties:
-            '.*':
-              type: object
-        components:
-          type: object
-          description: Collection of components
-          patternProperties:
-            '.*':
-              type: object
-
-    blueprints:
-      type: object
-      description: Blueprints
-      propertyNames:
-        pattern: "^[A-Za-z_.:{][A-Za-z0-9.{}/\\\\_-]*$"
-      patternProperties:
-        '.*':
-          type: object
-          additionalProperties: false
-          minProperties: 1
-          properties:
-            regex:
-              type: string
-            group:
-              type: string
-            depends:
-              type: array
-            process:
-              type: array
-              items:
-                type: object
-    choices:
-      type: object
-      description: Choices
-      propertyNames:
-        pattern: "^[A-Za-z0-9_.]*$"
-      patternProperties:
-        '.*':
-          type: object
-          additionalProperties: false
-          minProperties: 1
-          required:
-            - description
-          properties:
-            description:
-              type: string
-            exclusive:
-              type: boolean
-            options:
-              type: array
-              items:
-                type: object
-                oneOf:
-                  - properties:
-                      feature:
-                        type: string
-                      label:
-                        type: string
-                      description:
-                        type: string
-                    required:
-                      - feature
-                  - properties:
-                      component:
-                        type: string
-                      label:
-                        type: string
-                      description:
-                        type: string
-                    required:
-                      - component
-            default:
-              oneOf:
-                - type: object
-                  properties:
-                    feature:
-                      type: string
-                  required:
-                    - feature
-                - type: object
-                  properties:
-                    component:
-                      type: string
-                  required:
-                    - component
-                - type: array
-                  items:
-                    type: object
-
-
-  required: 
-    - name
-  )";
-  // clang-format on
-
-  class custom_error_handler : public nlohmann::json_schema::basic_error_handler {
-  public:
-    yakka::component *component;
-    void error(const nlohmann::json::json_pointer &ptr, const nlohmann::json &instance, const std::string &message) override
-    {
-      nlohmann::json_schema::basic_error_handler::error(ptr, instance, message);
-      spdlog::error("Validation error in '{}': {} - {} : - {}", component->file_path.generic_string(), ptr.to_string(), instance.dump(3), message);
-    }
-  };
+  // class custom_error_handler : public ryml_schema::basic_error_handler {
+  // public:
+  //   yakka::component *component;
+  //   void error(const ryml::Pointer &ptr, const ryml::Tree &instance, const std::string &message) override
+  //   {
+  //     ryml_schema::basic_error_handler::error(ptr, instance, message);
+  //     spdlog::error("Validation error in '{}': {} - {} : - {}", component->file_path.generic_string(), ptr.to_string(), instance.dump(3), message);
+  //   }
+  // };
 
 public:
   static yakka_schema_validator &get()

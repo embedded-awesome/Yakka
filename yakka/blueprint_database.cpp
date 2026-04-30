@@ -7,7 +7,17 @@
 #include <regex>
 
 namespace yakka {
-std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(const std::string target, const nlohmann::json &project_summary)
+blueprint_database::blueprint_database()
+{
+  database.reserve_arena(8 * 1024 * 1024);                // Reserve 8MB to keep csubstr-backed arena storage stable during typical operations.
+  database.add_flags(ryml::Tree::TREEF_NO_ARENA_REALLOC); // Forbid arena reallocations to ensure pointer stability of csubstrs.
+  database.rootref() |= ryml::MAP;
+  database["blueprints"] |= ryml::SEQ;
+  database["matches"] |= ryml::SEQ;
+  database["dependencies"] |= ryml::SEQ;
+}
+
+std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(ryml::csubstr target, ryml::ConstNodeRef project_summary)
 {
   bool blueprint_match_found = false;
   std::vector<std::shared_ptr<blueprint_match>> result;
@@ -18,12 +28,15 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
     // Check if rule is a regex, otherwise do a string comparison
     if (blueprint.second->regex.has_value()) {
       std::smatch s;
-      if (!std::regex_match(target, s, std::regex{ blueprint.first }))
+      std::string target_str = ryml_string(target);
+      if (!std::regex_match(target_str, s, std::regex{ ryml_string(blueprint.first) }))
         continue;
 
       // arg_count starts at 0 as the first match is the entire string
-      for (auto &regex_match: s)
-        match->regex_matches.push_back(regex_match.str());
+      for (auto &regex_match: s) {
+        auto match_node = database["matches"].append_child() << regex_match.str();
+        match->regex_matches.push_back(match_node.val());
+      }
     } else {
       if (target != blueprint.first)
         continue;
@@ -39,62 +52,66 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
 
     add_common_template_commands(local_inja_env);
 
-    local_inja_env.add_callback("$", 1, [&match](const inja::Arguments &args) {
-      const int index = args[0]->get<int>();
+    local_inja_env.add_callback("$", 1, [&match](inja::Arguments &args, ryml::NodeRef additional_data) {
+      const int32_t index = args[0].val<int32_t>().value();
       if (index < match->regex_matches.size())
-        return nlohmann::json(match->regex_matches[index]);
+        return additional_data["values"].append_child() << match->regex_matches[index];
 
-      return nlohmann::json();
+      return ryml::NodeRef{};
     });
-    local_inja_env.add_callback("curdir", 0, [&match](const inja::Arguments &args) {
-      return match->blueprint->parent_path;
+    local_inja_env.add_callback("curdir", 0, [&match](inja::Arguments &args, ryml::NodeRef additional_data) {
+      return additional_data["values"].append_child() << match->blueprint->parent_path;
     });
-    local_inja_env.add_callback("render", 1, [&](const inja::Arguments &args) {
-      return local_inja_env.render(args[0]->get<std::string>(), project_summary);
+    local_inja_env.add_callback("render", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
+      return additional_data["values"].append_child() << local_inja_env.render(args[0].val<std::string>().value(), project_summary);
     });
-    local_inja_env.add_callback("select", 1, [&](const inja::Arguments &args) {
-      nlohmann::json choice;
-      for (const auto &option: args.at(0)->items()) {
-        const auto option_type = option.key();
-        const auto option_name = option.value();
-        if ((option_type == "feature" && project_summary["features"].contains(option_name)) || (option_type == "component" && project_summary["components"].contains(option_name))) {
-          assert(choice.is_null());
-          choice = option_name;
-        }
-      }
-      return choice;
+    local_inja_env.add_callback("select", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
+      // TODO
+      return ryml::NodeRef{};
+      // inja::ryml_json choice;
+      // for (const auto &option: args.at(0)->items()) {
+      //   const auto option_type = option.key();
+      //   const auto option_name = option.value();
+      //   if ((option_type == "feature" && project_summary["features"].has_child(option_name)) || (option_type == "component" && project_summary["components"].has_child(option_name))) {
+      //     assert(choice.is_null());
+      //     choice = option_name;
+      //   }
+      // }
+      // return choice;
     });
-    local_inja_env.add_callback("aggregate", 1, [&](const inja::Arguments &args) {
-      nlohmann::json aggregate;
-      auto path = nlohmann::json::json_pointer{args[0]->get<std::string>()};
+    local_inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
+      auto aggregate = additional_data["values"].append_child();
+      aggregate |= ryml::MAP;
+      auto path = ryml::Pointer{ args[0].val() };
+
       // Loop through components, check if object path exists, if so add it to the aggregate
-      for (const auto &[c_key, c_value]: project_summary["components"].items()) {
-        // auto v = json_path(c.value(), path);
-        if (!c_value.contains(path))
+      for (const auto &child: project_summary["components"].children()) {
+        // auto c_value = child.val();
+        if (!child.contains(path))
           continue;
 
-        auto v = c_value[path];
-        if (v.is_object())
-          for (const auto &[i_key, i_value]: v.items())
-            aggregate[i_key] = i_value; //local_inja_env.render(i.second.as<std::string>(), this->project_summary);
-        else if (v.is_array())
-          for (const auto &i: v)
-            aggregate.push_back(local_inja_env.render(i.get<std::string>(), project_summary));
+        auto v = child[path];
+        if (v.is_map())
+          for (auto i: v.children())
+            aggregate[i.key()] = i.val(); //local_inja_env.render(i.second.as<std::string>(), this->project_summary);
+        else if (v.is_seq())
+          for (const auto &i: v.children())
+            aggregate.append_child() << local_inja_env.render(i.val<std::string>().value(), project_summary);
         else
-          aggregate.push_back(local_inja_env.render(v.get<std::string>(), project_summary));
+          aggregate.append_child() << local_inja_env.render(v.val<std::string>().value(), project_summary);
       }
 
       // Check project data
       if (project_summary["data"].contains(path)) {
         auto v = project_summary["data"][path];
-        if (v.is_object())
-          for (const auto &[i_key, i_value]: v.items())
-            aggregate[i_key] = i_value;
-        else if (v.is_array())
-          for (const auto &i: v)
-            aggregate.push_back(local_inja_env.render(i.get<std::string>(), project_summary));
+        if (v.is_map())
+          for (auto i: v.children())
+            aggregate[i.key()] = i.val();
+        else if (v.is_seq())
+          for (const auto &i: v.children())
+            aggregate.append_child() << local_inja_env.render(i.val<std::string>().value(), project_summary);
         else
-          aggregate.push_back(local_inja_env.render(v.get<std::string>(), project_summary));
+          aggregate.append_child() << local_inja_env.render(v.val<std::string>().value(), project_summary);
       }
       return aggregate;
     });
@@ -112,7 +129,8 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
           std::string data_name = yakka::try_render(local_inja_env, d.name, project_summary);
           if (data_name.front() != yakka::data_dependency_identifier)
             data_name.insert(0, 1, yakka::data_dependency_identifier);
-          match->dependencies.push_back(data_name);
+          auto dependency = database["dependencies"].append_child() << data_name;
+          match->dependencies.push_back(dependency.val());
           continue;
         }
         default:
@@ -122,7 +140,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
       // Generate full dependency string by applying template engine
       std::string generated_depend;
       try {
-        generated_depend = local_inja_env.render(d.name, project_summary);
+        generated_depend = local_inja_env.render(std::string_view(d.name.data(), d.name.size()), project_summary);
       } catch (std::exception &e) {
         spdlog::error("Error evaluating dependency for {}\r\nCouldn't apply template: '{}'\n{}", blueprint.first, d.name, e.what());
         return result;
@@ -134,14 +152,16 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
         try {
           auto generated_node = YAML::Load(generated_depend);
           for (auto i: generated_node) {
-            auto temp = i.Scalar();
-            match->dependencies.push_back(temp.starts_with("./") ? temp.substr(temp.find_first_not_of("/", 2)) : temp);
+            auto temp       = i.Scalar();
+            auto dependency = database["dependencies"].append_child() << (temp.starts_with("./") ? temp.substr(temp.find_first_not_of("/", 2)) : temp);
+            match->dependencies.push_back(dependency.val());
           }
         } catch (std::exception &e) {
-          std::cerr << "Failed to parse dependency: " << d.name << "\n";
+          std::cerr << "Failed to parse dependency: " << ryml_string(d.name) << "\n";
         }
       } else {
-        match->dependencies.push_back(generated_depend.starts_with("./") ? generated_depend.substr(generated_depend.find_first_not_of("/", 2)) : generated_depend);
+        auto dependency = database["dependencies"].append_child() << (generated_depend.starts_with("./") ? generated_depend.substr(generated_depend.find_first_not_of("/", 2)) : generated_depend);
+        match->dependencies.push_back(dependency.val());
       }
     }
 
@@ -149,7 +169,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
   }
 
   if (!blueprint_match_found) {
-    if (!fs::exists(target) && target[0] != yakka::data_dependency_identifier)
+    if (!fs::exists(ryml_string(target)) && target[0] != yakka::data_dependency_identifier)
       spdlog::info("No blueprint for '{}'", target);
   }
   return result;
@@ -157,31 +177,83 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(con
 
 void blueprint_database::load(const std::filesystem::path filename)
 {
+  database = ryml_load_file(filename).value();
+
+  // Generate blueprints from database
 }
 
 void blueprint_database::save(const std::filesystem::path filename)
 {
-  nlohmann::json output;
+  ryml::Tree output;
+  output.reserve_arena(2 * 1024 * 1024); // Reserve 2MB for the arena to avoid reallocations during saving, which would invalidate all node references
+  auto output_root = output.rootref();
+  output_root |= ryml::MAP;
 
   for (const auto &bp: blueprints) {
-    nlohmann::json blueprint;
-    blueprint["target"]      = bp.second->target;
-    blueprint["regex"]       = bp.second->regex.value_or("");
-    blueprint["parent_path"] = bp.second->parent_path;
+    auto blueprint = output_root.append_child() << ryml::Key(bp.first);
+    blueprint |= ryml::MAP;
+    blueprint["target"] << bp.second->target;
+    blueprint["regex"] << bp.second->regex.value_or("");
+    blueprint["parent_path"] << bp.second->parent_path;
 
-    nlohmann::json dependencies = nlohmann::json::array();
+    auto dependencies = blueprint.append_child() << ryml::Key("dependencies");
+    dependencies |= ryml::SEQ;
     for (const auto &dep: bp.second->dependencies) {
-      nlohmann::json dependency;
-      dependency["type"] = dep.type;
-      dependency["name"] = dep.name;
-      dependencies.push_back(dependency);
+      auto dependency = dependencies.append_child();
+      dependency |= ryml::MAP;
+      dependency["type"] << dep.type;
+      dependency["name"] << dep.name;
     }
-    blueprint["dependencies"] = dependencies;
-
-    output[bp.first].push_back(blueprint);
   }
 
   std::ofstream file(filename);
-  file << output.dump(2);
+  file << ryml::emitrs_json<std::string>(output);
+}
+
+/**
+ * @brief Parses dependency files as output by GCC or Clang generating a vector of filenames as found in the named file
+ *
+ * @param filename  Name of the dependency file. Typically ending in '.d'
+ * @return std::vector<ryml::csubstr>  Vector of files specified as dependencies
+ */
+std::vector<ryml::csubstr> blueprint_database::parse_gcc_dependency_file(const std::string &filename)
+{
+  std::vector<ryml::csubstr> dependencies;
+  std::ifstream infile(filename);
+
+  if (!infile.is_open())
+    return {};
+
+  std::string line;
+
+  // Find and ignore the first line with the target. Typically "<target>: \"
+  do {
+    std::getline(infile, line);
+  } while (line.length() > 0 && line.find(':') == std::string::npos);
+
+  while (std::getline(infile, line, ' ')) {
+    if (line.empty() || line.compare("\\\n") == 0)
+      continue;
+    if (line.back() == '\n')
+      line.pop_back();
+    if (line.back() == '\r')
+      line.pop_back();
+    if (line.rfind("./", 0) == 0) {
+      auto dependency = database["dependencies"].append_child() << line.substr(2);
+      dependencies.push_back(dependency.val());
+    } else {
+      auto dependency = database["dependencies"].append_child() << line;
+      dependencies.push_back(dependency.val());
+    }
+  }
+
+  return dependencies;
+}
+
+void blueprint_database::create_blueprint(const std::string &target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path)
+{
+  auto blueprint_target     = database["blueprints"].append_child() << target;
+  auto new_blueprint = std::make_shared<blueprint>(blueprint_target.val(), blueprint_data, parent_path);
+  blueprints.insert({ blueprint_target.val(), new_blueprint });
 }
 } // namespace yakka

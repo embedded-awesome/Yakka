@@ -15,10 +15,60 @@ namespace fs = std::filesystem;
 
 namespace yakka {
 
+ryml::NodeRef ensure_map_node(ryml::NodeRef node)
+{
+  if (!node.is_map()) {
+    node |= ryml::MAP;
+  }
+  return node;
+}
+
+ryml::NodeRef ensure_child_map(ryml::NodeRef parent, c4::csubstr key)
+{
+  ensure_map_node(parent);
+  if (parent.has_child(key)) {
+    auto child = parent.find_child(key);
+    if (!child.is_map()) {
+      child |= ryml::MAP;
+    }
+    return child;
+  }
+
+  ryml::NodeRef child = parent.append_child();
+  child << ryml::key(key);
+  child |= ryml::MAP;
+  return child;
+}
+
+ryml::NodeRef ensure_child_seq(ryml::NodeRef parent, c4::csubstr key)
+{
+  ensure_map_node(parent);
+  ryml::NodeRef child = parent.has_child(key) ? parent.find_child(key) : parent.append_child();
+  if (!child.has_key()) {
+    child << ryml::key(key);
+  }
+  if (!child.is_seq()) {
+    child |= ryml::SEQ;
+  }
+  return child;
+}
+
+ryml::NodeRef ensure_child_scalar(ryml::NodeRef parent, c4::csubstr key, c4::csubstr value)
+{
+  ensure_map_node(parent);
+  ryml::NodeRef child = parent.has_child(key) ? parent.find_child(key) : parent.append_child();
+  if (!child.has_key()) {
+    child << ryml::key(key);
+  }
+  child.set_val(value);
+  return child;
+}
+
 // Using std::expected for error handling
 std::expected<void, std::error_code> workspace::init(const std::filesystem::path &workspace_path)
 {
   this->workspace_path = workspace_path;
+  ensure_map_node(summary.rootref());
 
   if (auto result = load_config_file(workspace_path / "config.yaml"); !result)
     return std::unexpected(result.error());
@@ -75,14 +125,28 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
 
   // Check for project file
   if (fs::exists(workspace_path / yakka::projects_filename)) {
-    projects = nlohmann::json::parse(std::ifstream(workspace_path / yakka::projects_filename));
+    auto projects_tree = ryml_load_file(workspace_path / yakka::projects_filename);
+    if (!projects_tree) {
+      spdlog::error("Failed to parse projects file: {}\n", projects_tree.error().message());
+      return std::unexpected(projects_tree.error());
+    }
+    projects = std::move(*projects_tree);
   } else {
     // Iterate through project folders in output directory and create a projects entry for each
     const auto output_path = workspace_path / yakka::default_output_directory;
+    auto projects_root = projects.rootref();
+    ensure_map_node(projects_root);
     if (fs::exists(output_path)) {
       for (const auto &d: fs::directory_iterator(output_path)) {
         if (fs::is_directory(d.path()) && fs::exists(d.path() / project_summary_filename)) {
-          projects[d.path().filename().string()] = { { "path", d.path().string() } };
+          const auto project_name = d.path().filename().string();
+          const auto key          = c4::to_csubstr(project_name);
+          ryml::NodeRef project_node = projects_root.has_child(key) ? projects_root.find_child(key) : projects_root.append_child();
+          if (!project_node.has_key()) {
+            project_node << ryml::key(key);
+          }
+          project_node |= ryml::MAP;
+          ensure_child_scalar(project_node, "path", c4::to_csubstr(d.path().string()));
         }
       }
     }
@@ -92,12 +156,13 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
       spdlog::error("Failed to create projects file at {}\n", (workspace_path / yakka::projects_filename).string());
       return std::unexpected(std::make_error_code(std::errc::io_error));
     }
-    project_file << projects;
+    project_file << ryml::emitrs_json<std::string>(projects);
     project_file.close();
   }
 
-  summary["configuration"]["host_os"]              = host_os_string;
-  summary["configuration"]["executable_extension"] = executable_extension;
+  auto config_node = ensure_child_map(summary.rootref(), "configuration");
+  ensure_child_scalar(config_node, "host_os", c4::to_csubstr(host_os_string));
+  ensure_child_scalar(config_node, "executable_extension", c4::to_csubstr(executable_extension));
 
   return {};
 }
@@ -116,7 +181,12 @@ void workspace::load_component_registries()
   for (const auto &entry: yaml_files) {
     try {
       const auto registry_name  = entry.path().filename().replace_extension().string();
-      registries[registry_name] = YAML::LoadFile(entry.path().string());
+      auto registry_tree = ryml_load_file(entry.path());
+      if (!registry_tree) {
+        spdlog::error("Could not parse component registry '{}': {}\n", entry.path().string(), registry_tree.error().message());
+        continue;
+      }
+      registries[registry_name] = std::move(*registry_tree);
     } catch (const std::exception &e) {
       spdlog::error("Could not parse component registry '{}': {}\n", entry.path().string(), e.what());
     }
@@ -124,28 +194,36 @@ void workspace::load_component_registries()
 }
 
 // Using std::expected for error handling in component registry addition
-std::expected<void, std::error_code> workspace::add_component_registry(std::string_view url)
+std::expected<void, std::error_code> workspace::add_component_registry(ryml::csubstr url)
 {
   return fetch_registry(url);
 }
 
 // Using std::optional for registry component lookup
-std::optional<YAML::Node> workspace::find_registry_component(std::string_view name) const
+std::optional<ryml::ConstNodeRef> workspace::find_registry_component(ryml::csubstr name) const
 {
-  for (const auto &r: registries) {
-    const auto &registry = r.second;
-    if (const auto &components = registry["provides"]["components"]; components[std::string(name)].IsDefined()) {
-      return components[std::string(name)];
+  for (const auto &[registry_name, registry_tree]: registries) {
+    const auto registry = registry_tree.crootref();
+    if (!registry.valid() || !registry.has_child("provides")) {
+      continue;
+    }
+    const auto provides = registry["provides"];
+    if (!provides.has_child("components")) {
+      continue;
+    }
+    const auto components = provides["components"];
+    if (components.has_child(name)) {
+      return components.find_child(name);
     }
   }
   return std::nullopt;
 }
 
 // Modern implementation of component finding with structured bindings
-std::optional<std::pair<std::filesystem::path, std::filesystem::path>> workspace::find_component(std::string_view component_dotname, component_database::flag flags)
+std::optional<std::pair<std::filesystem::path, std::filesystem::path>> workspace::find_component(ryml::csubstr component_dotname, component_database::flag flags)
 {
   const bool try_update_the_database = false;
-  const auto component_id            = yakka::component_dotname_to_id(std::string(component_dotname));
+  const auto component_id            = yakka::component_dotname_to_id(component_dotname);
 
   const auto [local, shared] = std::tuple{ local_database.get_component(component_id, flags), shared_database.get_component(component_id, flags) };
 
@@ -175,16 +253,15 @@ std::optional<std::pair<std::filesystem::path, std::filesystem::path>> workspace
   return std::nullopt;
 }
 
-// Feature finding with modern C++ features
-std::optional<nlohmann::json> workspace::find_feature(std::string_view feature) const
+std::optional<ryml::ConstNodeRef> workspace::find_feature(ryml::csubstr feature) const
 {
   // Using structured bindings and if-init statement
   if (auto node = local_database.get_feature_provider(feature); node.has_value()) {
-    return std::optional<nlohmann::json>(*node);
+    return node;
   }
 
   if (auto node = shared_database.get_feature_provider(feature); node.has_value()) {
-    return std::optional<nlohmann::json>(*node);
+    return node;
   }
 
   // Using ranges to search package databases
@@ -199,15 +276,14 @@ std::optional<nlohmann::json> workspace::find_feature(std::string_view feature) 
   return std::nullopt;
 }
 
-// Blueprint finding with modern features
-std::optional<nlohmann::json> workspace::find_blueprint(std::string_view blueprint) const
+std::optional<ryml::ConstNodeRef> workspace::find_blueprint(ryml::csubstr blueprint) const
 {
   if (auto node = local_database.get_blueprint_provider(blueprint); node.has_value()) {
-    return std::optional<nlohmann::json>(*node);
+    return node;
   }
 
   if (auto node = shared_database.get_blueprint_provider(blueprint); node.has_value()) {
-    return std::optional<nlohmann::json>(*node);
+    return node;
   }
 
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
@@ -228,16 +304,27 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
     if (!fs::exists(config_file_path))
       return {};
 
-    const auto configuration = YAML::LoadFile(config_file_path.string());
+    auto configuration_tree = ryml_load_file(config_file_path);
+    if (!configuration_tree) {
+      return std::unexpected(configuration_tree.error());
+    }
 
-    if (configuration["path"]) {
+    const auto configuration = configuration_tree->crootref();
+    auto config_node          = ensure_child_map(summary.rootref(), "configuration");
+
+    if (configuration.has_child("path")) {
       std::string path;
-      for (const auto &p: configuration["path"]) {
-        path += std::format("{}{}", p.as<std::string>(), host_os_path_seperator);
+      const auto path_node = configuration["path"];
+      if (path_node.is_seq()) {
+        for (auto p: path_node.children()) {
+          path += std::format("{}{}", p.val<std::string>().value(), host_os_path_seperator);
+        }
+      } else if (path_node.has_val()) {
+        path += std::format("{}{}", path_node.val<std::string>().value(), host_os_path_seperator);
       }
       path += std::getenv("PATH");
 
-      summary["configuration"]["path"] = path;
+      ensure_child_scalar(config_node, "path", c4::to_csubstr(path));
 
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
       _putenv_s("PATH", path.c_str());
@@ -246,9 +333,11 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
 #endif
     }
 
-    if (configuration["packages"]) {
-      for (const auto &p: configuration["packages"]) {
-        auto path = p.as<std::string>();
+    if (configuration.has_child("packages")) {
+      const auto packages_node = configuration["packages"];
+      if (packages_node.is_seq()) {
+        for (auto p: packages_node.children()) {
+          auto path = p.val<std::string>().value();
         if (path.starts_with('~')) {
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
           std::string homepath = std::getenv("HOMEPATH");
@@ -259,13 +348,15 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
           path = homepath + path.substr(1);
         }
         packages.push_back(path);
-        summary["configuration"]["packages"].push_back(path);
+        auto packages_summary = ensure_child_seq(config_node, "packages");
+        packages_summary.append_child().set_val(c4::to_csubstr(path));
+      }
       }
     }
 
-    if (configuration["home"]) {
-      yakka_shared_home                = std::filesystem::path(configuration["home"].Scalar());
-      summary["configuration"]["home"] = yakka_shared_home.string();
+    if (configuration.has_child("home")) {
+      yakka_shared_home                 = std::filesystem::path(configuration["home"].val<std::string>().value());
+      ensure_child_scalar(config_node, "home", c4::to_csubstr(yakka_shared_home.string()));
     }
 
     return {};
@@ -276,33 +367,38 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
 }
 
 // Modern implementation of component fetching
-std::future<std::filesystem::path> workspace::fetch_component(std::string_view name, const YAML::Node &node, std::function<void(std::string_view, size_t)> progress_handler)
+std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name, ryml::ConstNodeRef node, std::function<void(std::string, size_t)> progress_handler)
 {
-  const auto url = try_render(inja_environment, node["packages"]["default"]["url"].as<std::string>(), summary);
+  const auto url_node = node["packages"]["default"]["url"];
+  const auto url      = try_render(inja_environment, url_node.val<std::string>().value(), summary.crootref());
 
-  const auto branch = try_render(inja_environment, node["packages"]["default"]["branch"].as<std::string>(), summary);
+  const auto branch_node = node["packages"]["default"]["branch"];
+  const auto branch      = try_render(inja_environment, branch_node.val<std::string>().value(), summary.crootref());
 
   const bool shared_components_write_access = (fs::status(shared_components_path).permissions() & fs::perms::owner_write) != fs::perms::none;
 
-  const auto git_location = (node["type"] && node["type"].as<std::string>() == "tool" && shared_components_write_access) ? shared_components_path / "repos" : workspace_path / ".yakka/repos";
+  const auto type_node = node.has_child("type") ? node["type"] : ryml::ConstNodeRef();
+  const bool is_tool   = type_node.valid() && type_node.val<std::string>().value() == "tool";
 
-  const auto checkout_location = (node["type"] && node["type"].as<std::string>() == "tool" && shared_components_write_access) ? shared_components_path / "repos" / std::string(name) : workspace_path / "components" / std::string(name);
+  const auto git_location = (is_tool && shared_components_write_access) ? shared_components_path / "repos" : workspace_path / ".yakka/repos";
+
+  const auto checkout_location = (is_tool && shared_components_write_access) ? shared_components_path / "repos" / ryml_string(name) : workspace_path / "components" / ryml_string(name);
 
   return std::async(std::launch::async, [=]() -> std::filesystem::path {
-    auto result = do_fetch_component(std::string(name), url, branch, git_location, checkout_location, progress_handler);
+    auto result = do_fetch_component(name, url, branch, git_location, checkout_location, progress_handler);
     if (result) {
       return *result;
     } else {
-      spdlog::error("Failed to fetch '{}'. error: {}", std::string(name), result.error().message());
+      spdlog::error("Failed to fetch '{}'. error: {}", name, result.error().message());
       return {};
     }
   });
 }
 
-std::expected<void, std::error_code> workspace::execute_git_command(std::string_view command, std::string_view git_directory_string)
+std::expected<void, std::error_code> workspace::execute_git_command(ryml::csubstr command, ryml::csubstr git_directory_string)
 {
   constexpr auto GIT_STRING = "git";
-  auto [output, result]     = yakka::exec(GIT_STRING, std::string(git_directory_string) + std::string(command));
+  auto [output, result]     = yakka::exec(GIT_STRING, ryml_string(git_directory_string) + ryml_string(command));
 
   if (result != 0) {
     spdlog::error(output);
@@ -313,10 +409,10 @@ std::expected<void, std::error_code> workspace::execute_git_command(std::string_
 };
 
 // Modern implementation of registry fetching using std::expected
-std::expected<void, std::error_code> workspace::fetch_registry(std::string_view url)
+std::expected<void, std::error_code> workspace::fetch_registry(ryml::csubstr url)
 {
   constexpr auto GIT_STRING = "git";
-  const auto fetch_string   = std::format("-C .yakka/registries/ clone {} --progress --single-branch", url);
+  const auto fetch_string   = std::format("-C .yakka/registries/ clone {} --progress --single-branch", ryml_string(url));
 
   auto [output, result] = yakka::exec(GIT_STRING, fetch_string);
   spdlog::info("{}\n", output);
@@ -328,40 +424,42 @@ std::expected<void, std::error_code> workspace::fetch_registry(std::string_view 
 }
 
 // Modern implementation of component updating using std::expected
-std::expected<void, std::error_code> workspace::update_component(std::string_view name)
+std::expected<void, std::error_code> workspace::update_component(std::string name)
 {
   std::string git_directory_string;
 
   // Determine git directory string based on component location
-  if (local_database.get_component(std::string(name)).has_value()) {
+  if (local_database.get_component(name).has_value()) {
     git_directory_string = std::format("--git-dir .yakka/repos/{0}/.git --work-tree components/{0} ", name);
-  } else if (shared_database.get_component(std::string(name)).has_value()) {
+  } else if (shared_database.get_component(name).has_value()) {
     git_directory_string = std::format("-C {}/repos/{} ", shared_components_path.string(), name);
   } else {
     return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
 
-  return execute_git_command("pull --progress --autostash", git_directory_string);
+  return execute_git_command("pull --progress --autostash", c4::to_csubstr(git_directory_string));
 }
 
 // Modern implementation using C++23 features
-std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_component(std::string_view name,
-                                                                       std::string_view url,
-                                                                       std::string_view branch,
+std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_component(ryml::csubstr name,
+                                                                       std::string url,
+                                                                       std::string branch,
                                                                        const std::filesystem::path &git_location,
                                                                        const std::filesystem::path &checkout_location,
-                                                                       std::function<void(std::string_view, size_t)> progress_handler)
+                                                                       std::function<void(std::string, size_t)> progress_handler)
 {
   // Modern enum class for Git phases
   enum class GitPhase { Counting, Compressing, Receiving, Resolving, Updating, LfsCheckout };
 
   // Phase names as compile-time array
   using namespace std::literals;
-  static constexpr std::array phase_names = { "Counting"sv, "Compressing"sv, "Receiving"sv, "Resolving"sv, "Updating"sv, "Fetch LFS"sv };
+  static constexpr std::array phase_names = { "Counting", "Compressing", "Receiving", "Resolving", "Updating", "Fetch LFS" };
 
   try {
+    const auto name_string = ryml_string(name);
+
     // Setup logging with RAII
-    auto fetch_log = spdlog::basic_logger_mt(std::format("fetchlog-{}", name), std::format("yakka-fetch-{}.log", name));
+    auto fetch_log = spdlog::basic_logger_mt(std::format("fetchlog-{}", name_string), std::format("yakka-fetch-{}.log", name_string));
     fetch_log->flush_on(spdlog::level::info);
 
     // Directory setup using ranges and modern fs operations
@@ -377,7 +475,7 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     }
 
     // Cleanup existing repository if needed
-    const auto repo_path = git_location / std::string(name);
+    const auto repo_path = git_location / std::string(name.str, name.len);
     if (fs::exists(repo_path)) {
       spdlog::info("Removing {}", repo_path.string());
       if (auto ec = std::error_code{}; !fs::remove_all(repo_path, ec)) {
@@ -386,11 +484,12 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     }
 
     // Helper function to handle Git command execution
-    auto execute_git_command = [&fetch_log](std::string_view cmd, std::string_view args, const auto &progress_callback) -> std::expected<int, std::error_code> {
+    auto execute_git_command = [&fetch_log](std::string cmd, std::string args, const auto &progress_callback) -> std::expected<int, std::error_code> {
       auto start_time = std::chrono::steady_clock::now();
+      auto logger     = fetch_log;
 
-      auto result = yakka::exec(std::string(cmd), std::string(args), [&](std::string_view data) {
-        fetch_log->info(std::string(data));
+      auto result = yakka::exec(cmd, args, [&](std::string data) {
+        logger->info(data);
         progress_callback(data);
       });
 
@@ -411,10 +510,10 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     } progress_state;
 
     // Progress callback
-    auto handle_progress = [&](std::string_view data) {
+    auto handle_progress = [&](std::string data) {
       // Update phase based on output
       const auto update_phase = [&](GitPhase new_phase, std::string_view marker) {
-        if (progress_state.current_phase < new_phase && data.contains(marker)) {
+        if (progress_state.current_phase < new_phase && data.find(marker) != std::string_view::npos) {
           progress_state.current_phase = new_phase;
         }
       };
@@ -427,9 +526,9 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
       update_phase(GitPhase::LfsCheckout, "Filt");
 
       // Parse progress information
-      std::string data_str{ data };
+      // std::string data_str{data}; };
       std::smatch match;
-      if (std::regex_search(data_str, match, progress_pattern)) {
+      if (std::regex_search(data, match, progress_pattern)) {
         const int phase_progress = std::stoi(match[1]);
         const int end_value      = std::stoi(match[2]);
         const int progress       = (100 * phase_progress) / end_value;
@@ -442,7 +541,7 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     };
 
     // Execute clone command
-    const auto clone_args = std::format(R"(-C "{}" clone {} {} -b {} --progress --single-branch --no-checkout)", git_location.string(), url, name, branch);
+    const auto clone_args = std::format(R"(-C "{}" clone {} {} -b {} --progress --single-branch --no-checkout)", git_location.string(), url, name_string, branch);
 
     auto clone_result = execute_git_command("git", clone_args, handle_progress);
     if (!clone_result) {
@@ -454,7 +553,7 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     progress_state = {};
 
     // Execute checkout command
-    const auto checkout_args = std::format(R"(--git-dir "{}/{}/.git" --work-tree "{}" checkout {} --progress --force)", git_location.string(), name, checkout_location.string(), branch);
+    const auto checkout_args = std::format(R"(--git-dir "{}/{}/.git" --work-tree "{}" checkout {} --progress --force)", git_location.string(), name_string, checkout_location.string(), branch);
 
     auto checkout_result = execute_git_command("git", checkout_args, handle_progress);
     if (!checkout_result) {
@@ -463,8 +562,8 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
     spdlog::info("{}: checkout in {}ms", name, *checkout_result);
 
     // Signal completion
-    spdlog::drop(std::format("fetchlog-{}", name));
-    progress_handler("Complete"sv, 100);
+    spdlog::drop(std::format("fetchlog-{}", name_string));
+    progress_handler("Complete", 100);
     return checkout_location;
 
   } catch (const std::exception &e) {
@@ -488,13 +587,20 @@ void workspace::update_versions()
   for (const auto &file_path: registry_files) {
     std::string registry_name = file_path.path().filename().string();
 
-    versions[registry_name] = {};
+    auto versions_root = versions.rootref();
+    ensure_map_node(versions_root);
+    const auto key = c4::to_csubstr(registry_name);
+    ryml::NodeRef registry_node = versions_root.has_child(key) ? versions_root.find_child(key) : versions_root.append_child();
+    if (!registry_node.has_key()) {
+      registry_node << ryml::key(key);
+    }
+    registry_node |= ryml::MAP;
 
     // Extract remote URL
-    versions[registry_name]["url"] = exec("git", "-C " + file_path.path().parent_path().string() + " config --get remote.origin.url").first;
+    ensure_child_scalar(registry_node, "url", c4::to_csubstr(exec("git", "-C " + file_path.path().parent_path().string() + " config --get remote.origin.url").first));
 
     // Extract last commit hash
-    versions[registry_name]["rev"] = exec("git", "-C " + file_path.path().parent_path().string() + " rev-parse HEAD").first;
+    ensure_child_scalar(registry_node, "rev", c4::to_csubstr(exec("git", "-C " + file_path.path().parent_path().string() + " rev-parse HEAD").first));
 
     // Extract version
 
@@ -507,7 +613,7 @@ void workspace::update_versions()
     for (int i = 0; i < 32; i++) {
       hashstr << std::setw(2) << static_cast<int>(hash[i]);
     }
-    versions[registry_name]["hash"] = hashstr.str();
+    ensure_child_scalar(registry_node, "hash", c4::to_csubstr(hashstr.str()));
   }
 
   // Scan local components

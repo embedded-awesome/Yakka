@@ -1,6 +1,8 @@
 #pragma once
 
-#include "yaml-cpp/yaml.h"
+// #include "yaml-cpp/yaml.h"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <set>
 #include <string>
 #include <functional>
@@ -9,6 +11,7 @@
 
 namespace yakka {
 const std::string yakka_component_extension     = ".yakka";
+const std::string yakka_component_toml_extension = ".yakka.toml";
 const std::string yakka_component_old_extension = ".bob";
 const std::string slcc_component_extension      = ".slcc";
 const std::string slce_component_extension      = ".slce";
@@ -20,7 +23,7 @@ const char data_dependency_identifier           = ':';
 const char data_wildcard_identifier             = '*';
 const std::string database_filename             = "yakka-components.json";
 const std::string projects_filename             = "yakka-projects.json";
-const std::string project_summary_filename      = "yakka_summary.json";
+const std::string project_summary_filename      = "yakka_summary.yaml";
 const std::string default_output_directory      = "output/";
 
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
@@ -46,8 +49,8 @@ struct process_return {
 };
 
 struct project_description {
-  std::vector<std::string> components;
-  std::vector<std::string> features;
+  std::vector<ryml::csubstr> components;
+  std::vector<ryml::csubstr> features;
 };
 
 enum yakka_status {
@@ -55,8 +58,8 @@ enum yakka_status {
   FAIL,
 };
 
-using component_list_t = std::unordered_set<std::string>;
-using feature_list_t   = std::unordered_set<std::string>;
-using command_list_t   = std::unordered_set<std::string>;
+using component_list_t = std::unordered_set<ryml::csubstr>;
+using feature_list_t   = std::unordered_set<ryml::csubstr>;
+using command_list_t   = std::unordered_set<ryml::csubstr>;
 
 } // namespace yakka

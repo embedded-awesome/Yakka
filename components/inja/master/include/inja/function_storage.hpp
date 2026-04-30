@@ -12,9 +12,9 @@
 
 namespace inja {
 
-using Arguments = std::vector<const json*>;
-using CallbackFunction = std::function<json(Arguments& args)>;
-using VoidCallbackFunction = std::function<void(Arguments& args)>;
+using Arguments = std::vector<ConstNodeRef>;
+using CallbackFunction = std::function<ConstNodeRef(Arguments& args, NodeRef additional_data)>;
+using VoidCallbackFunction = std::function<void(Arguments& args, NodeRef additional_data)>;
 
 /*!
  * \brief Class for builtin functions and user-defined callbacks.
@@ -63,14 +63,20 @@ public:
     Min,
     Odd,
     Range,
+    Replace,
     Round,
     Sort,
     Upper,
     Super,
     Join,
+    Macro,
     Callback,
     Hex,
-    Map,
+    SetAt,
+    Fetch,
+    PushBack,
+    Erase,
+    Unique,
     None,
   };
 
@@ -84,6 +90,7 @@ private:
   const int VARIADIC {-1};
 
   std::map<std::pair<std::string, int>, FunctionData> function_storage = {
+      {std::make_pair("at", 1), FunctionData {Operation::At}},
       {std::make_pair("at", 2), FunctionData {Operation::At}},
       {std::make_pair("capitalize", 1), FunctionData {Operation::Capitalize}},
       {std::make_pair("default", 2), FunctionData {Operation::Default}},
@@ -108,6 +115,7 @@ private:
       {std::make_pair("min", 1), FunctionData {Operation::Min}},
       {std::make_pair("odd", 1), FunctionData {Operation::Odd}},
       {std::make_pair("range", 1), FunctionData {Operation::Range}},
+      {std::make_pair("replace", 3), FunctionData {Operation::Replace}},
       {std::make_pair("round", 2), FunctionData {Operation::Round}},
       {std::make_pair("sort", 1), FunctionData {Operation::Sort}},
       {std::make_pair("upper", 1), FunctionData {Operation::Upper}},
@@ -115,7 +123,14 @@ private:
       {std::make_pair("super", 1), FunctionData {Operation::Super}},
       {std::make_pair("join", 2), FunctionData {Operation::Join}},
       {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
-      {std::make_pair("map", -1), FunctionData {Operation::Map}},
+      {std::make_pair("setAt", 2), FunctionData {Operation::SetAt}},
+      {std::make_pair("setAt", 3), FunctionData {Operation::SetAt}},
+      {std::make_pair("fetch", 1), FunctionData {Operation::Fetch}},
+      {std::make_pair("fetch", 2), FunctionData {Operation::Fetch}},
+      {std::make_pair("push_back", 2), FunctionData {Operation::PushBack}},
+      {std::make_pair("push_back", 3), FunctionData {Operation::PushBack}},
+      {std::make_pair("erase", 1), FunctionData {Operation::Erase}},
+      {std::make_pair("unique", 1), FunctionData {Operation::Unique}},
   };
 
 public:

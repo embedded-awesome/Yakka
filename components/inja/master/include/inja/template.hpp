@@ -17,6 +17,7 @@ struct Template {
   BlockNode root;
   std::string content;
   std::map<std::string, std::shared_ptr<BlockStatementNode>> block_storage;
+  std::map<std::pair<std::string, int>, std::shared_ptr<MacroStatementNode>> macro_storage;
 
   explicit Template() {}
   explicit Template(std::string content): content(std::move(content)) {}

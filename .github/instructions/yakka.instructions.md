@@ -39,8 +39,8 @@ The project uses a custom build system. Build configurations are managed through
 ## Coding Standards
 - Use modern C++ features and idioms
 - Follow consistent naming conventions:
-  - Classes: PascalCase (e.g., `TaskEngine`)
-  - Methods/Functions: camelCase (e.g., `executeTask`)
+  - Classes: snake_case (e.g., `task_engine`)
+  - Methods/Functions: snake_case (e.g., `execute_task`)
   - Variables: snake_case (e.g., `component_name`)
 - Write comprehensive error handling
 - Include documentation comments for public interfaces
@@ -52,5 +52,3 @@ The project uses a custom build system. Build configurations are managed through
 - Testing: Unit tests are in the `/test` directory
 - Component Management: Components are defined in .yakka files
 - Blueprint System: Used for project templates and generation
-
-Note: This context file helps GitHub Copilot provide more accurate and project-specific suggestions. Keep this file updated as the project evolves.

@@ -1,0 +1,1 @@
+{%- for key, value in settings -%}{{ loop.index }}:{{ loop.key }}={{ key }}={{ value }}:{{ loop.is_first }}:{{ loop.is_last }};{%- endfor -%}

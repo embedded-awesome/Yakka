@@ -1,0 +1,14 @@
+name: Peter
+words:
+  - Alpha
+  - beta
+  - gAMMA
+numbers:
+  - 3
+  - 1
+  - 2
+  - 3
+map:
+  x: 10
+  y: 20
+float_text: 3.14159

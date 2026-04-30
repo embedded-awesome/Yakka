@@ -1,0 +1,1 @@
+G1=alpha[0.1:a:true:false;0.2:b:false:true;]G2=beta[1.1:c:true:true;]

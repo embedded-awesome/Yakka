@@ -4,6 +4,12 @@ includes:
   global:
     - master/include/inja
 
-# defines:
-#   global:
-#     - INJA_NOEXCEPTION
+requires:
+  components:
+    - spdlog
+
+defines:
+  global:
+    # - INJA_DATA_TYPE=inja::ryml_json
+    - INJA_DATA_TYPE_HEADER="rapidyaml_json.hpp"
+#    - INJA_NOEXCEPTION

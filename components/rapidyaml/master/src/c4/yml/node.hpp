@@ -5,8 +5,10 @@
  * @see NodeRef */
 
 #include <cstddef>
+#include <optional>
 
 #include "c4/yml/tree.hpp"
+#include "c4/yml/pointer.hpp"
 #include "c4/base64.hpp"
 
 #ifdef __clang__
@@ -175,6 +177,22 @@ public:
     template<class U=Impl>
     C4_ALWAYS_INLINE C4_PURE auto get() noexcept -> _C4_IF_MUTABLE(NodeData*) { RYML_ASSERT(tree_ != nullptr); return tree__->get(id__); }
 
+    template<typename T>
+    C4_ALWAYS_INLINE C4_PURE std::optional<T> val() const noexcept
+    {
+        RYML_ASSERT(tree_ != nullptr);
+        const auto n = tree_->get(id_);
+        T result{};
+        if(!n) return std::nullopt;
+
+        // Cast CRTP base to actual node type so read() overloads match.
+        Impl const& self = *static_cast<Impl const*>(this);
+        if(read(self, &result))
+            return result;
+
+        return std::nullopt;
+    }
+
     C4_ALWAYS_INLINE C4_PURE NodeType    type() const noexcept { _C4RV(); return tree_->type(id_); }
     C4_ALWAYS_INLINE C4_PURE const char* type_str() const noexcept { return tree_->type_str(id_); }
 
@@ -243,13 +261,29 @@ public:
     C4_ALWAYS_INLINE C4_PURE bool has_child(csubstr name) const noexcept { _C4RV(); return tree_->has_child(id_, name); }
     C4_ALWAYS_INLINE C4_PURE bool has_children() const noexcept { _C4RV(); return tree_->has_children(id_); }
 
+    /** Wrapper for has_child() with std::map-like naming convention */
+    C4_ALWAYS_INLINE C4_PURE bool contains(csubstr name) const noexcept { _C4RV(); return tree_->has_child(id_, name); }
+    C4_ALWAYS_INLINE C4_PURE bool contains(Pointer ptr) const noexcept
+    {
+        _C4RV();
+        ConstImpl curr = *((ConstImpl const*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            if (curr.is_map() && curr.contains(ptr[i]))
+                curr = curr.find_child(ptr[i]);
+            else
+                return false;
+        }
+        return true;
+    }
+
     C4_ALWAYS_INLINE C4_PURE bool has_sibling(ConstImpl const& n) const noexcept { _C4RV(); return tree_->has_sibling(id_, n.m_id); }
     C4_ALWAYS_INLINE C4_PURE bool has_sibling(csubstr name) const noexcept { _C4RV(); return tree_->has_sibling(id_, name); }
     /** counts with this */
     C4_ALWAYS_INLINE C4_PURE bool has_siblings() const noexcept { _C4RV(); return tree_->has_siblings(id_); }
     /** does not count with this */
     C4_ALWAYS_INLINE C4_PURE bool has_other_siblings() const noexcept { _C4RV(); return tree_->has_other_siblings(id_); }
-
+    
     /** @} */
 
 public:
@@ -352,6 +386,186 @@ public:
         _C4RV();
         size_t ch = tree__->child(id__, pos);
         return ch != NONE ? Impl(tree__, ch) : NodeRef(tree__, id__, pos);
+    }
+
+    /** Navigate to a node using a Pointer path. O(num_segments * num_children).
+     * For const version, requires that all segments exist. */
+    C4_ALWAYS_INLINE C4_PURE ConstImpl operator[] (Pointer const& ptr) const noexcept
+    {
+        _C4RV();
+        ConstImpl curr = *((ConstImpl const*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            csubstr seg = ptr[i];
+            if(curr.is_seq())
+            {
+                size_t pos = 0;
+                _RYML_CB_ASSERT(tree__->m_callbacks, seg.is_number() && from_chars(seg, &pos));
+                curr = curr.child(pos);
+            }
+            else
+            {
+                curr = curr.find_child(seg);
+            }
+            _RYML_CB_ASSERT(tree__->m_callbacks, curr.valid());
+        }
+        return curr;
+    }
+
+    /** Navigate to a node using a Pointer path. O(num_segments * num_children).
+     * Creates missing nodes along the path, returns a seed node for the last segment. */
+    template<class U=Impl>
+    C4_ALWAYS_INLINE C4_PURE auto operator[] (Pointer const& ptr) noexcept -> _C4_IF_MUTABLE(Impl)
+    {
+        _C4RV();
+        Impl curr = *((Impl*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            csubstr seg = ptr[i];
+            if(curr.is_seq())
+            {
+                size_t pos = 0;
+                if(!(seg.is_number() && from_chars(seg, &pos)))
+                {
+                    // _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment for sequence is not a non-negative integer");
+                    return Impl(curr.m_tree, NONE); // to silence "control reaches end of non-void function" warning
+                }
+
+                // Avoid pathological growth from pointer paths while still
+                // allowing sparse sequence access to materialize missing items.
+                const size_t max_seq_index = curr.num_children() + 100;
+                if(pos > max_seq_index)
+                {
+                    // _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment for sequence exceeds max index");
+                    return Impl(curr.m_tree, NONE); // to silence "control reaches end of non-void function" warning
+                }
+
+                size_t ch_id = curr.m_tree->child(curr.m_id, pos);
+                if(ch_id == NONE)
+                {
+                    size_t n = curr.num_children();
+                    while(n <= pos)
+                    {
+                        curr.append_child();
+                        ++n;
+                    }
+                    ch_id = curr.m_tree->child(curr.m_id, pos);
+                }
+
+                curr = Impl(curr.m_tree, ch_id);
+            }
+            else
+            {
+                size_t ch_id = curr.m_tree->find_child(curr.m_id, seg);
+                if(ch_id == NONE)
+                {
+                    if(i == ptr.size() - 1)
+                    {
+                        // Last segment: return a seed node
+                        return NodeRef(curr.m_tree, curr.m_id, seg);
+                    }
+
+                    // Intermediate segment: create a map node
+                    Impl ch = curr.append_child();
+                    ch.set_key_serialized(seg);
+                    ch |= NodeType_e::MAP;
+                    curr = ch;
+                }
+                else
+                {
+                    Impl ch(curr.m_tree, ch_id);
+                    curr = ch;
+                }
+            }
+        }
+        // All segments exist
+        return curr;
+    }
+
+    /** Navigate to a node using a Pointer path. O(num_segments * num_children).
+     * Throws an error if any segment in the path is not found. */
+    C4_ALWAYS_INLINE C4_PURE ConstImpl at(Pointer const& ptr) const
+    {
+        _C4RV();
+        ConstImpl curr = *((ConstImpl const*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            curr = curr.find_child(ptr[i]);
+            if(!curr.valid())
+            {
+                _RYML_CB_ERR(tree__->m_callbacks, "pointer path segment not found");
+            }
+        }
+        return curr;
+    }
+
+    /** Navigate to a node using a Pointer path. O(num_segments * num_children).
+     * Throws an error if any segment in the path is not found. */
+    template<class U=Impl>
+    C4_ALWAYS_INLINE C4_PURE auto at(Pointer const& ptr) -> _C4_IF_MUTABLE(Impl)
+    {
+        _C4RV();
+        Impl curr = *((Impl*)this);
+        for(size_t i = 0; i < ptr.size(); ++i)
+        {
+            size_t ch = curr.m_tree->find_child(curr.m_id, ptr[i]);
+            if(ch == NONE)
+            {
+                _RYML_CB_ERR(curr.m_tree->m_callbacks, "pointer path segment not found");
+            }
+            curr = Impl(curr.m_tree, ch);
+        }
+        return curr;
+    }
+
+    /** Find child by key name. O(num_children). Equivalent to operator[] but throws an error if not found. */
+    C4_ALWAYS_INLINE C4_PURE ConstImpl at(csubstr k) const
+    {
+        _C4RV();
+        size_t ch = tree_->find_child(id_, k);
+        if(ch == NONE)
+        {
+            _RYML_CB_ERR(tree_->m_callbacks, "child not found");
+        }
+        return {tree_, ch};
+    }
+
+    /** Find child by key name. O(num_children). Equivalent to operator[] but throws an error if not found. */
+    template<class U=Impl>
+    C4_ALWAYS_INLINE C4_PURE auto at(csubstr k) noexcept -> _C4_IF_MUTABLE(Impl)
+    {
+        _C4RV();
+        size_t ch = tree__->find_child(id__, k);
+        if(ch == NONE)
+        {
+            _RYML_CB_ERR(tree__->m_callbacks, "child not found");
+        }
+        return Impl(tree__, ch);
+    }
+
+    /** Find child by index position. O(pos). Equivalent to operator[] but throws an error if not found. */
+    C4_ALWAYS_INLINE C4_PURE ConstImpl at(size_t pos) const
+    {
+        _C4RV();
+        size_t ch = tree_->child(id_, pos);
+        if(ch == NONE)
+        {
+            _RYML_CB_ERR(tree_->m_callbacks, "child index not found");
+        }
+        return {tree_, ch};
+    }
+
+    /** Find child by index position. O(pos). Equivalent to operator[] but throws an error if not found. */
+    template<class U=Impl>
+    C4_ALWAYS_INLINE C4_PURE auto at(size_t pos) noexcept -> _C4_IF_MUTABLE(Impl)
+    {
+        _C4RV();
+        size_t ch = tree__->child(id__, pos);
+        if(ch == NONE)
+        {
+            _RYML_CB_ERR(tree__->m_callbacks, "child index not found");
+        }
+        return Impl(tree__, ch);
     }
 
     /** @} */
@@ -1263,6 +1477,16 @@ inline read(ConstNodeRef const& n, T *v)
     return from_chars_float(n.val(), v);
 }
 
+inline bool read(NodeRef const& n, std::string *v)
+{
+    v->assign(n.val().str, n.val().len);
+    return true;
+}
+inline bool read(ConstNodeRef const& n, std::string *v)
+{
+    v->assign(n.val().str, n.val().len);
+    return true;
+}
 
 } // namespace yml
 } // namespace c4

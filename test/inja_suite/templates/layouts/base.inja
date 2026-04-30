@@ -1,0 +1,1 @@
+Base[{% block title %}base-title{% endblock %}|{% block body %}base-body{% endblock %}]

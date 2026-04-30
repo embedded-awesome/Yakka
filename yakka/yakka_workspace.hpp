@@ -1,9 +1,10 @@
 #pragma once
 
-#include "yaml-cpp/yaml.h"
 #include "spdlog/spdlog.h"
 #include "inja.hpp"
 #include "component_database.hpp"
+#include <ryml.hpp>
+#include <ryml_std.hpp>
 #include <string>
 #include <future>
 #include <expected>
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <functional>
 #include <system_error>
+#include <map>
 
 namespace fs = std::filesystem;
 
@@ -43,11 +45,11 @@ public:
   /**
    * @brief Asynchronously fetches a component from a remote source
    * @param name Name of the component to fetch
-   * @param node YAML node containing component configuration
+    * @param node ryml node containing component configuration
    * @param progress_handler Function to report progress during fetch
    * @return Future containing the path where component was fetched
    */
-  std::future<std::filesystem::path> fetch_component(std::string_view name, const YAML::Node &node, std::function<void(std::string_view, size_t)> progress_handler);
+  std::future<std::filesystem::path> fetch_component(ryml::csubstr name, ryml::ConstNodeRef node, std::function<void(std::string, size_t)> progress_handler);
 
   /**
    * @brief Loads all component registries from the workspace
@@ -63,14 +65,14 @@ public:
    * 
    * The registry is cloned under the .yakka/registries directory 
    */
-  std::expected<void, std::error_code> add_component_registry(std::string_view url);
+  std::expected<void, std::error_code> add_component_registry(ryml::csubstr url);
 
   /**
    * @brief Finds a component in the loaded registries
    * @param name Name of the component to find
-   * @return Optional YAML node containing the component details if found
+    * @return Optional ryml node containing the component details if found
    */
-  std::optional<YAML::Node> find_registry_component(std::string_view name) const;
+  std::optional<ryml::ConstNodeRef> find_registry_component(ryml::csubstr name) const;
 
   /**
    * @brief Finds a component in local, shared or package databases
@@ -81,21 +83,21 @@ public:
    * The search order is local database, shared database, then package databases
    * The flags parameter can be used to filter component types (e.g., only SLCC, ignore Yakka components, etc.)
    */
-  std::optional<std::pair<std::filesystem::path, std::filesystem::path>> find_component(std::string_view component_dotname, component_database::flag flags = component_database::flag::ALL_COMPONENTS);
+  std::optional<std::pair<std::filesystem::path, std::filesystem::path>> find_component(ryml::csubstr component_dotname, component_database::flag flags = component_database::flag::ALL_COMPONENTS);
 
   /**
    * @brief Finds a feature provider in the workspace
    * @param feature Name of the feature to find
    * @return Optional JSON containing feature provider info
    */
-  std::optional<nlohmann::json> find_feature(std::string_view feature) const;
+  std::optional<ryml::ConstNodeRef> find_feature(ryml::csubstr feature) const;
 
   /**
    * @brief Finds a blueprint provider in the workspace
    * @param blueprint Name of the blueprint to find
    * @return Optional JSON containing blueprint provider info
    */
-  std::optional<nlohmann::json> find_blueprint(std::string_view blueprint) const;
+  std::optional<ryml::ConstNodeRef> find_blueprint(ryml::csubstr blueprint) const;
 
   /**
    * @brief Loads the workspace configuration file
@@ -116,14 +118,14 @@ public:
    * @param url URL of the registry to fetch
    * @return Success or error code
    */
-  std::expected<void, std::error_code> fetch_registry(std::string_view url);
+  std::expected<void, std::error_code> fetch_registry(ryml::csubstr url);
 
   /**
    * @brief Updates a component to its latest version
    * @param name Name of the component to update
    * @return Success or error code
    */
-  std::expected<void, std::error_code> update_component(std::string_view name);
+  std::expected<void, std::error_code> update_component(std::string name);
 
   /**
    * @brief Gets the path to the Yakka shared home directory
@@ -137,7 +139,7 @@ public:
    * @param git_directory_string Directory where to execute the command
    * @return Success or error code
    */
-  std::expected<void, std::error_code> execute_git_command(std::string_view command, std::string_view git_directory_string);
+  std::expected<void, std::error_code> execute_git_command(ryml::csubstr command, ryml::csubstr git_directory_string);
 
   /**
    * @brief Performs the actual component fetching operation
@@ -149,12 +151,12 @@ public:
    * @param progress_handler Function to report progress
    * @return Path where component was fetched or error code
    */
-  static std::expected<std::filesystem::path, std::error_code> do_fetch_component(std::string_view name,
-                                                                     std::string_view url,
-                                                                     std::string_view branch,
+  static std::expected<std::filesystem::path, std::error_code> do_fetch_component(ryml::csubstr name,
+                                                                     std::string url,
+                                                                     std::string branch,
                                                                      const std::filesystem::path &git_location,
                                                                      const std::filesystem::path &checkout_location,
-                                                                     std::function<void(std::string_view, size_t)> progress_handler);
+                                                                     std::function<void(std::string, size_t)> progress_handler);
 
   /**
    * @brief Updates the workspace version information
@@ -171,16 +173,16 @@ public:
   std::shared_ptr<spdlog::logger> log;
 
   /** @brief Collection of loaded component registries */
-  YAML::Node registries;
+  std::map<std::string, ryml::Tree> registries;
 
   /** @brief Summary information about the workspace */
-  nlohmann::json summary;
+  ryml::Tree summary;
 
   /** @brief Projects configuration and information */
-  nlohmann::json projects;
+  ryml::Tree projects;
 
   /** @brief Workspace version information */
-  nlohmann::json versions;
+  ryml::Tree versions;
 
   /** @brief List of ongoing component fetch operations */
   std::map<std::string, std::future<void>> fetching_list;

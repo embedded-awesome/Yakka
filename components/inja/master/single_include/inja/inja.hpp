@@ -1,9 +1,9 @@
 /*
-  ___        _          Version 3.4.0
+  ___        _          Version 3.5.0
  |_ _|_ __  (_) __ _    https://github.com/pantor/inja
   | || '_ \ | |/ _` |   Licensed under the MIT License <http://opensource.org/licenses/MIT>.
   | || | | || | (_| |
- |___|_| |_|/ |\__,_|   Copyright (c) 2018-2023 Lars Berscheid
+ |___|_| |_|/ |\__,_|   Copyright (c) 2018-2025 Lars Berscheid
           |__/
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -29,14 +29,16 @@ SOFTWARE.
 #ifndef INCLUDE_INJA_JSON_HPP_
 #define INCLUDE_INJA_JSON_HPP_
 
-#include <nlohmann/json.hpp>
+#include <ryml.hpp>
+#include "ryml_std.hpp"
 
 namespace inja {
-#ifndef INJA_DATA_TYPE
-using json = nlohmann::json;
-#else
-using json = INJA_DATA_TYPE;
-#endif
+namespace ryml = ::ryml;
+using Tree = ryml::Tree;
+using NodeRef = ryml::NodeRef;
+using ConstNodeRef = ryml::ConstNodeRef;
+using Pointer = ryml::Pointer;
+constexpr size_t NONE = size_t(-1);
 } // namespace inja
 
 #endif // INCLUDE_INJA_JSON_HPP_
@@ -76,189 +78,23 @@ std::abort();                 \
 
 // #include "json.hpp"
 
-// #include "config.hpp"
-#ifndef INCLUDE_INJA_CONFIG_HPP_
-#define INCLUDE_INJA_CONFIG_HPP_
-
-#include <filesystem>
-#include <functional>
-#include <string>
-
-// #include "template.hpp"
-#ifndef INCLUDE_INJA_TEMPLATE_HPP_
-#define INCLUDE_INJA_TEMPLATE_HPP_
-
-#include <map>
-#include <memory>
-#include <string>
-
-// #include "node.hpp"
-#ifndef INCLUDE_INJA_NODE_HPP_
-#define INCLUDE_INJA_NODE_HPP_
-
-#include <cstddef>
-#include <memory>
-#include <string>
-#include <string_view>
-#include <tuple>
-#include <vector>
-
-// #include "function_storage.hpp"
-#ifndef INCLUDE_INJA_FUNCTION_STORAGE_HPP_
-#define INCLUDE_INJA_FUNCTION_STORAGE_HPP_
-
-#include <functional>
-#include <map>
-#include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
-
-// #include "json.hpp"
-
-
-namespace inja {
-
-using Arguments = std::vector<const json*>;
-using CallbackFunction = std::function<json(Arguments& args)>;
-using VoidCallbackFunction = std::function<void(Arguments& args)>;
-
-/*!
- * \brief Class for builtin functions and user-defined callbacks.
- */
-class FunctionStorage {
-public:
-  enum class Operation {
-    Not,
-    And,
-    Or,
-    In,
-    Equal,
-    NotEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
-    Add,
-    Subtract,
-    Multiplication,
-    Division,
-    Power,
-    Modulo,
-    AtId,
-    At,
-    Capitalize,
-    Default,
-    DivisibleBy,
-    Even,
-    Exists,
-    ExistsInObject,
-    First,
-    Float,
-    Int,
-    IsArray,
-    IsBoolean,
-    IsFloat,
-    IsInteger,
-    IsNumber,
-    IsObject,
-    IsString,
-    Last,
-    Length,
-    Lower,
-    Max,
-    Min,
-    Odd,
-    Range,
-    Round,
-    Sort,
-    Upper,
-    Super,
-    Join,
-    Callback,
-    None,
-  };
-
-  struct FunctionData {
-    explicit FunctionData(const Operation& op, const CallbackFunction& cb = CallbackFunction {}): operation(op), callback(cb) {}
-    const Operation operation;
-    const CallbackFunction callback;
-  };
-
-private:
-  const int VARIADIC {-1};
-
-  std::map<std::pair<std::string, int>, FunctionData> function_storage = {
-      {std::make_pair("at", 2), FunctionData {Operation::At}},
-      {std::make_pair("capitalize", 1), FunctionData {Operation::Capitalize}},
-      {std::make_pair("default", 2), FunctionData {Operation::Default}},
-      {std::make_pair("divisibleBy", 2), FunctionData {Operation::DivisibleBy}},
-      {std::make_pair("even", 1), FunctionData {Operation::Even}},
-      {std::make_pair("exists", 1), FunctionData {Operation::Exists}},
-      {std::make_pair("existsIn", 2), FunctionData {Operation::ExistsInObject}},
-      {std::make_pair("first", 1), FunctionData {Operation::First}},
-      {std::make_pair("float", 1), FunctionData {Operation::Float}},
-      {std::make_pair("int", 1), FunctionData {Operation::Int}},
-      {std::make_pair("isArray", 1), FunctionData {Operation::IsArray}},
-      {std::make_pair("isBoolean", 1), FunctionData {Operation::IsBoolean}},
-      {std::make_pair("isFloat", 1), FunctionData {Operation::IsFloat}},
-      {std::make_pair("isInteger", 1), FunctionData {Operation::IsInteger}},
-      {std::make_pair("isNumber", 1), FunctionData {Operation::IsNumber}},
-      {std::make_pair("isObject", 1), FunctionData {Operation::IsObject}},
-      {std::make_pair("isString", 1), FunctionData {Operation::IsString}},
-      {std::make_pair("last", 1), FunctionData {Operation::Last}},
-      {std::make_pair("length", 1), FunctionData {Operation::Length}},
-      {std::make_pair("lower", 1), FunctionData {Operation::Lower}},
-      {std::make_pair("max", 1), FunctionData {Operation::Max}},
-      {std::make_pair("min", 1), FunctionData {Operation::Min}},
-      {std::make_pair("odd", 1), FunctionData {Operation::Odd}},
-      {std::make_pair("range", 1), FunctionData {Operation::Range}},
-      {std::make_pair("round", 2), FunctionData {Operation::Round}},
-      {std::make_pair("sort", 1), FunctionData {Operation::Sort}},
-      {std::make_pair("upper", 1), FunctionData {Operation::Upper}},
-      {std::make_pair("super", 0), FunctionData {Operation::Super}},
-      {std::make_pair("super", 1), FunctionData {Operation::Super}},
-      {std::make_pair("join", 2), FunctionData {Operation::Join}},
-  };
-
-public:
-  void add_builtin(std::string_view name, int num_args, Operation op) {
-    function_storage.emplace(std::make_pair(static_cast<std::string>(name), num_args), FunctionData {op});
-  }
-
-  void add_callback(std::string_view name, int num_args, const CallbackFunction& callback) {
-    function_storage.emplace(std::make_pair(static_cast<std::string>(name), num_args), FunctionData {Operation::Callback, callback});
-  }
-
-  FunctionData find_function(std::string_view name, int num_args) const {
-    auto it = function_storage.find(std::make_pair(static_cast<std::string>(name), num_args));
-    if (it != function_storage.end()) {
-      return it->second;
-
-      // Find variadic function
-    } else if (num_args > 0) {
-      it = function_storage.find(std::make_pair(static_cast<std::string>(name), VARIADIC));
-      if (it != function_storage.end()) {
-        return it->second;
-      }
-    }
-
-    return FunctionData {Operation::None};
-  }
-};
-
-} // namespace inja
-
-#endif // INCLUDE_INJA_FUNCTION_STORAGE_HPP_
-
 // #include "utils.hpp"
 #ifndef INCLUDE_INJA_UTILS_HPP_
 #define INCLUDE_INJA_UTILS_HPP_
 
 #include <algorithm>
+#include <cerrno>
+#include <charconv>
+#include <cctype>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 // #include "exceptions.hpp"
@@ -311,6 +147,9 @@ struct DataError : public InjaError {
 
 #endif // INCLUDE_INJA_EXCEPTIONS_HPP_
 
+// #include "json.hpp"
+
+#include "spdlog/spdlog.h"
 
 namespace inja {
 
@@ -368,11 +207,765 @@ inline void replace_substring(std::string& s, const std::string& f, const std::s
   {}
 }
 
+inline std::string to_std_string(::ryml::csubstr view) {
+  return std::string(view.str, view.len);
+}
+
+inline ::ryml::csubstr to_csubstr(std::string_view view) {
+  return ::ryml::csubstr(view.data(), view.size());
+}
+
+inline std::string_view trim(std::string_view view) {
+  size_t start = 0;
+  while (start < view.size() && std::isspace(static_cast<unsigned char>(view[start]))) {
+    ++start;
+  }
+  size_t end = view.size();
+  while (end > start && std::isspace(static_cast<unsigned char>(view[end - 1]))) {
+    --end;
+  }
+  return view.substr(start, end - start);
+}
+
+inline std::optional<int64_t> parse_int(std::string_view view) {
+  view = trim(view);
+  if (view.empty()) {
+    return std::nullopt;
+  }
+
+  if (view[0] == '-') {
+    int64_t result;
+    auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
+    if (ec != std::errc() || ptr != view.data() + view.size()) {
+      return std::nullopt;
+    }
+    return result;
+  }
+
+  uint64_t result;
+  auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
+  if (ec != std::errc() || ptr != view.data() + view.size()) {
+    return std::nullopt;
+  }
+  if (result > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+    return std::nullopt;
+  }
+  return static_cast<int64_t>(result);
+}
+
+inline std::optional<uint64_t> parse_uint(std::string_view view) {
+  view = trim(view);
+  if (view.empty() || view[0] == '-' || view[0] == '+') {
+    return std::nullopt;
+  }
+
+  uint64_t result;
+  auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
+  if (ec != std::errc() || ptr != view.data() + view.size()) {
+    return std::nullopt;
+  } else {
+    return result;
+  }
+}
+
+inline std::optional<double> parse_float(std::string_view view) {
+  view = trim(view);
+  if (view.empty()) {
+    return std::nullopt;
+  }
+  // Use strtod for portability - std::from_chars for floating-point is not
+  // available on all platforms (e.g. older macOS/libc++ versions).
+  std::string str(view);
+  char* end = nullptr;
+  errno = 0;
+  double result = std::strtod(str.c_str(), &end);
+  if (errno != 0 || end != str.c_str() + str.size()) {
+    return std::nullopt;
+  }
+  return result;
+}
+
+inline std::optional<bool> parse_bool(std::string_view view) {
+  view = trim(view);
+  if (view == "true" || view == "True" || view == "TRUE") {
+    return true;
+  }
+  if (view == "false" || view == "False" || view == "FALSE") {
+    return false;
+  }
+  return std::nullopt;
+}
+
+inline bool is_null_like(std::string_view view) {
+  view = trim(view);
+  return view.empty() || view == "null" || view == "Null" || view == "NULL" || view == "~";
+}
+
+inline bool node_is_null(const ConstNodeRef& node) {
+  if (!node.valid()) {
+    return true;
+  }
+  if (node.is_val() || node.is_keyval()) {
+    if (node.val_is_null()) {
+      return true;
+    }
+    return is_null_like(std::string_view(node.val().str, node.val().len));
+  }
+  return false;
+}
+
+inline std::optional<std::string_view> node_scalar_view(const ConstNodeRef& node) {
+  if (!node.valid()) {
+    return std::nullopt;
+  }
+  if (node.is_val() || node.is_keyval()) {
+    return std::string_view(node.val().str, node.val().len);
+  }
+  return std::nullopt;
+}
+
+inline bool node_is_bool_like(const ConstNodeRef& node) {
+  const auto view = node_scalar_view(node);
+  return view && parse_bool(*view).has_value();
+}
+
+inline bool node_is_int_like(const ConstNodeRef& node) {
+  const auto view = node_scalar_view(node);
+  return view && parse_int(*view).has_value();
+}
+
+inline bool node_is_uint_like(const ConstNodeRef& node) {
+  const auto view = node_scalar_view(node);
+  return view && parse_uint(*view).has_value();
+}
+
+inline bool node_is_float_like(const ConstNodeRef& node) {
+  const auto view = node_scalar_view(node);
+  return view && parse_float(*view).has_value();
+}
+
+inline std::optional<int64_t> node_to_int(const ConstNodeRef& node) {
+  const auto view = node_scalar_view(node);
+  if (!view) {
+    return std::nullopt;
+  }
+  return parse_int(*view);
+}
+
+inline std::optional<double> node_to_double(const ConstNodeRef& node) {
+  const auto view = node_scalar_view(node);
+  if (!view) {
+    return std::nullopt;
+  }
+  return parse_float(*view);
+}
+
+inline std::optional<uint64_t> node_to_uint(const ConstNodeRef& node) {
+  const auto view = node_scalar_view(node);
+  if (!view) {
+    return std::nullopt;
+  }
+  return parse_uint(*view);
+}
+
+inline std::optional<bool> node_to_bool(const ConstNodeRef& node) {
+  const auto view = node_scalar_view(node);
+  if (!view) {
+    return std::nullopt;
+  }
+  return parse_bool(*view);
+}
+
+inline std::string node_to_string(const ConstNodeRef& node) {
+  if (node_is_bool_like(node)) {
+    if (auto parsed = node_to_bool(node)) {
+      return *parsed ? "true" : "false";
+    }
+  }
+  if (node_is_int_like(node)) {
+    if (auto parsed = node_to_int(node)) {
+      return std::to_string(*parsed);
+    }
+  }
+  if (node_is_float_like(node)) {
+    if (auto parsed = node_to_double(node)) {
+      auto s = std::to_string(*parsed);
+      // trim excess trailing zeros, leave one
+      auto last_non_zero = s.find_last_not_of('0');
+      if (last_non_zero != std::string::npos && s[last_non_zero] == '.') {
+        s.erase(last_non_zero + 2);
+      } else if (last_non_zero != std::string::npos) {
+        s.erase(last_non_zero + 1);
+      }
+      return s;
+    }
+  }
+  const auto view = node_scalar_view(node);
+  if (!view) {
+    return std::string();
+  }
+  return std::string(view->data(), view->size());
+}
+
+inline bool node_truthy(const ConstNodeRef& node) {
+  if (!node.valid()) {
+    return false;
+  }
+  if (node.has_children()) {
+    return node.num_children() > 0;
+  }
+  if (node_is_null(node)) {
+    return false;
+  }
+  const auto view = node_scalar_view(node);
+  if (!view) {
+    return false;
+  }
+  if (auto parsed = parse_bool(*view)) {
+    return *parsed;
+  }
+  if (auto parsed = parse_float(*view)) {
+    return *parsed != 0.0;
+  }
+  return !trim(*view).empty();
+}
+
+enum class NativeKind {
+  Invalid,
+  Int64,
+  UInt64,
+  Float64,
+  String,
+  Bool,
+};
+
+struct NativeValue {
+  NativeKind kind {NativeKind::Invalid};
+  int64_t i64 {};
+  uint64_t u64 {};
+  double f64 {};
+  bool b {};
+  std::string s;
+};
+
+inline NativeValue to_native_value(const ConstNodeRef& node) {
+  NativeValue out;
+  if (!node.valid() || node.has_children() || node_is_null(node)) {
+    return out;
+  }
+
+  const auto view = node_scalar_view(node);
+  if (!view) {
+    return out;
+  }
+
+  if (auto b = parse_bool(*view)) {
+    out.kind = NativeKind::Bool;
+    out.b = *b;
+    return out;
+  }
+  if (auto i = parse_int(*view)) {
+    out.kind = NativeKind::Int64;
+    out.i64 = *i;
+    return out;
+  }
+  if (auto u = parse_uint(*view)) {
+    out.kind = NativeKind::UInt64;
+    out.u64 = *u;
+    return out;
+  }
+  if (auto f = parse_float(*view)) {
+    out.kind = NativeKind::Float64;
+    out.f64 = *f;
+    return out;
+  }
+
+  out.kind = NativeKind::String;
+  out.s = std::string(view->data(), view->size());
+  return out;
+}
+
+inline NativeKind query_kind(const ConstNodeRef& node) {
+  return to_native_value(node).kind;
+}
+
+struct NativeNodeRef {
+  ConstNodeRef node;
+  mutable bool has_cached_value {false};
+  mutable NativeValue cached;
+
+  NativeNodeRef() = default;
+  explicit NativeNodeRef(ConstNodeRef ref): node(ref) {}
+
+  bool valid() const {
+    return node.valid();
+  }
+
+  const NativeValue& value() const {
+    if (!has_cached_value) {
+      cached = to_native_value(node);
+      has_cached_value = true;
+    }
+    return cached;
+  }
+
+  NativeKind kind() const {
+    return value().kind;
+  }
+};
+
+inline bool native_is_number(const NativeKind kind) {
+  return kind == NativeKind::Int64 || kind == NativeKind::UInt64 || kind == NativeKind::Float64;
+}
+
+inline std::optional<double> native_to_double(const NativeNodeRef& node) {
+  const auto& value = node.value();
+  switch (value.kind) {
+  case NativeKind::Int64:
+    return static_cast<double>(value.i64);
+  case NativeKind::UInt64:
+    return static_cast<double>(value.u64);
+  case NativeKind::Float64:
+    return value.f64;
+  default:
+    return std::nullopt;
+  }
+}
+
+inline std::optional<int64_t> native_to_int(const NativeNodeRef& node) {
+  const auto& value = node.value();
+  switch (value.kind) {
+  case NativeKind::Int64:
+    return value.i64;
+  case NativeKind::UInt64:
+    if (value.u64 <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+      return static_cast<int64_t>(value.u64);
+    }
+    return std::nullopt;
+  case NativeKind::Float64:
+    return static_cast<int64_t>(value.f64);
+  default:
+    return std::nullopt;
+  }
+}
+
+inline std::optional<uint64_t> native_to_uint(const NativeNodeRef& node) {
+  const auto& value = node.value();
+  switch (value.kind) {
+  case NativeKind::UInt64:
+    return value.u64;
+  case NativeKind::Int64:
+    if (value.i64 >= 0) {
+      return static_cast<uint64_t>(value.i64);
+    }
+    return std::nullopt;
+  case NativeKind::Float64:
+    if (value.f64 >= 0.0) {
+      return static_cast<uint64_t>(value.f64);
+    }
+    return std::nullopt;
+  default:
+    return std::nullopt;
+  }
+}
+
+inline std::optional<bool> native_to_bool(const NativeNodeRef& node) {
+  const auto& value = node.value();
+  if (value.kind == NativeKind::Bool) {
+    return value.b;
+  }
+  return std::nullopt;
+}
+
+inline std::string native_to_string(const NativeNodeRef& native_ref) {
+  if (!native_ref.valid()) {
+    return std::string();
+  }
+  if (native_ref.node.has_children() && !native_ref.node.is_val()) {
+    std::ostringstream os;
+    os << ryml::as_json(*native_ref.node.tree(), native_ref.node.id());
+    return os.str();
+  }
+
+  const auto& value = native_ref.value();
+  switch (value.kind) {
+  case NativeKind::Bool:
+    return value.b ? "true" : "false";
+  case NativeKind::Int64:
+    return std::to_string(value.i64);
+  case NativeKind::UInt64:
+    return std::to_string(value.u64);
+  case NativeKind::Float64: {
+    auto s = std::to_string(value.f64);
+    const auto last_non_zero = s.find_last_not_of('0');
+    if (last_non_zero != std::string::npos && s[last_non_zero] == '.') {
+      s.erase(last_non_zero + 2);
+    } else if (last_non_zero != std::string::npos) {
+      s.erase(last_non_zero + 1);
+    }
+    return s;
+  }
+  case NativeKind::String:
+    return value.s;
+  case NativeKind::Invalid:
+  default:
+    return node_to_string(native_ref.node);
+  }
+}
+
+inline bool native_truthy(const NativeNodeRef& native_ref) {
+  if (!native_ref.valid()) {
+    return false;
+  }
+  if (native_ref.node.has_children()) {
+    return native_ref.node.num_children() > 0;
+  }
+
+  const auto& value = native_ref.value();
+  switch (value.kind) {
+  case NativeKind::Bool:
+    return value.b;
+  case NativeKind::Int64:
+    return value.i64 != 0;
+  case NativeKind::UInt64:
+    return value.u64 != 0;
+  case NativeKind::Float64:
+    return value.f64 != 0.0;
+  case NativeKind::String:
+    return !trim(value.s).empty();
+  case NativeKind::Invalid:
+  default:
+    return false;
+  }
+}
+
+inline void write_native_value(NodeRef node, const NativeValue& value) {
+  switch (value.kind) {
+  case NativeKind::Bool:
+    node << (value.b ? "true" : "false");
+    break;
+  case NativeKind::Int64:
+    node << value.i64;
+    break;
+  case NativeKind::UInt64:
+    node << value.u64;
+    break;
+  case NativeKind::Float64:
+    node << value.f64;
+    break;
+  case NativeKind::String:
+    node << to_csubstr(value.s);
+    break;
+  case NativeKind::Invalid:
+  default:
+    node = nullptr;
+    break;
+  }
+}
+
+inline NodeRef append_native_tmp(NodeRef tmp_root, const NativeValue& value) {
+  auto node = tmp_root.append_child();
+  write_native_value(node, value);
+  return node;
+}
+
+inline ConstNodeRef find_child_by_key(ConstNodeRef node, ::ryml::csubstr key) {
+  if (!node.valid()) {
+    return ConstNodeRef();
+  }
+  for (auto child : node.children()) {
+    if (child.key() == key) {
+      return child;
+    }
+  }
+  return ConstNodeRef();
+}
+
+inline NodeRef find_child_by_key(NodeRef node, ::ryml::csubstr key) {
+  if (!node.valid()) {
+    return NodeRef();
+  }
+  for (auto child : node.children()) {
+    if (child.has_key() && child.key() == key) {
+      return child;
+    }
+  }
+  return NodeRef();
+}
+
+inline ConstNodeRef resolve_pointer(ConstNodeRef root, const Pointer& ptr) {
+  if (root.contains(ptr)) {
+    return root[ptr];
+  }
+  return ConstNodeRef{};
+  // ConstNodeRef current = root;
+  // for (const auto& token : ptr.tokens()) {
+  //   if (!current.valid()) {
+  //     return ConstNodeRef();
+  //   }
+  //   if (current.is_map()) {
+  //     current = current.find_child(token);
+  //     current = find_child_by_key(current, token);
+  //   } else if (current.is_seq()) {
+  //     const std::string_view view(token.str, token.len);
+  //     const auto index = parse_int(view);
+  //     if (!index || *index < 0) {
+  //       return ConstNodeRef();
+  //     }
+  //     if (static_cast<size_t>(*index) >= current.num_children()) {
+  //       return ConstNodeRef();
+  //     }
+  //     current = current.child(static_cast<size_t>(*index));
+  //   } else {
+  //     return ConstNodeRef();
+  //   }
+  // }
+  // return current;
+}
+
+inline NodeRef ensure_child_map(NodeRef parent, std::string_view key) {
+  const ::ryml::csubstr key_sub = to_csubstr(key);
+  auto child = find_child_by_key(parent, key_sub);
+  if (!child.valid()) {
+    child = parent.append_child();
+    child << ::ryml::key(key_sub);
+  }
+  child |= ::ryml::MAP;
+  return child;
+}
+
+inline NodeRef ensure_child_seq(NodeRef parent, std::string_view key) {
+  const ::ryml::csubstr key_sub = to_csubstr(key);
+  auto child = find_child_by_key(parent, key_sub);
+  if (!child.valid()) {
+    child = parent.append_child();
+    child << ::ryml::key(key_sub);
+  }
+  child |= ::ryml::SEQ;
+  return child;
+}
+
+inline NodeRef ensure_path(NodeRef root, const Pointer& ptr) {
+  NodeRef current = root;
+  for (const auto& token : ptr.tokens()) {
+    if (!current.valid()) {
+      return NodeRef();
+    }
+    if (!current.is_map()) {
+      current |= ::ryml::MAP;
+    }
+    auto child = find_child_by_key(current, token);
+    if (!child.valid()) {
+      child = current.append_child();
+      child << ::ryml::key(token);
+    }
+    current = child;
+  }
+  return current;
+}
+
+inline void set_child_from_node(NodeRef parent, std::string_view key, ConstNodeRef src) {
+  if (!parent.valid()) {
+    return;
+  }
+  const ::ryml::csubstr key_sub = to_csubstr(key);
+  if (parent.contains(key_sub)) {
+    parent.remove_child(key_sub);
+  }
+
+  const size_t new_index = parent.tree()->duplicate(src.tree(), src.id(), parent.id(), /*parent.last_child().id());*/ c4::yml::NONE);
+  auto node = NodeRef(parent.tree(), new_index);
+  node << ryml::key(key_sub);
+}
+
 } // namespace inja
 
 #endif // INCLUDE_INJA_UTILS_HPP_
 
+// #include "config.hpp"
+#ifndef INCLUDE_INJA_CONFIG_HPP_
+#define INCLUDE_INJA_CONFIG_HPP_
+
+#include <filesystem>
+#include <functional>
+#include <string>
+
+// #include "template.hpp"
+#ifndef INCLUDE_INJA_TEMPLATE_HPP_
+#define INCLUDE_INJA_TEMPLATE_HPP_
+
+#include <map>
+#include <memory>
+#include <string>
+
+// #include "node.hpp"
+#ifndef INCLUDE_INJA_NODE_HPP_
+#define INCLUDE_INJA_NODE_HPP_
+
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <vector>
+
+// #include "function_storage.hpp"
+#ifndef INCLUDE_INJA_FUNCTION_STORAGE_HPP_
+#define INCLUDE_INJA_FUNCTION_STORAGE_HPP_
+
+#include <functional>
+#include <map>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
 // #include "json.hpp"
+
+
+namespace inja {
+
+using Arguments = std::vector<ConstNodeRef>;
+using CallbackFunction = std::function<ConstNodeRef(Arguments& args, NodeRef additional_data)>;
+using VoidCallbackFunction = std::function<void(Arguments& args, NodeRef additional_data)>;
+
+/*!
+ * \brief Class for builtin functions and user-defined callbacks.
+ */
+class FunctionStorage {
+public:
+  enum class Operation {
+    Not,
+    And,
+    Or,
+    In,
+    Equal,
+    NotEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+    Add,
+    Subtract,
+    Multiplication,
+    Division,
+    Power,
+    Modulo,
+    AtId,
+    At,
+    Capitalize,
+    Default,
+    DivisibleBy,
+    Even,
+    Exists,
+    ExistsInObject,
+    First,
+    Float,
+    Int,
+    IsArray,
+    IsBoolean,
+    IsFloat,
+    IsInteger,
+    IsNumber,
+    IsObject,
+    IsString,
+    Last,
+    Length,
+    Lower,
+    Max,
+    Min,
+    Odd,
+    Range,
+    Replace,
+    Round,
+    Sort,
+    Upper,
+    Super,
+    Join,
+    Macro,
+    Callback,
+    Hex,
+    None,
+  };
+
+  struct FunctionData {
+    explicit FunctionData(const Operation& op, const CallbackFunction& cb = CallbackFunction {}): operation(op), callback(cb) {}
+    const Operation operation;
+    const CallbackFunction callback;
+  };
+
+private:
+  const int VARIADIC {-1};
+
+  std::map<std::pair<std::string, int>, FunctionData> function_storage = {
+      {std::make_pair("at", 1), FunctionData {Operation::At}},
+      {std::make_pair("at", 2), FunctionData {Operation::At}},
+      {std::make_pair("capitalize", 1), FunctionData {Operation::Capitalize}},
+      {std::make_pair("default", 2), FunctionData {Operation::Default}},
+      {std::make_pair("divisibleBy", 2), FunctionData {Operation::DivisibleBy}},
+      {std::make_pair("even", 1), FunctionData {Operation::Even}},
+      {std::make_pair("exists", 1), FunctionData {Operation::Exists}},
+      {std::make_pair("existsIn", 2), FunctionData {Operation::ExistsInObject}},
+      {std::make_pair("first", 1), FunctionData {Operation::First}},
+      {std::make_pair("float", 1), FunctionData {Operation::Float}},
+      {std::make_pair("int", 1), FunctionData {Operation::Int}},
+      {std::make_pair("isArray", 1), FunctionData {Operation::IsArray}},
+      {std::make_pair("isBoolean", 1), FunctionData {Operation::IsBoolean}},
+      {std::make_pair("isFloat", 1), FunctionData {Operation::IsFloat}},
+      {std::make_pair("isInteger", 1), FunctionData {Operation::IsInteger}},
+      {std::make_pair("isNumber", 1), FunctionData {Operation::IsNumber}},
+      {std::make_pair("isObject", 1), FunctionData {Operation::IsObject}},
+      {std::make_pair("isString", 1), FunctionData {Operation::IsString}},
+      {std::make_pair("last", 1), FunctionData {Operation::Last}},
+      {std::make_pair("length", 1), FunctionData {Operation::Length}},
+      {std::make_pair("lower", 1), FunctionData {Operation::Lower}},
+      {std::make_pair("max", 1), FunctionData {Operation::Max}},
+      {std::make_pair("min", 1), FunctionData {Operation::Min}},
+      {std::make_pair("odd", 1), FunctionData {Operation::Odd}},
+      {std::make_pair("range", 1), FunctionData {Operation::Range}},
+      {std::make_pair("replace", 3), FunctionData {Operation::Replace}},
+      {std::make_pair("round", 2), FunctionData {Operation::Round}},
+      {std::make_pair("sort", 1), FunctionData {Operation::Sort}},
+      {std::make_pair("upper", 1), FunctionData {Operation::Upper}},
+      {std::make_pair("super", 0), FunctionData {Operation::Super}},
+      {std::make_pair("super", 1), FunctionData {Operation::Super}},
+      {std::make_pair("join", 2), FunctionData {Operation::Join}},
+      {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
+  };
+
+public:
+  void add_builtin(std::string_view name, int num_args, Operation op) {
+    function_storage.emplace(std::make_pair(static_cast<std::string>(name), num_args), FunctionData {op});
+  }
+
+  void add_callback(std::string_view name, int num_args, const CallbackFunction& callback) {
+    function_storage.emplace(std::make_pair(static_cast<std::string>(name), num_args), FunctionData {Operation::Callback, callback});
+  }
+
+  FunctionData find_function(std::string_view name, int num_args) const {
+    auto it = function_storage.find(std::make_pair(static_cast<std::string>(name), num_args));
+    if (it != function_storage.end()) {
+      return it->second;
+
+      // Find variadic function
+    } else if (num_args > 0) {
+      it = function_storage.find(std::make_pair(static_cast<std::string>(name), VARIADIC));
+      if (it != function_storage.end()) {
+        return it->second;
+      }
+    }
+
+    return FunctionData {Operation::None};
+  }
+};
+
+} // namespace inja
+
+#endif // INCLUDE_INJA_FUNCTION_STORAGE_HPP_
+
+// #include "json.hpp"
+
+// #include "utils.hpp"
 
 
 namespace inja {
@@ -394,6 +987,7 @@ class IncludeStatementNode;
 class ExtendsStatementNode;
 class BlockStatementNode;
 class SetStatementNode;
+class MacroStatementNode;
 
 class NodeVisitor {
 public:
@@ -415,6 +1009,7 @@ public:
   virtual void visit(const ExtendsStatementNode& node) = 0;
   virtual void visit(const BlockStatementNode& node) = 0;
   virtual void visit(const SetStatementNode& node) = 0;
+  virtual void visit(const MacroStatementNode& node) = 0;
 };
 
 /*!
@@ -426,7 +1021,7 @@ public:
 
   size_t pos;
 
-  AstNode(size_t pos): pos(pos) {}
+  explicit AstNode(size_t pos): pos(pos) {}
   virtual ~AstNode() {}
 };
 
@@ -436,7 +1031,7 @@ public:
 
   explicit BlockNode(): AstNode(0) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -447,7 +1042,7 @@ public:
 
   explicit TextNode(size_t pos, size_t length): AstNode(pos), length(length) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -456,18 +1051,18 @@ class ExpressionNode : public AstNode {
 public:
   explicit ExpressionNode(size_t pos): AstNode(pos) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
 
 class LiteralNode : public ExpressionNode {
 public:
-  const json value;
+  const std::string_view text;
 
-  explicit LiteralNode(std::string_view data_text, size_t pos): ExpressionNode(pos), value(json::parse(data_text)) {}
+  explicit LiteralNode(std::string_view data_text, size_t pos): ExpressionNode(pos), text(data_text) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -475,22 +1070,22 @@ public:
 class DataNode : public ExpressionNode {
 public:
   const std::string name;
-  const json::json_pointer ptr;
+  const Pointer ptr;
 
   static std::string convert_dot_to_ptr(std::string_view ptr_name) {
     std::string result;
-    do {
+    while (!ptr_name.empty()) {
       std::string_view part;
       std::tie(part, ptr_name) = string_view::split(ptr_name, '.');
       result.push_back('/');
       result.append(part.begin(), part.end());
-    } while (!ptr_name.empty());
+    };
     return result;
   }
 
-  explicit DataNode(std::string_view ptr_name, size_t pos): ExpressionNode(pos), name(ptr_name), ptr(json::json_pointer(convert_dot_to_ptr(ptr_name))) {}
+  explicit DataNode(std::string_view ptr_name, size_t pos): ExpressionNode(pos), name(ptr_name), ptr(Pointer(convert_dot_to_ptr(ptr_name))) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -610,7 +1205,7 @@ public:
     }
   }
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -622,14 +1217,14 @@ public:
   explicit ExpressionListNode(): AstNode(0) {}
   explicit ExpressionListNode(size_t pos): AstNode(pos) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
 
 class StatementNode : public AstNode {
 public:
-  StatementNode(size_t pos): AstNode(pos) {}
+  explicit StatementNode(size_t pos): AstNode(pos) {}
 
   virtual void accept(NodeVisitor& v) const = 0;
 };
@@ -640,7 +1235,7 @@ public:
   BlockNode body;
   BlockNode* const parent;
 
-  ForStatementNode(BlockNode* const parent, size_t pos): StatementNode(pos), parent(parent) {}
+  explicit ForStatementNode(BlockNode* const parent, size_t pos): StatementNode(pos), parent(parent) {}
 
   virtual void accept(NodeVisitor& v) const = 0;
 };
@@ -651,7 +1246,7 @@ public:
 
   explicit ForArrayStatementNode(const std::string& value, BlockNode* const parent, size_t pos): ForStatementNode(parent, pos), value(value) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -664,7 +1259,7 @@ public:
   explicit ForObjectStatementNode(const std::string& key, const std::string& value, BlockNode* const parent, size_t pos)
       : ForStatementNode(parent, pos), key(key), value(value) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -682,7 +1277,7 @@ public:
   explicit IfStatementNode(BlockNode* const parent, size_t pos): StatementNode(pos), parent(parent), is_nested(false) {}
   explicit IfStatementNode(bool is_nested, BlockNode* const parent, size_t pos): StatementNode(pos), parent(parent), is_nested(is_nested) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -693,7 +1288,7 @@ public:
 
   explicit IncludeStatementNode(const std::string& file, size_t pos): StatementNode(pos), file(file) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -704,7 +1299,7 @@ public:
 
   explicit ExtendsStatementNode(const std::string& file, size_t pos): StatementNode(pos), file(file) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -717,7 +1312,7 @@ public:
 
   explicit BlockStatementNode(BlockNode* const parent, const std::string& name, size_t pos): StatementNode(pos), name(name), parent(parent) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -729,7 +1324,22 @@ public:
 
   explicit SetStatementNode(const std::string& key, size_t pos): StatementNode(pos), key(key) {}
 
-  void accept(NodeVisitor& v) const {
+  void accept(NodeVisitor& v) const override {
+    v.visit(*this);
+  }
+};
+
+class MacroStatementNode : public StatementNode {
+public:
+  const std::string name;
+  std::vector<std::string> parameters;
+  BlockNode body;
+  BlockNode* const parent;
+
+  explicit MacroStatementNode(BlockNode* const parent, const std::string& name, size_t pos)
+      : StatementNode(pos), name(name), parent(parent) {}
+
+  void accept(NodeVisitor& v) const override {
     v.visit(*this);
   }
 };
@@ -751,63 +1361,67 @@ namespace inja {
  * \brief A class for counting statistics on a Template.
  */
 class StatisticsVisitor : public NodeVisitor {
-  void visit(const BlockNode& node) {
+  void visit(const BlockNode& node) override {
     for (const auto& n : node.nodes) {
       n->accept(*this);
     }
   }
 
-  void visit(const TextNode&) {}
-  void visit(const ExpressionNode&) {}
-  void visit(const LiteralNode&) {}
+  void visit(const TextNode&) override {}
+  void visit(const ExpressionNode&) override {}
+  void visit(const LiteralNode&) override {}
 
-  void visit(const DataNode&) {
+  void visit(const DataNode&) override {
     variable_counter += 1;
   }
 
-  void visit(const FunctionNode& node) {
+  void visit(const FunctionNode& node) override {
     for (const auto& n : node.arguments) {
       n->accept(*this);
     }
   }
 
-  void visit(const ExpressionListNode& node) {
+  void visit(const ExpressionListNode& node) override {
     node.root->accept(*this);
   }
 
-  void visit(const StatementNode&) {}
-  void visit(const ForStatementNode&) {}
+  void visit(const StatementNode&) override {}
+  void visit(const ForStatementNode&) override {}
 
-  void visit(const ForArrayStatementNode& node) {
+  void visit(const ForArrayStatementNode& node) override {
     node.condition.accept(*this);
     node.body.accept(*this);
   }
 
-  void visit(const ForObjectStatementNode& node) {
+  void visit(const ForObjectStatementNode& node) override {
     node.condition.accept(*this);
     node.body.accept(*this);
   }
 
-  void visit(const IfStatementNode& node) {
+  void visit(const IfStatementNode& node) override {
     node.condition.accept(*this);
     node.true_statement.accept(*this);
     node.false_statement.accept(*this);
   }
 
-  void visit(const IncludeStatementNode&) {}
+  void visit(const IncludeStatementNode&) override {}
 
-  void visit(const ExtendsStatementNode&) {}
+  void visit(const ExtendsStatementNode&) override {}
 
-  void visit(const BlockStatementNode& node) {
+  void visit(const BlockStatementNode& node) override {
     node.block.accept(*this);
   }
 
-  void visit(const SetStatementNode&) {}
+  void visit(const SetStatementNode&) override {}
+
+  void visit(const MacroStatementNode& node) override {
+    node.body.accept(*this);
+  }
 
 public:
-  size_t variable_counter;
+  size_t variable_counter {0};
 
-  explicit StatisticsVisitor(): variable_counter(0) {}
+  explicit StatisticsVisitor() {}
 };
 
 } // namespace inja
@@ -824,6 +1438,7 @@ struct Template {
   BlockNode root;
   std::string content;
   std::map<std::string, std::shared_ptr<BlockStatementNode>> block_storage;
+  std::map<std::pair<std::string, int>, std::shared_ptr<MacroStatementNode>> macro_storage;
 
   explicit Template() {}
   explicit Template(std::string content): content(std::move(content)) {}
@@ -1495,12 +2110,13 @@ class Parser {
   std::stack<IfStatementNode*> if_statement_stack;
   std::stack<ForStatementNode*> for_statement_stack;
   std::stack<BlockStatementNode*> block_statement_stack;
+  std::stack<MacroStatementNode*> macro_statement_stack;
 
-  inline void throw_parser_error(const std::string& message) const {
+  void throw_parser_error(const std::string& message) const {
     INJA_THROW(ParserError(message, lexer.current_position()));
   }
 
-  inline void get_next_token() {
+  void get_next_token() {
     if (have_peek_tok) {
       tok = peek_tok;
       have_peek_tok = false;
@@ -1509,24 +2125,24 @@ class Parser {
     }
   }
 
-  inline void get_peek_token() {
+  void get_peek_token() {
     if (!have_peek_tok) {
       peek_tok = lexer.scan();
       have_peek_tok = true;
     }
   }
 
-  inline void add_literal(Arguments &arguments, const char* content_ptr) {
+  void add_literal(Arguments &arguments, const char* content_ptr) {
     const std::string_view data_text(literal_start.data(), tok.text.data() - literal_start.data() + tok.text.size());
     arguments.emplace_back(std::make_shared<LiteralNode>(data_text, data_text.data() - content_ptr));
   }
 
-  inline void add_operator(Arguments &arguments, OperatorStack &operator_stack) {
+  void add_operator(Arguments &arguments, OperatorStack &operator_stack) {
     auto function = operator_stack.top();
     operator_stack.pop();
 
     if (static_cast<int>(arguments.size()) < function->number_args) {
-      throw_parser_error("too few arguments");
+      throw_parser_error("too few arguments in expression for operator '" + function->name + "'");
     }
 
     for (int i = 0; i < function->number_args; ++i) {
@@ -1679,11 +2295,16 @@ class Parser {
 
           auto function_data = function_storage.find_function(func->name, func->number_args);
           if (function_data.operation == FunctionStorage::Operation::None) {
-            throw_parser_error("unknown function " + func->name);
-          }
-          func->operation = function_data.operation;
-          if (function_data.operation == FunctionStorage::Operation::Callback) {
-            func->callback = function_data.callback;
+            const auto macro_it = tmpl.macro_storage.find(std::make_pair(func->name, func->number_args));
+            if (macro_it == tmpl.macro_storage.end()) {
+              throw_parser_error("unknown function " + func->name);
+            }
+            func->operation = FunctionStorage::Operation::Macro;
+          } else {
+            func->operation = function_data.operation;
+            if (function_data.operation == FunctionStorage::Operation::Callback) {
+              func->callback = function_data.callback;
+            }
           }
           arguments.emplace_back(func);
 
@@ -1694,6 +2315,12 @@ class Parser {
 
         // Operators
       } break;
+      case Token::Kind::Dot:
+        if (arguments.empty()) {
+          arguments.emplace_back(std::make_shared<DataNode>("", tok.text.data() - tmpl.content.c_str()));
+          break;
+        }
+        [[fallthrough]];
       case Token::Kind::Equal:
       case Token::Kind::NotEqual:
       case Token::Kind::GreaterThan:
@@ -1705,8 +2332,7 @@ class Parser {
       case Token::Kind::Times:
       case Token::Kind::Slash:
       case Token::Kind::Power:
-      case Token::Kind::Percent:
-      case Token::Kind::Dot: {
+      case Token::Kind::Percent: {
 
       parse_operator:
         FunctionStorage::Operation operation;
@@ -1831,11 +2457,16 @@ class Parser {
         // search store for defined function with such name and number of args
         auto function_data = function_storage.find_function(func->name, func->number_args);
         if (function_data.operation == FunctionStorage::Operation::None) {
-          throw_parser_error("unknown function " + func->name);
-        }
-        func->operation = function_data.operation;
-        if (function_data.operation == FunctionStorage::Operation::Callback) {
-          func->callback = function_data.callback;
+          const auto macro_it = tmpl.macro_storage.find(std::make_pair(func->name, func->number_args));
+          if (macro_it == tmpl.macro_storage.end()) {
+            throw_parser_error("unknown function " + func->name);
+          }
+          func->operation = FunctionStorage::Operation::Macro;
+        } else {
+          func->operation = function_data.operation;
+          if (function_data.operation == FunctionStorage::Operation::Callback) {
+            func->callback = function_data.callback;
+          }
         }
         arguments.emplace_back(func);
       } break;
@@ -1965,7 +2596,7 @@ class Parser {
           throw_parser_error("expected id, got '" + tok.describe() + "'");
         }
 
-        const Token key_token = std::move(value_token);
+        const Token key_token = value_token;
         value_token = tok;
         get_next_token();
 
@@ -2041,6 +2672,69 @@ class Parser {
       if (!parse_expression(tmpl, closing)) {
         return false;
       }
+    } else if (tok.text == static_cast<decltype(tok.text)>("macro")) {
+      get_next_token();
+
+      if (tok.kind != Token::Kind::Id) {
+        throw_parser_error("expected macro name, got '" + tok.describe() + "'");
+      }
+
+      const Token name_token = tok;
+      const std::string macro_name = static_cast<std::string>(tok.text);
+
+      get_next_token();
+      if (tok.kind != Token::Kind::LeftParen) {
+        throw_parser_error("expected left parenthesis, got '" + tok.describe() + "'");
+      }
+
+      std::vector<std::string> parameters;
+      get_next_token();
+      if (tok.kind != Token::Kind::RightParen) {
+        for (;;) {
+          if (tok.kind != Token::Kind::Id) {
+            throw_parser_error("expected parameter name, got '" + tok.describe() + "'");
+          }
+          parameters.emplace_back(static_cast<std::string>(tok.text));
+
+          get_next_token();
+          if (tok.kind == Token::Kind::Comma) {
+            get_next_token();
+            continue;
+          }
+
+          if (tok.kind != Token::Kind::RightParen) {
+            throw_parser_error("expected right parenthesis, got '" + tok.describe() + "'");
+          }
+          break;
+        }
+      }
+
+      auto macro_statement_node =
+          std::make_shared<MacroStatementNode>(current_block, macro_name, name_token.text.data() - tmpl.content.c_str());
+      macro_statement_node->parameters = std::move(parameters);
+
+      auto success = tmpl.macro_storage.emplace(std::make_pair(macro_statement_node->name, static_cast<int>(macro_statement_node->parameters.size())),
+                                                macro_statement_node);
+      if (!success.second) {
+        throw_parser_error("macro with the name '" + macro_statement_node->name + "' and arity " +
+                           std::to_string(macro_statement_node->parameters.size()) + " does already exist");
+      }
+
+      current_block->nodes.emplace_back(macro_statement_node);
+      macro_statement_stack.emplace(macro_statement_node.get());
+      current_block = &macro_statement_node->body;
+
+      get_next_token();
+    } else if (tok.text == static_cast<decltype(tok.text)>("endmacro")) {
+      if (macro_statement_stack.empty()) {
+        throw_parser_error("endmacro without matching macro");
+      }
+
+      auto& macro_statement_data = macro_statement_stack.top();
+      get_next_token();
+
+      current_block = macro_statement_data->parent;
+      macro_statement_stack.pop();
     } else {
       return false;
     }
@@ -2060,6 +2754,9 @@ class Parser {
         }
         if (!for_statement_stack.empty()) {
           throw_parser_error("unmatched for");
+        }
+        if (!macro_statement_stack.empty()) {
+          throw_parser_error("unmatched macro");
         }
       }
         current_block = nullptr;
@@ -2107,7 +2804,6 @@ class Parser {
       } break;
       }
     }
-    current_block = nullptr;
   }
 
 public:
@@ -2115,13 +2811,13 @@ public:
                   const FunctionStorage& function_storage)
       : config(parser_config), lexer(lexer_config), template_storage(template_storage), function_storage(function_storage) {}
 
-  Template parse(std::string_view input, std::filesystem::path path) {
+  Template parse(std::string_view input, const std::filesystem::path& path) {
     auto result = Template(std::string(input));
     parse_into(result, path);
     return result;
   }
 
-  void parse_into_template(Template& tmpl, std::filesystem::path filename) {
+  void parse_into_template(Template& tmpl, const std::filesystem::path& filename) {
     auto sub_parser = Parser(config, lexer.get_config(), template_storage, function_storage);
     sub_parser.parse_into(tmpl, filename.parent_path());
   }
@@ -2173,6 +2869,7 @@ public:
 
 // #include "utils.hpp"
 
+#include "spdlog/spdlog.h"
 
 namespace inja {
 
@@ -2181,7 +2878,7 @@ namespace inja {
 */
 inline std::string htmlescape(const std::string& data) {
   std::string buffer;
-  buffer.reserve((unsigned int)(1.1 * data.size()));
+  buffer.reserve(static_cast<size_t>(1.1 * data.size()));
   for (size_t pos = 0; pos != data.size(); ++pos) {
     switch (data[pos]) {
       case '&':  buffer.append("&amp;");       break;
@@ -2195,6 +2892,89 @@ inline std::string htmlescape(const std::string& data) {
   return buffer;
 }
 
+namespace detail {
+
+struct LoopFrameSketch {
+  ConstNodeRef value;
+  ::ryml::csubstr key {};
+  size_t index {0};
+  size_t size {0};
+  bool has_key {false};
+  bool first {true};
+  bool last {true};
+
+  bool is_first() const {
+    return first;
+  }
+
+  bool is_last() const {
+    return last;
+  }
+};
+
+class LoopFrameStackSketch {
+  std::vector<LoopFrameSketch> frames;
+
+public:
+  void clear() {
+    frames.clear();
+  }
+
+  size_t depth() const {
+    return frames.size();
+  }
+
+  void push_existing(const LoopFrameSketch& frame) {
+    frames.push_back(frame);
+  }
+
+  void push_array(ConstNodeRef value, size_t index, size_t size) {
+    frames.push_back(LoopFrameSketch {
+        value,
+        ::ryml::csubstr {},
+        index,
+        size,
+        false,
+        index == 0,
+        size == 0 ? true : (index + 1 >= size),
+    });
+  }
+
+  void push_object(::ryml::csubstr key, ConstNodeRef value, size_t index, size_t size) {
+    frames.push_back(LoopFrameSketch {
+        value,
+        key,
+        index,
+        size,
+        true,
+        index == 0,
+        size == 0 ? true : (index + 1 >= size),
+    });
+  }
+
+  void pop() {
+    if (!frames.empty()) {
+      frames.pop_back();
+    }
+  }
+
+  const LoopFrameSketch* current() const {
+    if (frames.empty()) {
+      return nullptr;
+    }
+    return &frames.back();
+  }
+
+  const LoopFrameSketch* parent(size_t levels = 1) const {
+    if (levels == 0 || frames.size() <= levels) {
+      return nullptr;
+    }
+    return &frames[frames.size() - 1 - levels];
+  }
+};
+
+} // namespace detail
+
 /*!
  * \brief Class for rendering a Template with data.
  */
@@ -2205,52 +2985,191 @@ class Renderer : public NodeVisitor {
   const TemplateStorage& template_storage;
   const FunctionStorage& function_storage;
 
-  const Template* current_template;
+  const Template* current_template {nullptr};
   size_t current_level {0};
   std::vector<const Template*> template_stack;
   std::vector<const BlockStatementNode*> block_statement_stack;
 
-  const json* data_input;
-  std::ostream* output_stream;
+  ConstNodeRef data_input;
+  std::ostream* output_stream {nullptr};
 
-  json additional_data;
-  json* current_loop_data = &additional_data["loop"];
+  NodeRef template_scope_data;
+  NodeRef additional_data;
+  NodeRef current_loop_data;
+  NodeRef tmp_sequence;
+  detail::LoopFrameStackSketch loop_frames;
 
-  std::vector<std::shared_ptr<json>> data_tmp_stack;
-  std::stack<const json*> data_eval_stack;
+  std::vector<NativeNodeRef> data_eval_stack;
   std::stack<const DataNode*> not_found_stack;
 
   bool break_rendering {false};
+  size_t macro_call_depth {0};
 
-  static bool truthy(const json* data) {
-    if (data->is_boolean()) {
-      return data->get<bool>();
-    } else if (data->is_number()) {
-      return (*data != 0);
-    } else if (data->is_null()) {
-      return false;
+  static constexpr size_t MAX_MACRO_CALL_DEPTH = 1000;
+
+  static bool nodes_equal(const NativeNodeRef& lhs, const NativeNodeRef& rhs) {
+    if (node_is_null(lhs.node) && node_is_null(rhs.node)) {
+      return true;
     }
-    return !data->empty();
+    const auto l_num = native_to_double(lhs);
+    const auto r_num = native_to_double(rhs);
+    if (l_num && r_num) {
+      return *l_num == *r_num;
+    }
+    const auto l_bool = native_to_bool(lhs);
+    const auto r_bool = native_to_bool(rhs);
+    if (l_bool && r_bool) {
+      return *l_bool == *r_bool;
+    }
+    return native_to_string(lhs) == native_to_string(rhs);
   }
 
-  void print_data(const std::shared_ptr<json>& value) {
-    if (value->is_string()) {
-      if (config.html_autoescape) {
-        *output_stream << htmlescape(value->get_ref<const json::string_t&>());
-      } else {
-        *output_stream << value->get_ref<const json::string_t&>();
-      }
-    } else if (value->is_number_unsigned()) {
-      *output_stream << value->get<const json::number_unsigned_t>();
-    } else if (value->is_number_integer()) {
-      *output_stream << value->get<const json::number_integer_t>();
-    } else if (value->is_null()) {
+  static bool node_less(const NativeNodeRef& lhs, const NativeNodeRef& rhs) {
+    const auto l_num = native_to_double(lhs);
+    const auto r_num = native_to_double(rhs);
+    if (l_num && r_num) {
+      return *l_num < *r_num;
+    }
+    return native_to_string(lhs) < native_to_string(rhs);
+  }
+
+  void set_loop_meta_bool(NodeRef node, std::string_view key, bool value) {
+    auto field = find_child_by_key(node, to_csubstr(key));
+    if (!field.valid()) {
+      const auto key_sub = to_csubstr(key);
+      field = node.append_child();
+      field << ryml::Key(key_sub);
+    }
+    field << (value ? "true" : "false");
+  }
+
+  void set_loop_meta_int(NodeRef node, std::string_view key, int64_t value) {
+    auto field = find_child_by_key(node, to_csubstr(key));
+    if (!field.valid()) {
+      const auto key_sub = to_csubstr(key);
+      field = node.append_child();
+      field << ryml::Key(key_sub);
+    }
+    field << value;
+  }
+
+  void set_loop_meta_key(NodeRef node, ::ryml::csubstr value) {
+    auto field = find_child_by_key(node, to_csubstr("key"));
+    if (!field.valid()) {
+      field = node.append_child();
+      field << ryml::Key("key");
+    }
+    field << value;
+  }
+
+  void write_loop_frame(NodeRef node, const detail::LoopFrameSketch& frame) {
+    set_loop_meta_bool(node, "is_first", frame.is_first());
+    set_loop_meta_bool(node, "is_last", frame.is_last());
+    set_loop_meta_int(node, "index", static_cast<int64_t>(frame.index));
+    set_loop_meta_int(node, "index1", static_cast<int64_t>(frame.index + 1));
+    if (frame.has_key) {
+      set_loop_meta_key(node, frame.key);
+    }
+  }
+
+  void sync_current_loop_data_from_frames() {
+    current_loop_data.clear_children();
+
+    const auto* current = loop_frames.current();
+    if (!current) {
+      return;
+    }
+
+    write_loop_frame(current_loop_data, *current);
+
+    size_t level = 1;
+    const auto* parent_frame = loop_frames.parent(level);
+    auto cursor = current_loop_data;
+    while (parent_frame) {
+      cursor = ensure_child_map(cursor, "parent");
+      write_loop_frame(cursor, *parent_frame);
+      ++level;
+      parent_frame = loop_frames.parent(level);
+    }
+  }
+
+  detail::LoopFrameSketch parse_loop_frame(ConstNodeRef node) {
+    detail::LoopFrameSketch frame;
+
+    const auto idx = node_to_int(find_child_by_key(node, to_csubstr("index")));
+    if (idx && *idx >= 0) {
+      frame.index = static_cast<size_t>(*idx);
+    }
+
+    frame.first = node_to_bool(find_child_by_key(node, to_csubstr("is_first"))).value_or(frame.index == 0);
+    frame.last = node_to_bool(find_child_by_key(node, to_csubstr("is_last"))).value_or(true);
+
+    const auto key_node = find_child_by_key(node, to_csubstr("key"));
+    if (key_node.valid() && !node_is_null(key_node)) {
+      frame.has_key = true;
+      frame.key = key_node.val();
+    }
+
+    frame.size = frame.last ? frame.index + 1 : frame.index + 2;
+    return frame;
+  }
+
+  void restore_loop_frames_from_current_scope_if_needed() {
+    if (loop_frames.depth() > 0 || !current_loop_data.has_children()) {
+      return;
+    }
+
+    std::vector<detail::LoopFrameSketch> chain;
+    auto cursor = ConstNodeRef(current_loop_data.tree(), current_loop_data.id());
+    while (cursor.valid()) {
+      chain.push_back(parse_loop_frame(cursor));
+      cursor = find_child_by_key(cursor, to_csubstr("parent"));
+    }
+
+    std::reverse(chain.begin(), chain.end());
+    for (const auto& frame : chain) {
+      loop_frames.push_existing(frame);
+    }
+  }
+
+  ConstNodeRef resolve_global_scope_reference(const DataNode& node) const {
+    constexpr std::string_view global_scope_name = "scope.global";
+    constexpr std::string_view global_scope_prefix = "scope.global.";
+
+    const std::string_view name = node.name;
+    if (name == global_scope_name) {
+      return ConstNodeRef(template_scope_data.tree(), template_scope_data.id());
+    }
+    if (!inja::string_view::starts_with(name, global_scope_prefix)) {
+      return ConstNodeRef{};
+    }
+
+    const auto suffix = name.substr(global_scope_prefix.size());
+    const auto ptr = Pointer(DataNode::convert_dot_to_ptr(suffix));
+    if (const auto from_template_scope = resolve_pointer(template_scope_data, ptr); from_template_scope.valid()) {
+      return from_template_scope;
+    }
+    return resolve_pointer(data_input, ptr);
+  }
+
+  void print_data(const NativeNodeRef& value) {
+    if (!value.valid() || node_is_null(value.node)) {
+      return;
+    }
+    if (value.node.has_children() && !value.node.is_val()) {
+      const auto emitted = ryml::as_json(*value.node.tree(), value.node.id());
+      *output_stream << emitted;
+      return;
+    }
+    const std::string text = native_to_string(value);
+    if (config.html_autoescape) {
+      *output_stream << htmlescape(text);
     } else {
-      *output_stream << value->dump();
+      *output_stream << text;
     }
   }
 
-  const std::shared_ptr<json> eval_expression_list(const ExpressionListNode& expression_list) {
+  NativeNodeRef eval_expression_list(const ExpressionListNode& expression_list) {
     if (!expression_list.root) {
       throw_renderer_error("empty expression", expression_list);
     }
@@ -2263,34 +3182,44 @@ class Renderer : public NodeVisitor {
       throw_renderer_error("malformed expression", expression_list);
     }
 
-    const auto result = data_eval_stack.top();
-    data_eval_stack.pop();
+    const auto result = data_eval_stack.back();
+    data_eval_stack.pop_back();
 
-    if (!result) {
-      if (not_found_stack.empty()) {
-        throw_renderer_error("expression could not be evaluated", expression_list);
+    if (!result.valid()) {
+      if (!not_found_stack.empty()) {
+        const auto missing_node = not_found_stack.top();
+        not_found_stack.pop();
+        throw_renderer_error("variable '" + static_cast<std::string>(missing_node->name) + "' not found", *missing_node);
       }
-
-      const auto node = not_found_stack.top();
-      not_found_stack.pop();
-
-      throw_renderer_error("variable '" + static_cast<std::string>(node->name) + "' not found", *node);
     }
-    return std::make_shared<json>(*result);
+    return result;
   }
 
   void throw_renderer_error(const std::string& message, const AstNode& node) {
     const SourceLocation loc = get_source_location(current_template->content, node.pos);
-    INJA_THROW(RenderError(message, loc));
+    //INJA_THROW(RenderError(message, loc));
+    spdlog::debug("[inja.exception.renderer] (at " + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ") " + message);
   }
 
-  void make_result(const json&& result) {
-    auto result_ptr = std::make_shared<json>(result);
-    data_tmp_stack.push_back(result_ptr);
-    data_eval_stack.push(result_ptr.get());
+  template <class T>
+  void make_result(const T& result) {
+    auto node = tmp_sequence.append_child();
+    if constexpr (std::is_same_v<T, bool>) {
+      node << (result ? "true" : "false");
+    } else {
+      node << result;
+    }
+    data_eval_stack.emplace_back(node);
   }
 
-  template <size_t N, size_t N_start = 0, bool throw_not_found = true> std::array<const json*, N> get_arguments(const FunctionNode& node) {
+  void make_null_result() {
+    auto node = tmp_sequence.append_child();
+    node = nullptr;
+    data_eval_stack.emplace_back(node);
+  }
+
+  template <size_t N, size_t N_start = 0, bool throw_not_found = true>
+  std::array<NativeNodeRef, N> get_arguments(const FunctionNode& node) {
     if (node.arguments.size() < N_start + N) {
       throw_renderer_error("function needs " + std::to_string(N_start + N) + " variables, but has only found " + std::to_string(node.arguments.size()), node);
     }
@@ -2303,12 +3232,12 @@ class Renderer : public NodeVisitor {
       throw_renderer_error("function needs " + std::to_string(N) + " variables, but has only found " + std::to_string(data_eval_stack.size()), node);
     }
 
-    std::array<const json*, N> result;
+    std::array<NativeNodeRef, N> result;
     for (size_t i = 0; i < N; i += 1) {
-      result[N - i - 1] = data_eval_stack.top();
-      data_eval_stack.pop();
+      result[N - i - 1] = data_eval_stack.back();
+      data_eval_stack.pop_back();
 
-      if (!result[N - i - 1]) {
+      if (!result[N - i - 1].valid()) {
         const auto data_node = not_found_stack.top();
         not_found_stack.pop();
 
@@ -2320,7 +3249,8 @@ class Renderer : public NodeVisitor {
     return result;
   }
 
-  template <bool throw_not_found = true> Arguments get_argument_vector(const FunctionNode& node) {
+  template <bool throw_not_found = true>
+  Arguments get_argument_vector(const FunctionNode& node) {
     const size_t N = node.arguments.size();
     for (const auto& a : node.arguments) {
       a->accept(*this);
@@ -2332,22 +3262,115 @@ class Renderer : public NodeVisitor {
 
     Arguments result {N};
     for (size_t i = 0; i < N; i += 1) {
-      result[N - i - 1] = data_eval_stack.top();
-      data_eval_stack.pop();
+      result[N - i - 1] = data_eval_stack.back().node;
+      data_eval_stack.pop_back();
 
-      if (!result[N - i - 1]) {
-        const auto data_node = not_found_stack.top();
-        not_found_stack.pop();
+      // if (!result[N - i - 1].valid()) {
+      //   const auto data_node = not_found_stack.top();
+      //   not_found_stack.pop();
 
-        if (throw_not_found) {
+      //   if (throw_not_found) {
+      //     throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
+      //   }
+      // }
+    }
+    return result;
+  }
+
+  Arguments get_macro_argument_vector(const FunctionNode& node) {
+    const size_t N = node.arguments.size();
+    for (const auto& a : node.arguments) {
+      a->accept(*this);
+    }
+
+    if (data_eval_stack.size() < N) {
+      throw_renderer_error("function needs " + std::to_string(N) + " variables, but has only found " + std::to_string(data_eval_stack.size()), node);
+    }
+
+    Arguments result {N};
+    for (size_t i = 0; i < N; i += 1) {
+      const auto value = data_eval_stack.back();
+      data_eval_stack.pop_back();
+      result[N - i - 1] = value.node;
+
+      if (!value.valid()) {
+        if (!not_found_stack.empty()) {
+          const auto data_node = not_found_stack.top();
+          not_found_stack.pop();
           throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
         }
+        throw_renderer_error("invalid macro argument", node);
       }
     }
     return result;
   }
 
-  void visit(const BlockNode& node) {
+  std::string evaluate_macro(const FunctionNode& node) {
+    if (macro_call_depth >= MAX_MACRO_CALL_DEPTH) {
+      throw_renderer_error("maximum macro call depth exceeded", node);
+      return std::string {};
+    }
+
+    const auto macro_it = current_template->macro_storage.find(std::make_pair(node.name, node.number_args));
+    if (macro_it == current_template->macro_storage.end()) {
+      throw_renderer_error("macro '" + node.name + "' with arity " + std::to_string(node.number_args) + " not found", node);
+      return std::string {};
+    }
+
+    const auto args = get_macro_argument_vector(node);
+    const auto& macro_node = *macro_it->second;
+
+    auto parent_scope = additional_data.parent();
+    const size_t macro_scope_id = additional_data.tree()->duplicate(additional_data.tree(), additional_data.id(), parent_scope.id(), NONE);
+    auto macro_scope = NodeRef(additional_data.tree(), macro_scope_id);
+
+    for (size_t i = 0; i < macro_node.parameters.size(); ++i) {
+      if (i >= args.size() || !args[i].valid()) {
+        auto target = macro_scope[Pointer(DataNode::convert_dot_to_ptr(macro_node.parameters[i]))];
+        target = nullptr;
+        continue;
+      }
+      set_child_from_node(macro_scope, macro_node.parameters[i], args[i]);
+    }
+
+    auto previous_additional_data = additional_data;
+    auto previous_current_loop_data = current_loop_data;
+    auto previous_tmp_sequence = tmp_sequence;
+    auto previous_output_stream = output_stream;
+    const bool previous_break_rendering = break_rendering;
+
+    std::ostringstream macro_output;
+    additional_data = macro_scope;
+    current_loop_data = find_child_by_key(additional_data, to_csubstr("loop"));
+    if (!current_loop_data.valid()) {
+      current_loop_data = additional_data.append_child() << ryml::key("loop");
+    }
+    current_loop_data |= ryml::MAP;
+    current_loop_data.clear_children();
+    tmp_sequence = find_child_by_key(additional_data, to_csubstr("_tmp"));
+    if (!tmp_sequence.valid()) {
+      tmp_sequence = additional_data.append_child() << ryml::key("_tmp");
+    }
+    tmp_sequence |= ryml::SEQ;
+    tmp_sequence.clear_children();
+    output_stream = &macro_output;
+    break_rendering = false;
+
+    macro_call_depth += 1;
+    macro_node.body.accept(*this);
+    macro_call_depth -= 1;
+
+    output_stream = previous_output_stream;
+    break_rendering = previous_break_rendering;
+    additional_data = previous_additional_data;
+    current_loop_data = previous_current_loop_data;
+    tmp_sequence = previous_tmp_sequence;
+
+    additional_data.tree()->remove(macro_scope_id);
+    return macro_output.str();
+  }
+
+  void visit(const BlockNode& node) override {
     for (const auto& n : node.nodes) {
       n->accept(*this);
 
@@ -2357,122 +3380,141 @@ class Renderer : public NodeVisitor {
     }
   }
 
-  void visit(const TextNode& node) {
+  void visit(const TextNode& node) override {
     output_stream->write(current_template->content.c_str() + node.pos, node.length);
   }
 
-  void visit(const ExpressionNode&) {}
+  void visit(const ExpressionNode&) override {}
 
-  void visit(const LiteralNode& node) {
-    data_eval_stack.push(&node.value);
+  void visit(const LiteralNode& node) override {
+    auto dest = tmp_sequence.append_child();
+    const ryml::csubstr name = to_csubstr("literal");
+    ryml::parse_in_arena(name, to_csubstr(node.text), dest);
+    data_eval_stack.emplace_back(dest);
   }
 
-  void visit(const DataNode& node) {
-    if (additional_data.contains(node.ptr)) {
-      data_eval_stack.push(&(additional_data[node.ptr]));
-    } else if (data_input->contains(node.ptr)) {
-      data_eval_stack.push(&(*data_input)[node.ptr]);
+  void visit(const DataNode& node) override {
+    if (node.ptr.empty()) {
+      // root document
+      data_eval_stack.emplace_back(data_input);
+    } else if (const auto from_global_scope = resolve_global_scope_reference(node); from_global_scope.valid()) {
+      data_eval_stack.emplace_back(from_global_scope);
+      return;
+    } else if (additional_data.contains(node.ptr)) {
+    // const auto from_additional = resolve_pointer(additional_data, node.ptr);
+    // if (from_additional.valid()) {
+      data_eval_stack.emplace_back(resolve_pointer(additional_data, node.ptr));
+      return;
+    }
+
+    const auto from_input = resolve_pointer(data_input, node.ptr);
+    if (from_input.valid()) {
+      data_eval_stack.emplace_back(from_input);
+      return;
+    }
+
+    const auto function_data = function_storage.find_function(node.name, 0);
+    if (function_data.operation == FunctionStorage::Operation::Callback) {
+      Arguments empty_args {};
+      const auto value = function_data.callback(empty_args, additional_data);
+      data_eval_stack.emplace_back(value);
     } else {
-      // Try to evaluate as a no-argument callback
-      const auto function_data = function_storage.find_function(node.name, 0);
-      if (function_data.operation == FunctionStorage::Operation::Callback) {
-        Arguments empty_args {};
-        const auto value = std::make_shared<json>(function_data.callback(empty_args));
-        data_tmp_stack.push_back(value);
-        data_eval_stack.push(value.get());
-      } else {
-        data_eval_stack.push(nullptr);
-        not_found_stack.emplace(&node);
-      }
+      data_eval_stack.emplace_back(ConstNodeRef());
+      not_found_stack.emplace(&node);
     }
   }
 
-  void visit(const FunctionNode& node) {
+  void visit(const FunctionNode& node) override {
     switch (node.operation) {
     case Op::Not: {
       const auto args = get_arguments<1>(node);
-      make_result(!truthy(args[0]));
+      make_result(!native_truthy(args[0]));
     } break;
     case Op::And: {
-      make_result(truthy(get_arguments<1, 0>(node)[0]) && truthy(get_arguments<1, 1>(node)[0]));
+      make_result(native_truthy(get_arguments<1, 0>(node)[0]) && native_truthy(get_arguments<1, 1>(node)[0]));
     } break;
     case Op::Or: {
-      make_result(truthy(get_arguments<1, 0>(node)[0]) || truthy(get_arguments<1, 1>(node)[0]));
+      make_result(native_truthy(get_arguments<1, 0>(node)[0]) || native_truthy(get_arguments<1, 1>(node)[0]));
     } break;
     case Op::In: {
       const auto args = get_arguments<2>(node);
-      make_result(std::find(args[1]->begin(), args[1]->end(), *args[0]) != args[1]->end());
+      bool found = false;
+      if (args[1].node.is_seq() || args[1].node.is_map()) {
+        for (const auto& child : args[1].node.children()) {
+          if (nodes_equal(NativeNodeRef(child), args[0])) {
+            found = true;
+            break;
+          }
+        }
+      }
+      make_result(found);
     } break;
     case Op::Equal: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] == *args[1]);
+      make_result(nodes_equal(args[0], args[1]));
     } break;
     case Op::NotEqual: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] != *args[1]);
+      make_result(!nodes_equal(args[0], args[1]));
     } break;
     case Op::Greater: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] > *args[1]);
+      make_result(node_less(args[1], args[0]));
     } break;
     case Op::GreaterEqual: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] >= *args[1]);
+      make_result(!node_less(args[0], args[1]));
     } break;
     case Op::Less: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] < *args[1]);
+      make_result(node_less(args[0], args[1]));
     } break;
     case Op::LessEqual: {
       const auto args = get_arguments<2>(node);
-      make_result(*args[0] <= *args[1]);
+      make_result(!node_less(args[1], args[0]));
     } break;
     case Op::Add: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_string() && args[1]->is_string()) {
-        make_result(args[0]->get_ref<const json::string_t&>() + args[1]->get_ref<const json::string_t&>());
-      } else if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() + args[1]->get<const json::number_integer_t>());
+      const auto lhs_num = native_to_double(args[0]);
+      const auto rhs_num = native_to_double(args[1]);
+      if (lhs_num && rhs_num) {
+        make_result(*lhs_num + *rhs_num);
       } else {
-        make_result(args[0]->get<const json::number_float_t>() + args[1]->get<const json::number_float_t>());
+        make_result(native_to_string(args[0]) + native_to_string(args[1]));
       }
     } break;
     case Op::Subtract: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() - args[1]->get<const json::number_integer_t>());
-      } else {
-        make_result(args[0]->get<const json::number_float_t>() - args[1]->get<const json::number_float_t>());
-      }
+      const auto lhs_num = native_to_double(args[0]);
+      const auto rhs_num = native_to_double(args[1]);
+      make_result((lhs_num ? *lhs_num : 0.0) - (rhs_num ? *rhs_num : 0.0));
     } break;
     case Op::Multiplication: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_number_integer() && args[1]->is_number_integer()) {
-        make_result(args[0]->get<const json::number_integer_t>() * args[1]->get<const json::number_integer_t>());
-      } else {
-        make_result(args[0]->get<const json::number_float_t>() * args[1]->get<const json::number_float_t>());
-      }
+      const auto lhs_num = native_to_double(args[0]);
+      const auto rhs_num = native_to_double(args[1]);
+      make_result((lhs_num ? *lhs_num : 0.0) * (rhs_num ? *rhs_num : 0.0));
     } break;
     case Op::Division: {
       const auto args = get_arguments<2>(node);
-      if (args[1]->get<const json::number_float_t>() == 0) {
+      const auto lhs_num = native_to_double(args[0]);
+      const auto rhs_num = native_to_double(args[1]);
+      if (!rhs_num || *rhs_num == 0.0) {
         throw_renderer_error("division by zero", node);
       }
-      make_result(args[0]->get<const json::number_float_t>() / args[1]->get<const json::number_float_t>());
+      make_result((lhs_num ? *lhs_num : 0.0) / *rhs_num);
     } break;
     case Op::Power: {
       const auto args = get_arguments<2>(node);
-      if (args[0]->is_number_integer() && args[1]->get<const json::number_integer_t>() >= 0) {
-        const auto result = static_cast<json::number_integer_t>(std::pow(args[0]->get<const json::number_integer_t>(), args[1]->get<const json::number_integer_t>()));
-        make_result(result);
-      } else {
-        const auto result = std::pow(args[0]->get<const json::number_float_t>(), args[1]->get<const json::number_integer_t>());
-        make_result(result);
-      }
+      const auto lhs_num = native_to_double(args[0]);
+      const auto rhs_num = native_to_double(args[1]);
+      make_result(std::pow(lhs_num ? *lhs_num : 0.0, rhs_num ? *rhs_num : 0.0));
     } break;
     case Op::Modulo: {
       const auto args = get_arguments<2>(node);
-      make_result(args[0]->get<const json::number_integer_t>() % args[1]->get<const json::number_integer_t>());
+      const auto lhs_num = native_to_int(args[0]);
+      const auto rhs_num = native_to_int(args[1]);
+      make_result((lhs_num && rhs_num && *rhs_num != 0) ? (*lhs_num % *rhs_num) : 0);
     } break;
     case Op::AtId: {
       const auto container = get_arguments<1, 0, false>(node)[0];
@@ -2482,139 +3524,245 @@ class Renderer : public NodeVisitor {
       }
       const auto id_node = not_found_stack.top();
       not_found_stack.pop();
-      data_eval_stack.pop();
-      data_eval_stack.push(&container->at(id_node->name));
+      data_eval_stack.pop_back();
+      const auto child_ptr = Pointer(DataNode::convert_dot_to_ptr(id_node->name));
+      data_eval_stack.emplace_back(resolve_pointer(container.node, child_ptr));
     } break;
     case Op::At: {
-      const auto args = get_arguments<2>(node);
-      if (args[0]->is_object()) {
-        data_eval_stack.push(&args[0]->at(args[1]->get<std::string>()));
+      if (node.arguments.size() == 1) {
+        const auto arg = get_arguments<1>(node)[0];
+        const auto ptr_text = native_to_string(arg);
+        if (ptr_text.empty()) {
+          data_eval_stack.emplace_back(ConstNodeRef());
+        } else {
+          const auto ptr = Pointer(ptr_text);
+          data_eval_stack.emplace_back(resolve_pointer(additional_data["store"], ptr));
+        }
       } else {
-        data_eval_stack.push(&args[0]->at(args[1]->get<int>()));
+        const auto args = get_arguments<2>(node);
+        ConstNodeRef container;
+
+        if (args[0].valid() && (args[0].node.is_map() || args[0].node.is_seq())) {
+          container = args[0].node;
+        } else {
+          const auto ptr_text = native_to_string(args[0]);
+          if (!ptr_text.empty()) {
+            container = resolve_pointer(additional_data["store"], Pointer(ptr_text));
+          }
+        }
+
+        if (!container.valid()) {
+          data_eval_stack.emplace_back(ConstNodeRef());
+        } else if (container.is_map()) {
+          const auto key = native_to_string(args[1]);
+          data_eval_stack.emplace_back(find_child_by_key(container, to_csubstr(key)));
+        } else if (container.is_seq()) {
+          const auto index = native_to_int(args[1]);
+          if (!index || *index < 0 || static_cast<size_t>(*index) >= container.num_children()) {
+            data_eval_stack.emplace_back(ConstNodeRef());
+          } else {
+            data_eval_stack.emplace_back(container.child(static_cast<size_t>(*index)));
+          }
+        } else {
+          data_eval_stack.emplace_back(ConstNodeRef());
+        }
       }
     } break;
     case Op::Capitalize: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
-      result[0] = static_cast<char>(::toupper(result[0]));
-      std::transform(result.begin() + 1, result.end(), result.begin() + 1, [](char c) { return static_cast<char>(::tolower(c)); });
-      make_result(std::move(result));
+      auto result = native_to_string(get_arguments<1>(node)[0]);
+      if (!result.empty()) {
+        result[0] = static_cast<char>(::toupper(result[0]));
+        std::transform(result.begin() + 1, result.end(), result.begin() + 1, [](char c) { return static_cast<char>(::tolower(c)); });
+      }
+      make_result(result);
     } break;
     case Op::Default: {
       const auto test_arg = get_arguments<1, 0, false>(node)[0];
-      data_eval_stack.push(test_arg ? test_arg : get_arguments<1, 1>(node)[0]);
+      if (test_arg.valid()) {
+        data_eval_stack.push_back(test_arg);
+      } else {
+        data_eval_stack.push_back(get_arguments<1, 1>(node)[0]);
+      }
     } break;
     case Op::DivisibleBy: {
       const auto args = get_arguments<2>(node);
-      const auto divisor = args[1]->get<const json::number_integer_t>();
-      make_result((divisor != 0) && (args[0]->get<const json::number_integer_t>() % divisor == 0));
+      const auto divisor = native_to_int(args[1]);
+      const auto value = native_to_int(args[0]);
+      make_result(divisor && value && *divisor != 0 && (*value % *divisor == 0));
     } break;
     case Op::Even: {
-      make_result(get_arguments<1>(node)[0]->get<const json::number_integer_t>() % 2 == 0);
+      const auto value = native_to_int(get_arguments<1>(node)[0]);
+      make_result(value && (*value % 2 == 0));
     } break;
     case Op::Exists: {
-      auto&& name = get_arguments<1>(node)[0]->get_ref<const json::string_t&>();
-      make_result(data_input->contains(json::json_pointer(DataNode::convert_dot_to_ptr(name))));
+      auto name = native_to_string(get_arguments<1>(node)[0]);
+      make_result(resolve_pointer(data_input, Pointer(DataNode::convert_dot_to_ptr(name))).valid());
     } break;
     case Op::ExistsInObject: {
       const auto args = get_arguments<2>(node);
-      auto&& name = args[1]->get_ref<const json::string_t&>();
-      make_result(args[0]->find(name) != args[0]->end());
+      auto name = native_to_string(args[1]);
+      make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
     } break;
     case Op::First: {
-      const auto result = &get_arguments<1>(node)[0]->front();
-      data_eval_stack.push(result);
+      const auto value = get_arguments<1>(node)[0];
+      if (!value.valid() || value.node.num_children() == 0) {
+        data_eval_stack.emplace_back(ConstNodeRef());
+      } else {
+        data_eval_stack.emplace_back(value.node.child(0));
+      }
     } break;
     case Op::Float: {
-      make_result(std::stod(get_arguments<1>(node)[0]->get_ref<const json::string_t&>()));
+      const auto value = native_to_double(get_arguments<1>(node)[0]);
+      make_result(value ? *value : 0.0);
     } break;
     case Op::Int: {
-      make_result(std::stoi(get_arguments<1>(node)[0]->get_ref<const json::string_t&>()));
+      const auto value = native_to_double(get_arguments<1>(node)[0]);
+      make_result(value ? static_cast<int>(*value) : 0);
     } break;
     case Op::Last: {
-      const auto result = &get_arguments<1>(node)[0]->back();
-      data_eval_stack.push(result);
+      const auto value = get_arguments<1>(node)[0];
+      if (!value.valid() || value.node.num_children() == 0) {
+        data_eval_stack.emplace_back(ConstNodeRef());
+      } else {
+        data_eval_stack.emplace_back(value.node.child(value.node.num_children() - 1));
+      }
     } break;
     case Op::Length: {
       const auto val = get_arguments<1>(node)[0];
-      if (val->is_string()) {
-        make_result(val->get_ref<const json::string_t&>().length());
+      if (!val.node.valid()){
+        make_result(0);
+      } else if (val.node.is_val() || val.node.is_keyval()) {
+        make_result(native_to_string(val).length());
       } else {
-        make_result(val->size());
+        make_result(val.node.num_children());
       }
     } break;
     case Op::Lower: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
+      auto result = native_to_string(get_arguments<1>(node)[0]);
       std::transform(result.begin(), result.end(), result.begin(), [](char c) { return static_cast<char>(::tolower(c)); });
-      make_result(std::move(result));
+      make_result(result);
     } break;
     case Op::Max: {
       const auto args = get_arguments<1>(node);
-      const auto result = std::max_element(args[0]->begin(), args[0]->end());
-      data_eval_stack.push(&(*result));
+      if (!args[0].valid() || args[0].node.num_children() == 0) {
+        data_eval_stack.emplace_back(ConstNodeRef());
+        break;
+      }
+      NativeNodeRef best(args[0].node.child(0));
+      for (const auto& child : args[0].node.children()) {
+        if (node_less(best, NativeNodeRef(child))) {
+          best = NativeNodeRef(child);
+        }
+      }
+      data_eval_stack.push_back(best);
     } break;
     case Op::Min: {
       const auto args = get_arguments<1>(node);
-      const auto result = std::min_element(args[0]->begin(), args[0]->end());
-      data_eval_stack.push(&(*result));
+      if (!args[0].valid() || args[0].node.num_children() == 0) {
+        data_eval_stack.emplace_back(ConstNodeRef());
+        break;
+      }
+      NativeNodeRef best(args[0].node.child(0));
+      for (const auto& child : args[0].node.children()) {
+        if (node_less(NativeNodeRef(child), best)) {
+          best = NativeNodeRef(child);
+        }
+      }
+      data_eval_stack.push_back(best);
     } break;
     case Op::Odd: {
-      make_result(get_arguments<1>(node)[0]->get<const json::number_integer_t>() % 2 != 0);
+      const auto value = native_to_int(get_arguments<1>(node)[0]);
+      make_result(value && (*value % 2 != 0));
     } break;
     case Op::Range: {
-      std::vector<int> result(get_arguments<1>(node)[0]->get<const json::number_integer_t>());
-      std::iota(result.begin(), result.end(), 0);
-      make_result(std::move(result));
+      const auto limit = native_to_int(get_arguments<1>(node)[0]);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      if (limit && *limit > 0) {
+        for (int64_t i = 0; i < *limit; ++i) {
+          auto child = result.append_child();
+          child << i;
+        }
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Replace: {
+      const auto args = get_arguments<3>(node);
+      auto result = native_to_string(args[0]);
+      replace_substring(result, native_to_string(args[1]), native_to_string(args[2]));
+      make_result(result);
     } break;
     case Op::Round: {
       const auto args = get_arguments<2>(node);
-      const auto precision = args[1]->get<const json::number_integer_t>();
-      const double result = std::round(args[0]->get<const json::number_float_t>() * std::pow(10.0, precision)) / std::pow(10.0, precision);
+      const auto precision = native_to_int(args[1]).value_or(0);
+      const double value = native_to_double(args[0]).value_or(0.0);
+      const double rounded = std::round(value * std::pow(10.0, precision)) / std::pow(10.0, precision);
       if (precision == 0) {
-        make_result(int(result));
+        make_result(static_cast<int>(rounded));
       } else {
-        make_result(result);
+        make_result(rounded);
       }
     } break;
     case Op::Sort: {
-      auto result_ptr = std::make_shared<json>(get_arguments<1>(node)[0]->get<std::vector<json>>());
-      std::sort(result_ptr->begin(), result_ptr->end());
-      data_tmp_stack.push_back(result_ptr);
-      data_eval_stack.push(result_ptr.get());
+      const auto value = get_arguments<1>(node)[0];
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      if (value.valid()) {
+        std::vector<ConstNodeRef> children;
+        for (const auto& child : value.node.children()) {
+          children.push_back(child);
+        }
+        std::sort(children.begin(), children.end(), [](const ConstNodeRef& lhs, const ConstNodeRef& rhs) {
+          return node_less(NativeNodeRef(lhs), NativeNodeRef(rhs));
+        });
+        size_t last_append = NONE;
+        for (const auto& child : children) {
+          // Use tree's duplicate method directly since ConstNodeRef doesn't have duplicate
+          last_append = result.tree()->duplicate(child.tree(), child.id(), result.id(), last_append);
+        }
+      }
+      data_eval_stack.emplace_back(result);
     } break;
     case Op::Upper: {
-      auto result = get_arguments<1>(node)[0]->get<json::string_t>();
+      auto result = native_to_string(get_arguments<1>(node)[0]);
       std::transform(result.begin(), result.end(), result.begin(), [](char c) { return static_cast<char>(::toupper(c)); });
-      make_result(std::move(result));
+      make_result(result);
     } break;
     case Op::IsBoolean: {
-      make_result(get_arguments<1>(node)[0]->is_boolean());
+      make_result(get_arguments<1>(node)[0].kind() == NativeKind::Bool);
     } break;
     case Op::IsNumber: {
-      make_result(get_arguments<1>(node)[0]->is_number());
+      make_result(native_is_number(get_arguments<1>(node)[0].kind()));
     } break;
     case Op::IsInteger: {
-      make_result(get_arguments<1>(node)[0]->is_number_integer());
+      const auto kind = get_arguments<1>(node)[0].kind();
+      make_result(kind == NativeKind::Int64 || kind == NativeKind::UInt64);
     } break;
     case Op::IsFloat: {
-      make_result(get_arguments<1>(node)[0]->is_number_float());
+      auto value = native_to_double(get_arguments<1>(node)[0]);
+      make_result(value && *value != std::floor(*value));
     } break;
     case Op::IsObject: {
-      make_result(get_arguments<1>(node)[0]->is_object());
+      make_result(get_arguments<1>(node)[0].node.is_map());
     } break;
     case Op::IsArray: {
-      make_result(get_arguments<1>(node)[0]->is_array());
+      make_result(get_arguments<1>(node)[0].node.is_seq());
     } break;
     case Op::IsString: {
-      make_result(get_arguments<1>(node)[0]->is_string());
+      const auto value = get_arguments<1>(node)[0];
+      make_result(value.valid() && (value.node.is_val() || value.node.is_keyval()) && value.kind() == NativeKind::String);
     } break;
     case Op::Callback: {
       auto args = get_argument_vector(node);
-      make_result(node.callback(args));
+      data_eval_stack.emplace_back(node.callback(args, additional_data));
+    } break;
+    case Op::Macro: {
+      make_result(evaluate_macro(node));
     } break;
     case Op::Super: {
       const auto args = get_argument_vector(node);
       const size_t old_level = current_level;
-      const size_t level_diff = (args.size() == 1) ? args[0]->get<int>() : 1;
+      const size_t level_diff = (args.size() == 1) ? static_cast<size_t>(node_to_int(args[0]).value_or(1)) : 1;
       const size_t level = current_level + level_diff;
 
       if (block_statement_stack.empty()) {
@@ -2638,146 +3786,156 @@ class Renderer : public NodeVisitor {
       } else {
         throw_renderer_error("could not find block with name '" + current_block_statement->name + "'", node);
       }
-      make_result(nullptr);
+      make_null_result();
     } break;
     case Op::Join: {
       const auto args = get_arguments<2>(node);
-      const auto separator = args[1]->get<json::string_t>();
+      const auto separator = native_to_string(args[1]);
       std::ostringstream os;
       std::string sep;
-      for (const auto& value : *args[0]) {
+      for (const auto& value : args[0].node.children()) {
         os << sep;
-        if (value.is_string()) {
-          os << value.get<std::string>(); // otherwise the value is surrounded with ""
+        if (value.is_val() || value.is_keyval()) {
+          os << node_to_string(value);
         } else {
-          os << value.dump();
+          os << ryml::as_json(*value.tree(), value.id());
         }
         sep = separator;
       }
       make_result(os.str());
+    } break;
+    case Op::Hex: {
+      make_result(std::format("{:x}", native_to_int(get_arguments<1>(node)[0]).value_or(0)));
     } break;
     case Op::None:
       break;
     }
   }
 
-  void visit(const ExpressionListNode& node) {
+  void visit(const ExpressionListNode& node) override {
     print_data(eval_expression_list(node));
   }
 
-  void visit(const StatementNode&) {}
+  void visit(const StatementNode&) override {}
 
-  void visit(const ForStatementNode&) {}
+  void visit(const ForStatementNode&) override {}
 
-  void visit(const ForArrayStatementNode& node) {
+  void visit(const ForArrayStatementNode& node) override {
+    restore_loop_frames_from_current_scope_if_needed();
+
     const auto result = eval_expression_list(node.condition);
-    if (!result->is_array()) {
+    if (!result.valid()) {
+      sync_current_loop_data_from_frames();
+      return;
+    }
+    if (!result.node.is_seq()) {
       throw_renderer_error("object must be an array", node);
+      sync_current_loop_data_from_frames();
+      return;
     }
 
-    if (!current_loop_data->empty()) {
-      auto tmp = *current_loop_data; // Because of clang-3
-      (*current_loop_data)["parent"] = std::move(tmp);
-    }
-
+    const size_t size = result.node.num_children();
     size_t index = 0;
-    (*current_loop_data)["is_first"] = true;
-    (*current_loop_data)["is_last"] = (result->size() <= 1);
-    for (auto it = result->begin(); it != result->end(); ++it) {
-      additional_data[static_cast<std::string>(node.value)] = *it;
 
-      (*current_loop_data)["index"] = index;
-      (*current_loop_data)["index1"] = index + 1;
-      if (index == 1) {
-        (*current_loop_data)["is_first"] = false;
-      }
-      if (index == result->size() - 1) {
-        (*current_loop_data)["is_last"] = true;
-      }
-
+    for (const auto& child : result.node.children()) {
+      loop_frames.push_array(child, index, size);
+      sync_current_loop_data_from_frames();
+      set_child_from_node(additional_data, node.value, child);
       node.body.accept(*this);
+
+      loop_frames.pop();
       ++index;
     }
 
-    additional_data[static_cast<std::string>(node.value)].clear();
-    if (!(*current_loop_data)["parent"].empty()) {
-      const auto tmp = (*current_loop_data)["parent"];
-      *current_loop_data = std::move(tmp);
-    } else {
-      current_loop_data = &additional_data["loop"];
+    if (find_child_by_key(additional_data, to_csubstr(node.value)).valid()) {
+      additional_data.remove_child(to_csubstr(node.value));
     }
+
+    sync_current_loop_data_from_frames();
   }
 
-  void visit(const ForObjectStatementNode& node) {
+  void visit(const ForObjectStatementNode& node) override {
+    restore_loop_frames_from_current_scope_if_needed();
+
     const auto result = eval_expression_list(node.condition);
-    if (!result->is_object()) {
+    if (!result.valid()) {
+      sync_current_loop_data_from_frames();
+      return;
+    }
+    if (!result.node.is_map()) {
       throw_renderer_error("object must be an object", node);
+      sync_current_loop_data_from_frames();
+      return;
     }
 
-    if (!current_loop_data->empty()) {
-      (*current_loop_data)["parent"] = std::move(*current_loop_data);
-    }
-
+    const size_t size = result.node.num_children();
     size_t index = 0;
-    (*current_loop_data)["is_first"] = true;
-    (*current_loop_data)["is_last"] = (result->size() <= 1);
-    for (auto it = result->begin(); it != result->end(); ++it) {
-      additional_data[static_cast<std::string>(node.key)] = it.key();
-      additional_data[static_cast<std::string>(node.value)] = it.value();
 
-      (*current_loop_data)["index"] = index;
-      (*current_loop_data)["index1"] = index + 1;
-      if (index == 1) {
-        (*current_loop_data)["is_first"] = false;
-      }
-      if (index == result->size() - 1) {
-        (*current_loop_data)["is_last"] = true;
-      }
+    std::vector<ConstNodeRef> children;
+    children.reserve(result.node.num_children());
+    for (const auto& child : result.node.children()) {
+      children.push_back(child);
+    }
+    std::sort(children.begin(), children.end(), [](const ConstNodeRef& lhs, const ConstNodeRef& rhs) {
+      return lhs.key() < rhs.key();
+    });
+
+    for (const auto& child : children) {
+      loop_frames.push_object(child.key(), child, index, size);
+      sync_current_loop_data_from_frames();
+
+      auto key_node = tmp_sequence.append_child();
+      key_node << child.key();
+      set_child_from_node(additional_data, node.key, key_node);
+      set_child_from_node(additional_data, node.value, child);
 
       node.body.accept(*this);
+
+      loop_frames.pop();
       ++index;
     }
 
-    additional_data[static_cast<std::string>(node.key)].clear();
-    additional_data[static_cast<std::string>(node.value)].clear();
-    if (!(*current_loop_data)["parent"].empty()) {
-      *current_loop_data = std::move((*current_loop_data)["parent"]);
-    } else {
-      current_loop_data = &additional_data["loop"];
+    if (find_child_by_key(additional_data, to_csubstr(node.key)).valid()) {
+      additional_data.remove_child(to_csubstr(node.key));
     }
+    if (find_child_by_key(additional_data, to_csubstr(node.value)).valid()) {
+      additional_data.remove_child(to_csubstr(node.value));
+    }
+
+    sync_current_loop_data_from_frames();
   }
 
-  void visit(const IfStatementNode& node) {
+  void visit(const IfStatementNode& node) override {
     const auto result = eval_expression_list(node.condition);
-    if (truthy(result.get())) {
+    if (native_truthy(result)) {
       node.true_statement.accept(*this);
     } else if (node.has_false_statement) {
       node.false_statement.accept(*this);
     }
   }
 
-  void visit(const IncludeStatementNode& node) {
+  void visit(const IncludeStatementNode& node) override {
     auto sub_renderer = Renderer(config, template_storage, function_storage);
     const auto included_template_it = template_storage.find(node.file);
     if (included_template_it != template_storage.end()) {
-      sub_renderer.render_to(*output_stream, included_template_it->second, *data_input, &additional_data);
+      sub_renderer.render_to(*output_stream, included_template_it->second, data_input, additional_data);
     } else if (config.throw_at_missing_includes) {
       throw_renderer_error("include '" + node.file + "' not found", node);
     }
   }
 
-  void visit(const ExtendsStatementNode& node) {
+  void visit(const ExtendsStatementNode& node) override {
     const auto included_template_it = template_storage.find(node.file);
     if (included_template_it != template_storage.end()) {
       const Template* parent_template = &included_template_it->second;
-      render_to(*output_stream, *parent_template, *data_input, &additional_data);
+      render_to(*output_stream, *parent_template, data_input, additional_data);
       break_rendering = true;
     } else if (config.throw_at_missing_includes) {
       throw_renderer_error("extends '" + node.file + "' not found", node);
     }
   }
 
-  void visit(const BlockStatementNode& node) {
+  void visit(const BlockStatementNode& node) override {
     const size_t old_level = current_level;
     current_level = 0;
     current_template = template_stack.front();
@@ -2791,30 +3949,78 @@ class Renderer : public NodeVisitor {
     current_template = template_stack.back();
   }
 
-  void visit(const SetStatementNode& node) {
-    std::string ptr = node.key;
-    replace_substring(ptr, ".", "/");
-    ptr = "/" + ptr;
-    additional_data[json::json_pointer(ptr)] = *eval_expression_list(node.expression);
+  void visit(const SetStatementNode& node) override {
+    const auto result = eval_expression_list(node.expression);
+    constexpr std::string_view global_scope_prefix = "scope.global.";
+
+    NodeRef target_scope = additional_data;
+    std::string target_key = node.key;
+    if (inja::string_view::starts_with(target_key, global_scope_prefix)) {
+      target_scope = template_scope_data;
+      target_key = target_key.substr(global_scope_prefix.size());
+    }
+
+    const Pointer ptr(DataNode::convert_dot_to_ptr(target_key));
+    if (ptr.empty()) {
+      throw_renderer_error("invalid variable name", node);
+      return;
+    }
+    const auto last_key = ptr.back();
+    auto target = target_scope[ptr];
+    
+    if (!result.valid()) {
+      target = nullptr;
+      return;
+    }
+
+    // Check if there is already a node, if so delete and recreate as seed node
+    if (!target.is_seed()) {
+      auto parent = target.parent();
+      parent.remove_child(last_key);
+      // target.tree()->remove(target.id());
+      target = target_scope[ptr];
+      if (parent.contains(last_key)) {
+        spdlog::error("failed to overwrite existing variable");
+        return;
+      }
+    }
+    auto parent = NodeRef(target.tree(), target.id()); // A seed node has the ID of the parent
+    if (parent.contains(last_key)) {
+        spdlog::error("failed to overwrite existing variable");
+        return;
+      }
+    auto new_index = parent.tree()->duplicate(result.node.tree(), result.node.id(), parent.id(), NONE);
+    auto new_node = NodeRef(parent.tree(), new_index);
+    new_node << ryml::key(last_key);
+  }
+
+  void visit(const MacroStatementNode&) override {
+    // Macro declarations do not produce output during normal rendering.
   }
 
 public:
-  Renderer(const RenderConfig& config, const TemplateStorage& template_storage, const FunctionStorage& function_storage)
+  explicit Renderer(const RenderConfig& config, const TemplateStorage& template_storage, const FunctionStorage& function_storage)
       : config(config), template_storage(template_storage), function_storage(function_storage) {}
 
-  void render_to(std::ostream& os, const Template& tmpl, const json& data, json* loop_data = nullptr) {
+  void render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data, NodeRef shared_additional_data) {
     output_stream = &os;
     current_template = &tmpl;
-    data_input = &data;
-    if (loop_data) {
-      additional_data = *loop_data;
-      current_loop_data = &additional_data["loop"];
+    data_input = data;
+    while (!not_found_stack.empty()) {
+      not_found_stack.pop();
     }
+
+    template_scope_data = shared_additional_data;
+    additional_data = shared_additional_data;
+    current_loop_data = additional_data.append_child() << ryml::key("loop");
+    current_loop_data |= ryml::MAP;
+    tmp_sequence = additional_data.append_child() << ryml::key("_tmp");
+    tmp_sequence |= ryml::SEQ;
 
     template_stack.emplace_back(current_template);
     current_template->root.accept(*this);
 
-    data_tmp_stack.clear();
+    data_eval_stack.clear();
   }
 };
 
@@ -2844,10 +4050,17 @@ protected:
   std::filesystem::path input_path;
   std::filesystem::path output_path;
 
+  inja::Tree temp_data_tree;
+
 public:
-  Environment(): Environment("") {}
-  explicit Environment(const std::filesystem::path& global_path): input_path(global_path), output_path(global_path) {}
-  Environment(const std::filesystem::path& input_path, const std::filesystem::path& output_path): input_path(input_path), output_path(output_path) {}
+  Environment() {setup_data();}
+  explicit Environment(const std::filesystem::path& global_path): input_path(global_path), output_path(global_path) { setup_data(); }
+  Environment(const std::filesystem::path& input_path, const std::filesystem::path& output_path): input_path(input_path), output_path(output_path) {setup_data();}
+
+  void setup_data() {
+    temp_data_tree.reserve_arena(2 * 1024 * 1024); // Reserve 2MB
+    temp_data_tree.add_flags(inja::Tree::TREEF_NO_ARENA_REALLOC);
+  }
 
   /// Sets the opener and closer for template statements
   void set_statement(const std::string& open, const std::string& close) {
@@ -2924,69 +4137,81 @@ public:
     return parse_template(filename);
   }
 
-  std::string render(std::string_view input, const json& data) {
+  std::string render(std::string_view input, const ConstNodeRef& data) {
     return render(parse(input), data);
   }
 
-  std::string render(const Template& tmpl, const json& data) {
+  std::string render(const Template& tmpl, const ConstNodeRef& data) {
     std::stringstream os;
     render_to(os, tmpl, data);
     return os.str();
   }
 
-  std::string render_file(const std::filesystem::path& filename, const json& data) {
+  std::string render_file(const std::filesystem::path& filename, const ConstNodeRef& data) {
     return render(parse_template(filename), data);
   }
 
   std::string render_file_with_json_file(const std::filesystem::path& filename, const std::string& filename_data) {
-    const json data = load_json(filename_data);
-    return render_file(filename, data);
+    Tree data = load_json(filename_data);
+    return render_file(filename, data.rootref());
   }
 
-  void write(const std::filesystem::path& filename, const json& data, const std::string& filename_out) {
+  void write(const std::filesystem::path& filename, const ConstNodeRef& data, const std::string& filename_out) {
     std::ofstream file(output_path / filename_out);
     file << render_file(filename, data);
     file.close();
   }
 
-  void write(const Template& temp, const json& data, const std::string& filename_out) {
+  void write(const Template& temp, const ConstNodeRef& data, const std::string& filename_out) {
     std::ofstream file(output_path / filename_out);
     file << render(temp, data);
     file.close();
   }
 
   void write_with_json_file(const std::filesystem::path& filename, const std::string& filename_data, const std::string& filename_out) {
-    const json data = load_json(filename_data);
-    write(filename, data, filename_out);
+    Tree data = load_json(filename_data);
+    write(filename, data.rootref(), filename_out);
   }
 
   void write_with_json_file(const Template& temp, const std::string& filename_data, const std::string& filename_out) {
-    const json data = load_json(filename_data);
-    write(temp, data, filename_out);
+    Tree data = load_json(filename_data);
+    write(temp, data.rootref(), filename_out);
   }
 
-  std::ostream& render_to(std::ostream& os, const Template& tmpl, const json& data) {
-    Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data);
+  std::ostream& render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data) {
+    NodeRef additional_data = temp_data_tree.rootref().append_child();
+    additional_data |= ryml::MAP;
+    additional_data["store"] |= ryml::MAP;
+    additional_data["values"] |= ryml::SEQ;
+    Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data, additional_data);
+    temp_data_tree.remove(additional_data.id());
     return os;
   }
 
-  std::ostream& render_to(std::ostream& os, const std::string_view input, const json& data) {
+  std::ostream& render_to(std::ostream& os, const std::string_view input, const ConstNodeRef& data) {
     return render_to(os, parse(input), data);
   }
 
   std::string load_file(const std::string& filename) {
-    Parser parser(parser_config, lexer_config, template_storage, function_storage);
+    const Parser parser(parser_config, lexer_config, template_storage, function_storage);
     return Parser::load_file(input_path / filename);
   }
 
-  json load_json(const std::string& filename) {
+  Tree load_json(const std::string& filename) {
     std::ifstream file;
     file.open(input_path / filename);
     if (file.fail()) {
+      const auto trimmed = trim(filename);
+      if (!trimmed.empty() && (trimmed.front() == '{' || trimmed.front() == '[')) {
+        const ryml::csubstr source_name = to_csubstr("inline-json");
+        return ryml::parse_in_arena(source_name, to_csubstr(filename));
+      }
       INJA_THROW(FileError("failed accessing file at '" + (input_path / filename).string() + "'"));
     }
 
-    return json::parse(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    const std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    const ryml::csubstr file_name = to_csubstr(filename);
+    return ryml::parse_in_arena(file_name, to_csubstr(contents));
   }
 
   /*!
@@ -3014,9 +4239,14 @@ public:
   @brief Adds a void callback with given number or arguments
   */
   void add_void_callback(const std::string& name, int num_args, const VoidCallbackFunction& callback) {
-    function_storage.add_callback(name, num_args, [callback](Arguments& args) {
-      callback(args);
-      return json();
+    function_storage.add_callback(name, num_args, [callback](Arguments& args, NodeRef additional_data) {
+      callback(args, additional_data);
+      auto root = additional_data;
+      root |= ryml::MAP;
+      auto tmp = ensure_child_seq(root, "_tmp");
+      auto node = tmp.append_child();
+      node = nullptr;
+      return ConstNodeRef(node);
     });
   }
 
@@ -3039,14 +4269,14 @@ public:
 /*!
 @brief render with default settings to a string
 */
-inline std::string render(std::string_view input, const json& data) {
+inline std::string render(std::string_view input, const ConstNodeRef& data) {
   return Environment().render(input, data);
 }
 
 /*!
 @brief render with default settings to the given output stream
 */
-inline void render_to(std::ostream& os, std::string_view input, const json& data) {
+inline void render_to(std::ostream& os, std::string_view input, const ConstNodeRef& data) {
   Environment env;
   env.render_to(os, env.parse(input), data);
 }

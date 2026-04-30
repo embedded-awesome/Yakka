@@ -2,15 +2,20 @@
 #include "yakka_config.hpp"
 #include "yakka_component.hpp"
 #include "yakka_workspace.hpp"
+#include "component_database.hpp"
 #include "yakka_project.hpp"
 #include "utilities.hpp"
 #include "spdlog.h"
 #include <ryml.hpp>
 #include <ryml_std.hpp> // For std::string and std::vector interop
+#include <c4/yml/emit.hpp>
 #include <httplib.h>
 #include <chrono>
+#include <filesystem>
 
 namespace yakka {
+
+namespace fs = std::filesystem;
 
 static std::string extract_start_of_url_path(const std::string &url_path)
 {
@@ -48,27 +53,30 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     }
 
     // Else try to find a serve endpoint
-    auto endpoint = workspace.local_database.get_serve_endpoint_provider(start);
+    auto endpoint = workspace.local_database.get_serve_endpoint_provider(c4::to_csubstr(start));
     if (endpoint.has_value()) {
       // Find details of the component providing this endpoint
-      auto component_name = endpoint.value()[0].template get<std::string>();
-      auto component_path = workspace.local_database.get_component(component_name);
-      if (component_path.has_value()) {
+      auto endpoint_root = endpoint.value();
+      if (endpoint_root.is_seq() && endpoint_root.num_children() > 0) {
+        auto component_name = endpoint_root.first_child().template val<std::string>().value();
+        auto component_path = workspace.local_database.get_component(component_name);
+        if (component_path.has_value()) {
         // Check if the request is for an endpoint or a file
-        auto full_path                 = (*component_path).parent_path();
-        std::filesystem::path req_path = req.path.substr(1); // 1 to skip the leading '/'
-        if (req_path.extension() != "") {
-          return httplib::Server::HandlerResponse::Unhandled;
-        }
-        full_path /= "index.html";
-      
-        spdlog::get("console")->info("Serving {} for endpoint {}", full_path.string(), req.path);
-        if (fs::exists(full_path)) {
-          std::ifstream file(full_path);
-          std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-          res.set_content(content, "text/html");
-          file.close();
-          return httplib::Server::HandlerResponse::Handled;
+          auto full_path      = (*component_path).parent_path();
+          std::filesystem::path req_path = req.path.substr(1); // 1 to skip the leading '/'
+          if (req_path.extension() != "") {
+            return httplib::Server::HandlerResponse::Unhandled;
+          }
+          full_path /= "index.html";
+
+          spdlog::get("console")->info("Serving {} for endpoint {}", full_path.string(), req.path);
+          if (fs::exists(full_path)) {
+            std::ifstream file(full_path);
+            std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            res.set_content(content, "text/html");
+            file.close();
+            return httplib::Server::HandlerResponse::Handled;
+          }
         }
       }
     }
@@ -78,16 +86,27 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
 
   // server.set_mount_point("/assets", "./components/configurator/assets");
   // Loop through the 'serve' endpoints in the local database and mount them
-  for (const auto &i: workspace.local_database.database["serve"].items()) {
-    const auto endpoint     = i.key();
-    const auto component_id = i.value()[0].template get<std::string>();
-    auto component_path     = workspace.local_database.get_component(component_id);
+  auto serve_root = workspace.local_database.database.crootref().find_child("serve");
+  if (serve_root.valid() && serve_root.is_map()) {
+    for (const auto child : serve_root.children()) {
+      if (!child.has_key()) {
+        continue;
+      }
+      if (!child.is_seq() || child.num_children() == 0) {
+        continue;
+      }
+
+      std::string endpoint;
+      c4::from_chars(child.key(), &endpoint);
+      const auto component_id = child.val();
+      auto component_path     = workspace.local_database.get_component(component_id);
     if (!component_path.has_value())
       continue;
 
     auto serve_path = (*component_path).parent_path();
     spdlog::info("Mounting endpoint /{} to {}\n", endpoint, serve_path.string());
     server.set_mount_point("/" + endpoint, serve_path.string());
+    }
   }
 
   server.Get("/api/components", [&](const httplib::Request &req, httplib::Response &res) {
@@ -99,37 +118,62 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
   server.Get("/api/projects", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/projects\n");
     res.set_header("Access-Control-Allow-Origin", "*");
-    res.set_content(workspace.projects.dump(), "application/json");
+    res.set_content(ryml::emitrs_json<std::string>(workspace.projects), "application/json");
   });
 
   server.Get("/api/registries", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/registries\n");
     res.set_header("Access-Control-Allow-Origin", "*");
-    res.set_content(workspace.registries.as<nlohmann::json>().dump(), "application/json");
+    ryml::Tree registries_tree;
+    auto root = registries_tree.rootref();
+    root |= ryml::MAP;
+    for (const auto &entry : workspace.registries) {
+      ryml::NodeRef child = root.append_child();
+      child << ryml::key(entry.first);
+      child |= ryml::MAP;
+      child.tree()->merge_with(&entry.second, entry.second.root_id(), child.id());
+    }
+    res.set_content(ryml::emitrs_json<std::string>(registries_tree), "application/json");
   });
 
   server.Get("/api/project/:id", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/project/{}\n", req.path_params.at("id"));
     res.set_header("Access-Control-Allow-Origin", "*");
     auto project = req.path_params.at("id");
-    if (!workspace.projects.contains(project)) {
+    if (!workspace.projects.crootref().has_child(c4::to_csubstr(project))) {
       res.status = 404;
       return;
     }
-    auto project_summary_file = std::filesystem::path{ workspace.projects[project]["path"].get<std::string>() } / project_summary_filename;
+    auto project_node = workspace.projects.crootref().find_child(c4::to_csubstr(project));
+    auto path_node = project_node.find_child("path");
+    auto project_summary_file = std::filesystem::path{ path_node.val<std::string>().value() } / project_summary_filename;
     if (fs::exists(project_summary_file)) {
-      // Read the entire file content into json object
-      std::ifstream project_summary_stream(project_summary_file);
-      nlohmann::json project_summary = nlohmann::json::parse(project_summary_stream);
-      const auto project_file        = project_summary["project_name"].get<std::string>() + ".yakka";
+      auto summary_loaded = ryml_load_file(project_summary_file);
+      if (!summary_loaded) {
+        res.status = 500;
+        return;
+      }
+      ryml::Tree project_summary = std::move(*summary_loaded);
+      auto project_name_node = project_summary.crootref().find_child("project_name");
+      const auto project_file = project_name_node.val<std::string>().value() + ".yakka";
       if (fs::exists(project_file)) {
-        YAML::Node node = YAML::LoadFile(project_file);
+        auto file_content = yakka::get_file_contents<std::string>(project_file);
+        if (!file_content) {
+          spdlog::error("Failed to read project file: {}", project_file);
+          res.status = 500;
+          return;
+        }
+        // ryml::Tree node = ryml::parse_in_arena(ryml::to_csubstr(*file_content));
         // Merge data from the project file
-        json_node_merge("/data"_json_pointer, project_summary, node.as<nlohmann::json>());
+        // const auto project_json = ryml_to_json(node.crootref());
+        auto node = project_summary["temp"].append_child();
+        node |= ryml::MAP;
+        ryml::parse_in_arena(ryml::to_csubstr(*file_content), node);
+        json_node_merge(ryml::Pointer{"/data"}, project_summary["data"], node);
       }
 
       // std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-      res.set_content(project_summary.dump(), "application/json"); // Set appropriate Content-Type
+      res.set_content(ryml::emitrs_json<std::string>(project_summary), "application/json"); // Set appropriate Content-Type
     } else {
       res.status = 404;
       return;
@@ -142,7 +186,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     auto project_id = req.path_params.at("id");
 
     // Load up project summary and see if the project file exists
-    yakka::project the_project(project_id, workspace);
+    yakka::project the_project(workspace, project_id);
     the_project.init_project();
 
     // If not, create a new project file
@@ -163,10 +207,10 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       project_data.merge_with(&incoming_data);
 
       project_file_stream.seekp(0);
-      project_file_stream << project_data;
+      project_file_stream << ryml::emitrs_yaml<std::string>(project_data);
       project_file_stream.close();
       res.set_content("{\"status\": \"OK\"}", "application/json");
-    } catch (const nlohmann::json::parse_error &e) {
+    } catch (const std::exception &e) {
       spdlog::error("Failed to parse incoming JSON data: {}\n", e.what());
       res.status = 400;
       return;
@@ -181,7 +225,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     if (component_path.has_value()) {
       yakka::component component_data;
       component_data.parse_file(component_path.value());
-      res.set_content(component_data.json.dump(2), "application/json");
+      res.set_content(ryml::emitrs_json<std::string>(component_data.tree), "application/json");
     } else {
       res.status = 404;
     }
