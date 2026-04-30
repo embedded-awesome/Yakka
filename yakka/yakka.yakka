@@ -18,6 +18,8 @@ includes:
     - '.'
 
 requires:
+  features:
+    - c++23
   components:
     - yaml-cpp
     - cpp-subprocess

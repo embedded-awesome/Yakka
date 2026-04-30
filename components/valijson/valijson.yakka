@@ -5,10 +5,8 @@ includes:
     - include
 
 requires:
+  features:
+    - c++20
   components:
     - rapidyaml
 
-flags:
-  cpp:
-    global:
-      - -std=c++20
