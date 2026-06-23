@@ -15,6 +15,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <regex>
 
 #include "config.hpp"
 #include "exceptions.hpp"
@@ -352,7 +353,7 @@ class Renderer : public NodeVisitor {
   void throw_renderer_error(const std::string& message, const AstNode& node) {
     const SourceLocation loc = get_source_location(current_template->content, node.pos);
     //INJA_THROW(RenderError(message, loc));
-    spdlog::debug("[inja.exception.renderer] (at " + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ") " + message);
+    spdlog::error("[inja.exception.renderer] (at " + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ") " + message);
   }
 
   template <class T>
@@ -843,9 +844,10 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Replace: {
       const auto args = get_arguments<3>(node);
-      auto result = native_to_string(args[0]);
-      replace_substring(result, native_to_string(args[1]), native_to_string(args[2]));
-      make_result(result);
+      auto input  = native_to_string(args[0]);
+      auto target = std::regex(native_to_string(args[1]));
+      auto match  = native_to_string(args[2]);
+      make_result(std::regex_replace(input, target, match));
     } break;
     case Op::Round: {
       const auto args = get_arguments<2>(node);
@@ -1043,9 +1045,9 @@ class Renderer : public NodeVisitor {
         // push_back(path, value)
         const auto args = get_arguments<2>(node);
         if (args[1].node.is_map()) {
-          additional_data.tree()->duplicate(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), NONE);
+          additional_data.tree()->duplicate(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), arg0_ref.last_child().id());
         } else if (args[1].node.is_seq()) {
-          additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), NONE);
+          additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), arg0_ref.last_child().id());
         } else {
           if (!arg0_ref.is_seq()) {
             arg0_ref |= ryml::SEQ;
@@ -1265,6 +1267,18 @@ class Renderer : public NodeVisitor {
       return;
     }
 
+    // Check if target is a value node and result is also a value, if so we can just assign the value without replacing the node
+    if (target.valid() && target.is_val() && result.node.is_val()) {
+      target << result.node.val();
+      return;
+    }
+    
+    // Check if target and result are the same node
+    if (target.valid() && target.tree() == result.node.tree() && target.id() == result.node.id()) {
+      spdlog::error("cannot assign variable to itself");
+      return;
+    }
+
     // Check if there is already a node, if so delete and recreate as seed node
     if (!target.is_seed()) {
       auto parent = target.parent();
@@ -1281,6 +1295,10 @@ class Renderer : public NodeVisitor {
         spdlog::error("failed to overwrite existing variable");
         return;
       }
+    if (result.node.is_root()) {
+      throw_renderer_error("Attempting to assign root document to variable", node);
+      return;
+    }
     auto new_index = parent.tree()->duplicate(result.node.tree(), result.node.id(), parent.id(), NONE);
     auto new_node = NodeRef(parent.tree(), new_index);
     new_node << ryml::key(last_key);

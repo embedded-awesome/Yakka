@@ -139,7 +139,7 @@ inline std::optional<uint64_t> parse_uint(std::string_view view) {
 
 inline std::optional<double> parse_float(std::string_view view) {
   view = trim(view);
-  if (view.empty()) {
+  if (view.empty() || view.starts_with("0x") || view.starts_with("0X") || view.starts_with("+") || view.starts_with("-+")) {
     return std::nullopt;
   }
   // Use strtod for portability - std::from_chars for floating-point is not
