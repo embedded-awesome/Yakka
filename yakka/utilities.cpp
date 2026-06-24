@@ -18,7 +18,6 @@
 #include <fstream>
 #include <string>
 #include <vector>
-#include <ranges>
 #include <chrono>
 #include <algorithm>
 #include <iomanip>
@@ -571,62 +570,15 @@ void add_common_template_commands(inja::Environment &inja_env)
     ss << std::quoted(args[0].val<std::string>().value());
     return additional_data["values"].append_child() << ss.str();
   });
-  inja_env.add_callback("replace", 3, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    auto input  = args[0].val<std::string>().value();
-    auto target = std::regex(args[1].val<std::string>().value());
-    auto match  = args[2].val<std::string>().value();
-    return additional_data["values"].append_child() << std::regex_replace(input, target, match);
-  });
   inja_env.add_callback("regex_escape", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     const std::regex metacharacters(R"([\.\^\$\+\(\)\[\]\{\}\|\?])");
     return additional_data["values"].append_child() << std::regex_replace(input, metacharacters, "\\$&");
   });
-  inja_env.add_callback("split", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    auto input  = args[0].val<std::string>().value();
-    auto delim  = args[1].val<std::string>().value();
-    auto output = additional_data["values"].append_child();
-    output |= ryml::SEQ;
-    for (auto word: std::views::split(input, delim)) {
-      output.append_child() << std::string{ word.begin(), word.end() };
-    }
-    return output;
-  });
   inja_env.add_callback("starts_with", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     auto start = args[1].val<std::string>().value();
     return additional_data["values"].append_child() << (input.rfind(start, 0) == 0);
-  });
-  inja_env.add_callback("substring", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    auto input = args[0].val<std::string>().value();
-    auto index = args[1].val<int>().value();
-    return additional_data["values"].append_child() << input.substr(index);
-  });
-  inja_env.add_callback("trim", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    auto input = args[0].val<std::string>().value();
-    input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) {
-                  return !std::isspace(ch);
-                }));
-    input.erase(std::find_if(input.rbegin(),
-                             input.rend(),
-                             [](unsigned char ch) {
-                               return !std::isspace(ch);
-                             })
-                  .base(),
-                input.end());
-    return additional_data["values"].append_child() << input;
-  });
-  inja_env.add_callback("filter", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    auto output = additional_data["values"].append_child();
-    output |= ryml::SEQ;
-    const auto input       = args[0];
-    const auto regex_match = std::regex(args[1].val<std::string>().value());
-    for (const auto &item: input.children()) {
-      if (std::regex_match(item.val<std::string>().value(), regex_match)) {
-        output.append_child() << item.val();
-      }
-    }
-    return output;
   });
   inja_env.add_callback("join", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto input = args[0];
