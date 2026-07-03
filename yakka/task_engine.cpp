@@ -255,13 +255,13 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     auto path = ryml::Pointer{ args[0].val() };
     // Loop through components, check if object path exists, if so add it to the aggregate
     for (const auto node: project.project_summary["components"].children()) {
-      if (!node[path].valid())
+      if (!node.contains(path) || !node[path].valid())
         continue;
 
       auto v = node[path];
       if (v.is_map())
         for (const auto i: v.children()) {
-          aggregate[i.key()] = i.val(); //try_render(inja_env, i.second.as<std::string>(), project->project_summary, log);
+          aggregate[i.key()] = i.has_val() ? i.val() : nullptr; //try_render(inja_env, i.second.as<std::string>(), project->project_summary, log);
         }
       else if (v.is_seq())
         for (const auto i: v.children())
@@ -278,7 +278,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       auto v = project.project_summary["data"][path];
       if (v.is_map())
         for (const auto i: v.children())
-          aggregate[i.key()] = i.val();
+          aggregate[i.key()] = i.has_val() ? i.val() : nullptr;
       else if (v.is_seq())
         for (const auto i: v.children())
           aggregate.append_child() << inja_env.render(i.val<std::string>().value(), project.project_summary);
