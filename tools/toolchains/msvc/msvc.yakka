@@ -5,7 +5,7 @@ requires:
     - '/msvc'
 
 msvc:
-  path: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/"
+  path: "C:/Program Files/Microsoft Visual Studio/18/Enterprise/VC/Tools/MSVC/"
   # path: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/"
   version: '14.51.36231'
   kit:
