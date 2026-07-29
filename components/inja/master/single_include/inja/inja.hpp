@@ -234,7 +234,7 @@ inline std::optional<int64_t> parse_int(std::string_view view) {
   }
 
   if (view[0] == '-') {
-    int64_t result;
+    int64_t result{};
     auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
     if (ec != std::errc() || ptr != view.data() + view.size()) {
       return std::nullopt;
@@ -242,7 +242,7 @@ inline std::optional<int64_t> parse_int(std::string_view view) {
     return result;
   }
 
-  uint64_t result;
+  uint64_t result{};
   auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
   if (ec != std::errc() || ptr != view.data() + view.size()) {
     return std::nullopt;
@@ -259,7 +259,7 @@ inline std::optional<uint64_t> parse_uint(std::string_view view) {
     return std::nullopt;
   }
 
-  uint64_t result;
+  uint64_t result{};
   auto [ptr, ec] = std::from_chars(view.data(), view.data() + view.size(), result);
   if (ec != std::errc() || ptr != view.data() + view.size()) {
     return std::nullopt;
@@ -270,7 +270,7 @@ inline std::optional<uint64_t> parse_uint(std::string_view view) {
 
 inline std::optional<double> parse_float(std::string_view view) {
   view = trim(view);
-  if (view.empty()) {
+  if (view.empty() || view.starts_with("0x") || view.starts_with("0X") || view.starts_with("+") || view.starts_with("-+")) {
     return std::nullopt;
   }
   // Use strtod for portability - std::from_chars for floating-point is not
@@ -859,6 +859,7 @@ public:
     Even,
     Exists,
     ExistsInObject,
+    Contains,
     First,
     Float,
     Int,
@@ -877,6 +878,10 @@ public:
     Odd,
     Range,
     Replace,
+    Split,
+    Substring,
+    Trim,
+    Filter,
     Round,
     Sort,
     Upper,
@@ -885,6 +890,11 @@ public:
     Macro,
     Callback,
     Hex,
+    SetAt,
+    Fetch,
+    PushBack,
+    Erase,
+    Unique,
     None,
   };
 
@@ -906,6 +916,7 @@ private:
       {std::make_pair("even", 1), FunctionData {Operation::Even}},
       {std::make_pair("exists", 1), FunctionData {Operation::Exists}},
       {std::make_pair("existsIn", 2), FunctionData {Operation::ExistsInObject}},
+      {std::make_pair("contains", 2), FunctionData {Operation::Contains}},
       {std::make_pair("first", 1), FunctionData {Operation::First}},
       {std::make_pair("float", 1), FunctionData {Operation::Float}},
       {std::make_pair("int", 1), FunctionData {Operation::Int}},
@@ -924,6 +935,10 @@ private:
       {std::make_pair("odd", 1), FunctionData {Operation::Odd}},
       {std::make_pair("range", 1), FunctionData {Operation::Range}},
       {std::make_pair("replace", 3), FunctionData {Operation::Replace}},
+      {std::make_pair("split", 2), FunctionData {Operation::Split}},
+      {std::make_pair("substring", 2), FunctionData {Operation::Substring}},
+      {std::make_pair("trim", 1), FunctionData {Operation::Trim}},
+      {std::make_pair("filter", 2), FunctionData {Operation::Filter}},
       {std::make_pair("round", 2), FunctionData {Operation::Round}},
       {std::make_pair("sort", 1), FunctionData {Operation::Sort}},
       {std::make_pair("upper", 1), FunctionData {Operation::Upper}},
@@ -931,6 +946,14 @@ private:
       {std::make_pair("super", 1), FunctionData {Operation::Super}},
       {std::make_pair("join", 2), FunctionData {Operation::Join}},
       {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
+      {std::make_pair("setAt", 2), FunctionData {Operation::SetAt}},
+      {std::make_pair("setAt", 3), FunctionData {Operation::SetAt}},
+      {std::make_pair("fetch", 1), FunctionData {Operation::Fetch}},
+      {std::make_pair("fetch", 2), FunctionData {Operation::Fetch}},
+      {std::make_pair("push_back", 2), FunctionData {Operation::PushBack}},
+      {std::make_pair("push_back", 3), FunctionData {Operation::PushBack}},
+      {std::make_pair("erase", 1), FunctionData {Operation::Erase}},
+      {std::make_pair("unique", 1), FunctionData {Operation::Unique}},
   };
 
 public:
@@ -988,6 +1011,7 @@ class ExtendsStatementNode;
 class BlockStatementNode;
 class SetStatementNode;
 class MacroStatementNode;
+class ExpressionStatementNode;
 
 class NodeVisitor {
 public:
@@ -1010,6 +1034,7 @@ public:
   virtual void visit(const BlockStatementNode& node) = 0;
   virtual void visit(const SetStatementNode& node) = 0;
   virtual void visit(const MacroStatementNode& node) = 0;
+  virtual void visit(const ExpressionStatementNode& node) = 0;
 };
 
 /*!
@@ -1344,6 +1369,17 @@ public:
   }
 };
 
+class ExpressionStatementNode : public StatementNode {
+public:
+  ExpressionListNode expression;
+
+  explicit ExpressionStatementNode(size_t pos): StatementNode(pos) {}
+
+  void accept(NodeVisitor& v) const override {
+    v.visit(*this);
+  }
+};
+
 } // namespace inja
 
 #endif // INCLUDE_INJA_NODE_HPP_
@@ -1413,6 +1449,10 @@ class StatisticsVisitor : public NodeVisitor {
   }
 
   void visit(const SetStatementNode&) override {}
+
+  void visit(const ExpressionStatementNode& node) override {
+    node.expression.accept(*this);
+  }
 
   void visit(const MacroStatementNode& node) override {
     node.body.accept(*this);
@@ -2211,6 +2251,7 @@ class Parser {
   std::shared_ptr<ExpressionNode> parse_expression(Template& tmpl) {
     size_t current_bracket_level {0};
     size_t current_brace_level {0};
+    Token::Kind previous_kind {Token::Kind::Unknown};
     Arguments arguments;
     OperatorStack operator_stack;
 
@@ -2230,6 +2271,32 @@ class Parser {
         }
       } break;
       case Token::Kind::LeftBracket: {
+        const auto follows_expression = previous_kind == Token::Kind::Id || previous_kind == Token::Kind::Number ||
+                                        previous_kind == Token::Kind::String || previous_kind == Token::Kind::RightParen ||
+                                        previous_kind == Token::Kind::RightBracket || previous_kind == Token::Kind::RightBrace;
+
+        // Parse postfix indexing like: call()[0], value["key"], (expr)[idx]
+        if (current_brace_level == 0 && current_bracket_level == 0 && follows_expression && !arguments.empty()) {
+          const auto pos = tok.text.data() - tmpl.content.c_str();
+          auto container = arguments.back();
+          arguments.pop_back();
+
+          get_next_token();
+          auto index_expression = parse_expression(tmpl);
+          if (tok.kind != Token::Kind::RightBracket) {
+            throw_parser_error("expected right bracket, got '" + tok.describe() + "'");
+          }
+          if (!index_expression) {
+            throw_parser_error("empty index expression");
+          }
+
+          auto at_node = std::make_shared<FunctionNode>(FunctionStorage::Operation::At, pos);
+          at_node->arguments.emplace_back(container);
+          at_node->arguments.emplace_back(index_expression);
+          arguments.emplace_back(at_node);
+          break;
+        }
+
         if (current_brace_level == 0 && current_bracket_level == 0) {
           literal_start = tok.text;
         }
@@ -2243,7 +2310,7 @@ class Parser {
       } break;
       case Token::Kind::RightBracket: {
         if (current_bracket_level == 0) {
-          throw_parser_error("unexpected ']'");
+          goto break_loop;
         }
 
         current_bracket_level -= 1;
@@ -2474,6 +2541,7 @@ class Parser {
         goto break_loop;
       }
 
+      previous_kind = tok.kind;
       get_next_token();
     }
 
@@ -2736,7 +2804,18 @@ class Parser {
       current_block = macro_statement_data->parent;
       macro_statement_stack.pop();
     } else {
-      return false;
+      // Allow side-effect function calls in statement blocks, e.g. {% store(...) %}
+      get_peek_token();
+      if (tok.kind == Token::Kind::Id && peek_tok.kind == Token::Kind::LeftParen) {
+        auto expression_statement_node = std::make_shared<ExpressionStatementNode>(tok.text.data() - tmpl.content.c_str());
+        current_block->nodes.emplace_back(expression_statement_node);
+        current_expression_list = &expression_statement_node->expression;
+        if (!parse_expression(tmpl, closing)) {
+          return false;
+        }
+      } else {
+        return false;
+      }
     }
     return true;
   }
@@ -2852,8 +2931,10 @@ public:
 #include <sstream>
 #include <stack>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
+#include <regex>
 
 // #include "config.hpp"
 
@@ -3187,10 +3268,9 @@ class Renderer : public NodeVisitor {
 
     if (!result.valid()) {
       if (!not_found_stack.empty()) {
-        const auto missing_node = not_found_stack.top();
         not_found_stack.pop();
-        throw_renderer_error("variable '" + static_cast<std::string>(missing_node->name) + "' not found", *missing_node);
       }
+      return NativeNodeRef {};
     }
     return result;
   }
@@ -3198,7 +3278,7 @@ class Renderer : public NodeVisitor {
   void throw_renderer_error(const std::string& message, const AstNode& node) {
     const SourceLocation loc = get_source_location(current_template->content, node.pos);
     //INJA_THROW(RenderError(message, loc));
-    spdlog::debug("[inja.exception.renderer] (at " + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ") " + message);
+    spdlog::error("[inja.exception.renderer] (at " + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ") " + message);
   }
 
   template <class T>
@@ -3237,14 +3317,14 @@ class Renderer : public NodeVisitor {
       result[N - i - 1] = data_eval_stack.back();
       data_eval_stack.pop_back();
 
-      if (!result[N - i - 1].valid()) {
-        const auto data_node = not_found_stack.top();
-        not_found_stack.pop();
+      // if (!result[N - i - 1].valid()) {
+      //   const auto data_node = not_found_stack.top();
+      //   not_found_stack.pop();
 
-        if (throw_not_found) {
-          throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
-        }
-      }
+      //   if (throw_not_found) {
+      //     throw_renderer_error("variable '" + static_cast<std::string>(data_node->name) + "' not found", *data_node);
+      //   }
+      // }
     }
     return result;
   }
@@ -3419,7 +3499,8 @@ class Renderer : public NodeVisitor {
       const auto value = function_data.callback(empty_args, additional_data);
       data_eval_stack.emplace_back(value);
     } else {
-      data_eval_stack.emplace_back(ConstNodeRef());
+      // Emplace a seed node
+      data_eval_stack.emplace_back(additional_data[node.ptr]);
       not_found_stack.emplace(&node);
     }
   }
@@ -3536,7 +3617,7 @@ class Renderer : public NodeVisitor {
           data_eval_stack.emplace_back(ConstNodeRef());
         } else {
           const auto ptr = Pointer(ptr_text);
-          data_eval_stack.emplace_back(resolve_pointer(additional_data["store"], ptr));
+          data_eval_stack.emplace_back(resolve_pointer(additional_data, ptr));
         }
       } else {
         const auto args = get_arguments<2>(node);
@@ -3547,7 +3628,7 @@ class Renderer : public NodeVisitor {
         } else {
           const auto ptr_text = native_to_string(args[0]);
           if (!ptr_text.empty()) {
-            container = resolve_pointer(additional_data["store"], Pointer(ptr_text));
+            container = resolve_pointer(additional_data, Pointer(ptr_text));
           }
         }
 
@@ -3602,6 +3683,33 @@ class Renderer : public NodeVisitor {
       const auto args = get_arguments<2>(node);
       auto name = native_to_string(args[1]);
       make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
+    } break;
+    case Op::Contains: {
+      const auto args = get_arguments<2>(node);
+      if (args[0].node.is_map()) {
+        const auto name = native_to_string(args[1]);
+        make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
+        break;
+      }
+
+      if (!args[0].node.is_seq()) {
+        make_result(false);
+        break;
+      }
+
+      const auto value_kind = args[1].kind();
+      if (value_kind != NativeKind::String && !native_is_number(value_kind)) {
+        throw_renderer_error("contains() sequence value must be a string or number", node);
+      }
+
+      bool found = false;
+      for (const auto& child : args[0].node.children()) {
+        if (nodes_equal(NativeNodeRef(child), args[1])) {
+          found = true;
+          break;
+        }
+      }
+      make_result(found);
     } break;
     case Op::First: {
       const auto value = get_arguments<1>(node)[0];
@@ -3688,9 +3796,73 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Replace: {
       const auto args = get_arguments<3>(node);
-      auto result = native_to_string(args[0]);
-      replace_substring(result, native_to_string(args[1]), native_to_string(args[2]));
-      make_result(result);
+      auto input  = native_to_string(args[0]);
+      auto target = std::regex(native_to_string(args[1]));
+      auto match  = native_to_string(args[2]);
+      make_result(std::regex_replace(input, target, match));
+    } break;
+    case Op::Split: {
+      const auto args = get_arguments<2>(node);
+      const auto input = native_to_string(args[0]);
+      const auto delimiter = native_to_string(args[1]);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+
+      if (delimiter.empty()) {
+        for (char c : input) {
+          auto child = result.append_child();
+          child << std::string(1, c);
+        }
+      } else {
+        std::string::size_type start = 0;
+        while (true) {
+          const auto pos = input.find(delimiter, start);
+          auto child = result.append_child();
+          if (pos == std::string::npos) {
+            child << input.substr(start);
+            break;
+          }
+          child << input.substr(start, pos - start);
+          start = pos + delimiter.size();
+        }
+      }
+
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Substring: {
+      const auto args = get_arguments<2>(node);
+      const auto input = native_to_string(args[0]);
+      const auto index = native_to_int(args[1]).value_or(0);
+      if (index < 0 || static_cast<size_t>(index) > input.size()) {
+        throw_renderer_error("substring index out of range", node);
+      }
+      make_result(input.substr(static_cast<size_t>(index)));
+    } break;
+    case Op::Trim: {
+      auto input = native_to_string(get_arguments<1>(node)[0]);
+      input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) {
+                    return !std::isspace(ch);
+                  }));
+      input.erase(std::find_if(input.rbegin(),
+                               input.rend(),
+                               [](unsigned char ch) {
+                                 return !std::isspace(ch);
+                               })
+                    .base(),
+                  input.end());
+      make_result(input);
+    } break;
+    case Op::Filter: {
+      const auto args = get_arguments<2>(node);
+      const auto regex_match = std::regex(native_to_string(args[1]));
+      auto filtered = tmp_sequence.append_child();
+      filtered |= ryml::SEQ;
+      for (const auto& item : args[0].node.children()) {
+        if ((item.is_val() || item.is_keyval()) && std::regex_match(node_to_string(item), regex_match)) {
+          filtered.append_child() << item.val();
+        }
+      }
+      data_eval_stack.emplace_back(filtered);
     } break;
     case Op::Round: {
       const auto args = get_arguments<2>(node);
@@ -3807,6 +3979,139 @@ class Renderer : public NodeVisitor {
     case Op::Hex: {
       make_result(std::format("{:x}", native_to_int(get_arguments<1>(node)[0]).value_or(0)));
     } break;
+    case Op::SetAt: {
+      const auto args = get_argument_vector(node);
+      const auto num_args = args.size();
+      // Check the type of arg 0
+      const auto arg0 = args[0];
+      NodeRef arg0_ref;
+      if (!arg0.valid()) {
+        spdlog::error("setAt: invalid first path argument");
+        throw_renderer_error("invalid first path argument", node);
+        make_null_result();
+        break;
+      } else if (arg0.is_val()) {
+        arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
+      } else if (arg0.tree() == additional_data.tree()) {
+        // If the referenced node is already in the additional_data tree, we can use it directly
+        arg0_ref = NodeRef{additional_data.tree(), arg0.id()};
+      } else {
+        // Otherwise, we need to duplicate the node into the additional_data tree
+        arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
+      }
+
+      if (num_args == 2) {
+        // setAt(path, value)
+        if (args[1].is_map()) {
+          arg0_ref |= ryml::MAP;
+          additional_data.tree()->duplicate(args[1].tree(), args[1].id(), arg0_ref.id(), NONE);
+        } else if (args[1].is_seq()) {
+          arg0_ref |= ryml::SEQ;
+          additional_data.tree()->duplicate_children(args[1].tree(), args[1].id(), arg0_ref.id(), NONE);
+        } else {
+          arg0_ref << args[1].val();
+          arg0_ref.set_key_serialized(arg0.val());
+        }
+      } else if (num_args == 3) {
+        // store(path, key, value)
+        ryml::Pointer ptr{ args[1].val() };
+        arg0_ref[ptr] << args[2].val();
+        if (arg0_ref[ptr].is_map())
+          arg0_ref[ptr].set_key_serialized(ptr.back());
+      }
+      make_null_result();
+    } break;
+    case Op::Fetch: {
+      const auto num_args = get_argument_vector(node).size();
+      if (num_args == 1) {
+        // fetch(path)
+        const auto args = get_arguments<1>(node);
+        ryml::Pointer ptr{ native_to_string(args[0]) };
+        data_eval_stack.emplace_back(additional_data[ptr]);
+      } else if (num_args == 2) {
+        // fetch(path, key)
+        const auto args = get_arguments<2>(node);
+        ryml::Pointer ptr{ native_to_string(args[0]) };
+        auto key = args[1].node.val();
+        data_eval_stack.emplace_back(additional_data[ptr][key]);
+      }
+    } break;
+    case Op::PushBack: {
+      const auto args = get_argument_vector(node);
+      const auto num_args = args.size();
+      // Check the type of arg 0
+      const auto arg0 = args[0];
+      NodeRef arg0_ref;
+      if (!arg0.valid()) {
+        spdlog::error("pushBack: invalid first path argument");
+        make_null_result();
+        break;
+      } else if (arg0.is_val()) {
+        arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
+      } else if (arg0.tree() == additional_data.tree()) {
+        // If the referenced node is already in the additional_data tree, we can use it directly
+        arg0_ref = NodeRef{additional_data.tree(), arg0.id()};
+      } else {
+        // Otherwise, we need to duplicate the node into the additional_data tree
+        arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
+      }
+
+      if (num_args == 2) {
+        // push_back(path, value)
+        const auto args = get_arguments<2>(node);
+        if (args[1].node.is_map()) {
+          additional_data.tree()->duplicate(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), arg0_ref.last_child().id());
+        } else if (args[1].node.is_seq()) {
+          additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), arg0_ref.last_child().id());
+        } else {
+          if (!arg0_ref.is_seq()) {
+            arg0_ref |= ryml::SEQ;
+          }
+          arg0_ref.append_child() << args[1].node.val();
+        }
+      } else if (num_args == 3) {
+        // push_back(path, key, value)
+        const auto args = get_arguments<3>(node);
+        ryml::Pointer ptr{ native_to_string(args[1]) };
+        if (!arg0_ref.contains(ptr)) {
+          arg0_ref[ptr] |= ryml::SEQ;
+          arg0_ref[ptr].set_key_serialized(ptr.back());
+        }
+        if (args[2].node.is_map()) {
+          additional_data.tree()->duplicate(args[2].node.tree(), args[2].node.id(), arg0_ref[ptr].id(), NONE);
+        } else if (args[2].node.is_seq()) {
+          additional_data.tree()->duplicate_children(args[2].node.tree(), args[2].node.id(), arg0_ref[ptr].id(), NONE);
+        } else {
+          if (!arg0_ref[ptr].is_seq()) {
+            arg0_ref[ptr] |= ryml::SEQ;
+          }
+          arg0_ref[ptr].append_child() << args[2].node.val();
+        }
+      }
+      make_null_result();
+    } break;
+    case Op::Erase: {
+      const auto args = get_arguments<1>(node);
+      ryml::Pointer ptr{ native_to_string(args[0]) };
+      if (additional_data.contains(ptr))
+        additional_data.tree()->remove(additional_data[ptr].id());
+      make_null_result();
+    } break;
+    case Op::Unique: {
+      const auto args = get_arguments<1>(node);
+      auto filtered = tmp_sequence.append_child();
+      filtered |= ryml::SEQ;
+      std::unordered_set<std::string> seen;
+      for (const auto& i : args[0].node.children()) {
+        auto val_str = native_to_string(NativeNodeRef(i));
+        if (seen.find(val_str) == seen.end()) {
+          seen.insert(val_str);
+          size_t last_append = NONE;
+          last_append = filtered.tree()->duplicate(i.tree(), i.id(), filtered.id(), last_append);
+        }
+      }
+      data_eval_stack.emplace_back(filtered);
+    } break;
     case Op::None:
       break;
     }
@@ -3881,6 +4186,10 @@ class Renderer : public NodeVisitor {
     });
 
     for (const auto& child : children) {
+      if (!child.valid() || !child.has_parent()) {
+        throw_renderer_error("child is not valid", node);
+        continue;
+      }
       loop_frames.push_object(child.key(), child, index, size);
       sync_current_loop_data_from_frames();
 
@@ -3973,6 +4282,18 @@ class Renderer : public NodeVisitor {
       return;
     }
 
+    // Check if target is a value node and result is also a value, if so we can just assign the value without replacing the node
+    if (target.valid() && target.is_val() && result.node.is_val()) {
+      target << result.node.val();
+      return;
+    }
+    
+    // Check if target and result are the same node
+    if (target.valid() && target.tree() == result.node.tree() && target.id() == result.node.id()) {
+      spdlog::error("cannot assign variable to itself");
+      return;
+    }
+
     // Check if there is already a node, if so delete and recreate as seed node
     if (!target.is_seed()) {
       auto parent = target.parent();
@@ -3989,6 +4310,10 @@ class Renderer : public NodeVisitor {
         spdlog::error("failed to overwrite existing variable");
         return;
       }
+    if (result.node.is_root()) {
+      throw_renderer_error("Attempting to assign root document to variable", node);
+      return;
+    }
     auto new_index = parent.tree()->duplicate(result.node.tree(), result.node.id(), parent.id(), NONE);
     auto new_node = NodeRef(parent.tree(), new_index);
     new_node << ryml::key(last_key);
@@ -3996,6 +4321,11 @@ class Renderer : public NodeVisitor {
 
   void visit(const MacroStatementNode&) override {
     // Macro declarations do not produce output during normal rendering.
+  }
+
+  void visit(const ExpressionStatementNode& node) override {
+    // Statement expressions are evaluated for side effects only.
+    eval_expression_list(node.expression);
   }
 
 public:
@@ -4023,7 +4353,6 @@ public:
     data_eval_stack.clear();
   }
 };
-
 } // namespace inja
 
 #endif // INCLUDE_INJA_RENDERER_HPP_
@@ -4058,8 +4387,8 @@ public:
   Environment(const std::filesystem::path& input_path, const std::filesystem::path& output_path): input_path(input_path), output_path(output_path) {setup_data();}
 
   void setup_data() {
-    temp_data_tree.reserve_arena(2 * 1024 * 1024); // Reserve 2MB
-    temp_data_tree.add_flags(inja::Tree::TREEF_NO_ARENA_REALLOC);
+    // temp_data_tree.reserve_arena(2 * 1024 * 1024); // Reserve 2MB
+    // temp_data_tree.add_flags(inja::Tree::TREEF_NO_ARENA_REALLOC);
   }
 
   /// Sets the opener and closer for template statements
@@ -4181,7 +4510,7 @@ public:
   std::ostream& render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data) {
     NodeRef additional_data = temp_data_tree.rootref().append_child();
     additional_data |= ryml::MAP;
-    additional_data["store"] |= ryml::MAP;
+    // additional_data["store"] |= ryml::MAP;
     additional_data["values"] |= ryml::SEQ;
     Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data, additional_data);
     temp_data_tree.remove(additional_data.id());

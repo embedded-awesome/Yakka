@@ -148,6 +148,7 @@ class Parser {
   std::shared_ptr<ExpressionNode> parse_expression(Template& tmpl) {
     size_t current_bracket_level {0};
     size_t current_brace_level {0};
+    Token::Kind previous_kind {Token::Kind::Unknown};
     Arguments arguments;
     OperatorStack operator_stack;
 
@@ -167,6 +168,32 @@ class Parser {
         }
       } break;
       case Token::Kind::LeftBracket: {
+        const auto follows_expression = previous_kind == Token::Kind::Id || previous_kind == Token::Kind::Number ||
+                                        previous_kind == Token::Kind::String || previous_kind == Token::Kind::RightParen ||
+                                        previous_kind == Token::Kind::RightBracket || previous_kind == Token::Kind::RightBrace;
+
+        // Parse postfix indexing like: call()[0], value["key"], (expr)[idx]
+        if (current_brace_level == 0 && current_bracket_level == 0 && follows_expression && !arguments.empty()) {
+          const auto pos = tok.text.data() - tmpl.content.c_str();
+          auto container = arguments.back();
+          arguments.pop_back();
+
+          get_next_token();
+          auto index_expression = parse_expression(tmpl);
+          if (tok.kind != Token::Kind::RightBracket) {
+            throw_parser_error("expected right bracket, got '" + tok.describe() + "'");
+          }
+          if (!index_expression) {
+            throw_parser_error("empty index expression");
+          }
+
+          auto at_node = std::make_shared<FunctionNode>(FunctionStorage::Operation::At, pos);
+          at_node->arguments.emplace_back(container);
+          at_node->arguments.emplace_back(index_expression);
+          arguments.emplace_back(at_node);
+          break;
+        }
+
         if (current_brace_level == 0 && current_bracket_level == 0) {
           literal_start = tok.text;
         }
@@ -180,7 +207,7 @@ class Parser {
       } break;
       case Token::Kind::RightBracket: {
         if (current_bracket_level == 0) {
-          throw_parser_error("unexpected ']'");
+          goto break_loop;
         }
 
         current_bracket_level -= 1;
@@ -411,6 +438,7 @@ class Parser {
         goto break_loop;
       }
 
+      previous_kind = tok.kind;
       get_next_token();
     }
 

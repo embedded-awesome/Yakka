@@ -214,6 +214,19 @@ TEST_CASE("functions") {
     CHECK_THROWS_WITH(env.render("{{ existsIn(brother, sister) }}", data.rootref()), "[inja.exception.render_error] (at 1:22) variable 'sister' not found");
   }
 
+  SUBCASE("contains") {
+    CHECK(env.render("{{ contains(names, \"Peter\") }}", data.rootref()) == "true");
+    CHECK(env.render("{{ contains(names, \"John\") }}", data.rootref()) == "false");
+    CHECK(env.render("{{ contains(vars, 2) }}", data.rootref()) == "true");
+    CHECK(env.render("{{ contains(vars, 5) }}", data.rootref()) == "false");
+    CHECK(env.render("{{ contains(brother, \"name\") }}", data.rootref()) == "true");
+    CHECK(env.render("{{ contains(brother, \"parents\") }}", data.rootref()) == "false");
+    CHECK_THROWS_WITH(env.render("{{ contains(names, true) }}", data.rootref()),
+                      "[inja.exception.render_error] (at 1:4) contains() sequence value must be a string or number");
+    CHECK_THROWS_WITH(env.render("{{ contains(names, vars) }}", data.rootref()),
+                      "[inja.exception.render_error] (at 1:4) contains() sequence value must be a string or number");
+  }
+
   SUBCASE("join") {
     CHECK(env.render("{{ join(names, \" | \") }}", data.rootref()) == "Jeff | Seb | Peter | Tom");
     CHECK(env.render("{{ join(vars, \", \") }}", data.rootref()) == "2, 3, 4, 0, -1, -2, -3");

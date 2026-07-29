@@ -342,10 +342,9 @@ class Renderer : public NodeVisitor {
 
     if (!result.valid()) {
       if (!not_found_stack.empty()) {
-        const auto missing_node = not_found_stack.top();
         not_found_stack.pop();
-        throw_renderer_error("variable '" + static_cast<std::string>(missing_node->name) + "' not found", *missing_node);
       }
+      return NativeNodeRef {};
     }
     return result;
   }
@@ -759,6 +758,33 @@ class Renderer : public NodeVisitor {
       auto name = native_to_string(args[1]);
       make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
     } break;
+    case Op::Contains: {
+      const auto args = get_arguments<2>(node);
+      if (args[0].node.is_map()) {
+        const auto name = native_to_string(args[1]);
+        make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
+        break;
+      }
+
+      if (!args[0].node.is_seq()) {
+        make_result(false);
+        break;
+      }
+
+      const auto value_kind = args[1].kind();
+      if (value_kind != NativeKind::String && !native_is_number(value_kind)) {
+        throw_renderer_error("contains() sequence value must be a string or number", node);
+      }
+
+      bool found = false;
+      for (const auto& child : args[0].node.children()) {
+        if (nodes_equal(NativeNodeRef(child), args[1])) {
+          found = true;
+          break;
+        }
+      }
+      make_result(found);
+    } break;
     case Op::First: {
       const auto value = get_arguments<1>(node)[0];
       if (!value.valid() || value.node.num_children() == 0) {
@@ -848,6 +874,69 @@ class Renderer : public NodeVisitor {
       auto target = std::regex(native_to_string(args[1]));
       auto match  = native_to_string(args[2]);
       make_result(std::regex_replace(input, target, match));
+    } break;
+    case Op::Split: {
+      const auto args = get_arguments<2>(node);
+      const auto input = native_to_string(args[0]);
+      const auto delimiter = native_to_string(args[1]);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+
+      if (delimiter.empty()) {
+        for (char c : input) {
+          auto child = result.append_child();
+          child << std::string(1, c);
+        }
+      } else {
+        std::string::size_type start = 0;
+        while (true) {
+          const auto pos = input.find(delimiter, start);
+          auto child = result.append_child();
+          if (pos == std::string::npos) {
+            child << input.substr(start);
+            break;
+          }
+          child << input.substr(start, pos - start);
+          start = pos + delimiter.size();
+        }
+      }
+
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Substring: {
+      const auto args = get_arguments<2>(node);
+      const auto input = native_to_string(args[0]);
+      const auto index = native_to_int(args[1]).value_or(0);
+      if (index < 0 || static_cast<size_t>(index) > input.size()) {
+        throw_renderer_error("substring index out of range", node);
+      }
+      make_result(input.substr(static_cast<size_t>(index)));
+    } break;
+    case Op::Trim: {
+      auto input = native_to_string(get_arguments<1>(node)[0]);
+      input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) {
+                    return !std::isspace(ch);
+                  }));
+      input.erase(std::find_if(input.rbegin(),
+                               input.rend(),
+                               [](unsigned char ch) {
+                                 return !std::isspace(ch);
+                               })
+                    .base(),
+                  input.end());
+      make_result(input);
+    } break;
+    case Op::Filter: {
+      const auto args = get_arguments<2>(node);
+      const auto regex_match = std::regex(native_to_string(args[1]));
+      auto filtered = tmp_sequence.append_child();
+      filtered |= ryml::SEQ;
+      for (const auto& item : args[0].node.children()) {
+        if ((item.is_val() || item.is_keyval()) && std::regex_match(node_to_string(item), regex_match)) {
+          filtered.append_child() << item.val();
+        }
+      }
+      data_eval_stack.emplace_back(filtered);
     } break;
     case Op::Round: {
       const auto args = get_arguments<2>(node);
