@@ -342,10 +342,9 @@ class Renderer : public NodeVisitor {
 
     if (!result.valid()) {
       if (!not_found_stack.empty()) {
-        const auto missing_node = not_found_stack.top();
         not_found_stack.pop();
-        throw_renderer_error("variable '" + static_cast<std::string>(missing_node->name) + "' not found", *missing_node);
       }
+      return NativeNodeRef {};
     }
     return result;
   }
