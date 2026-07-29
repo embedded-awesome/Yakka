@@ -758,6 +758,33 @@ class Renderer : public NodeVisitor {
       auto name = native_to_string(args[1]);
       make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
     } break;
+    case Op::Contains: {
+      const auto args = get_arguments<2>(node);
+      if (args[0].node.is_map()) {
+        const auto name = native_to_string(args[1]);
+        make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
+        break;
+      }
+
+      if (!args[0].node.is_seq()) {
+        make_result(false);
+        break;
+      }
+
+      const auto value_kind = args[1].kind();
+      if (value_kind != NativeKind::String && !native_is_number(value_kind)) {
+        throw_renderer_error("contains() sequence value must be a string or number", node);
+      }
+
+      bool found = false;
+      for (const auto& child : args[0].node.children()) {
+        if (nodes_equal(NativeNodeRef(child), args[1])) {
+          found = true;
+          break;
+        }
+      }
+      make_result(found);
+    } break;
     case Op::First: {
       const auto value = get_arguments<1>(node)[0];
       if (!value.valid() || value.node.num_children() == 0) {
