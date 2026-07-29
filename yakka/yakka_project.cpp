@@ -1,7 +1,13 @@
+/**
+ * @file yakka_project.cpp
+ * @brief Implements project evaluation, dependency resolution, and output generation.
+ */
+
 #include "yakka.hpp"
 #include "yakka_project.hpp"
 #include "yakka_schema.hpp"
 #include "utilities.hpp"
+
 #include "spdlog/spdlog.h"
 #include "glob/glob.h"
 // #include <ryml/json-schema.hpp>
@@ -18,9 +24,12 @@ using namespace std;
 namespace yakka {
 using namespace std::chrono_literals;
 
+/// @brief Executes project.
+
 project::project(yakka::workspace &workspace, const std::string project_name) : project_name(project_name), yakka_home_directory("/.yakka"), project_directory("."), workspace(workspace)
 {
   // abort_build      = false;
+
   project_has_slcc = false;
   current_state    = yakka::project::state::PROJECT_VALID;
   component_flags  = component_database::flag::ALL_COMPONENTS;
@@ -56,18 +65,27 @@ project::project(yakka::workspace &workspace, const std::string project_name) : 
   add_common_template_commands(inja_environment);
 }
 
+/// @brief Executes ~project.
+
 project::~project()
 {
 }
 
+
+/// @brief Executes set_project_directory.
+
 void project::set_project_directory(const std::string path)
 {
   project_directory = path;
+
 }
+
+/// @brief Executes process_build_string.
 
 void project::process_build_string(const std::string word)
 {
   // Identify features, commands, and components
+
   if (word.front() == '+') {
     auto feature_node = project_data["initial_features"].append_child() << word.substr(1);
     this->initial_features.push_back(feature_node.val());
@@ -82,25 +100,34 @@ void project::process_build_string(const std::string word)
   }
 }
 
+/// @brief Executes init_project.
+
 void project::init_project(const std::vector<std::string> build_string_list)
 {
   for (const auto &build_string: build_string_list)
+
     process_build_string(build_string);
   init_project();
 }
 
+/// @brief Executes init_project.
+
 void project::init_project(const std::string build_string)
 {
   std::stringstream ss(build_string);
+
   std::string word;
   while (std::getline(ss, word, ' '))
     process_build_string(word);
   init_project();
 }
 
+/// @brief Executes init_project.
+
 void project::init_project(std::vector<ryml::csubstr> components, std::vector<ryml::csubstr> features, std::unordered_set<ryml::csubstr> commands)
 {
   initial_features = features;
+
 
   for (const auto &c: components) {
     unprocessed_components.insert(c);
@@ -115,9 +142,12 @@ void project::init_project(std::vector<ryml::csubstr> components, std::vector<ry
   init_project();
 }
 
+/// @brief Executes init_project.
+
 void project::init_project()
 {
   if (project_name.empty()) {
+
     // Generate a project name based on the components and features
     for (auto c: initial_components)
       project_name += ryml_string(c) + "-";
@@ -171,15 +201,21 @@ void project::init_project()
   }
 }
 
+/// @brief Executes add_command.
+
 void project::add_command(const std::string command)
 {
   auto command_node = project_data["commands"].append_child() << command;
+
   commands.insert(command_node.val());
 }
+
+/// @brief Executes process_requirements.
 
 void project::process_requirements(std::shared_ptr<yakka::component> component, ryml::ConstNodeRef child_node)
 {
   // TODO: Implement ryml version - needs json_node_merge, ryml::Pointer, .contains(), .get<>(), .is_string(),
+
   // Merge the feature values into the parent component
   // json_node_merge(ryml::Pointer(""), component->root, child_node, &project_schema);
   merge_nodes(component->root, child_node);
@@ -272,9 +308,12 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
   }
 }
 
+/// @brief Executes update_summary.
+
 void project::update_summary()
 {
   // Check if any component files have been modified
+
   for (auto node: project_summary["components"].children()) {
     if (!node.valid())
       continue;
@@ -300,14 +339,20 @@ void project::update_summary()
   previous_summary["data"] = project_summary["data"];
 }
 
+/// @brief Executes add_component.
+
 bool project::add_component(std::string &component_name, component_database::flag flags)
 {
   return add_component(c4::to_csubstr(component_name), flags);
+
 }
+
+/// @brief Executes add_component.
 
 bool project::add_component(c4::csubstr component_name, component_database::flag flags)
 {
   // Convert string to id
+
   const auto component_id = component_dotname_to_id(component_name);
 
   // Check if component has been replaced
@@ -485,9 +530,12 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
   return true;
 }
 
+/// @brief Executes add_feature.
+
 bool project::add_feature(c4::csubstr &feature_name)
 {
   // Insert feature and continue if this is not new
+
   if (required_features.insert(feature_name).second == false)
     return false;
 
@@ -505,9 +553,12 @@ bool project::add_feature(c4::csubstr &feature_name)
   return true;
 }
 
+/// @brief Executes process_choice.
+
 project::state project::process_choice(c4::csubstr &choice_name)
 {
   const auto &choice = project_summary["choices"][choice_name];
+
   int matches        = 0;
   int option_count   = 0;
 
@@ -771,9 +822,12 @@ project::state project::evaluate_dependencies()
   return project::state::PROJECT_VALID;
 }
 
+/// @brief Executes evaluate_choices.
+
 void project::evaluate_choices()
 {
   // For each component, check each choice has exactly one match in required features unless it's a multi
+
   for (const auto &c: components) {
     if (c->root.contains("choices") && c->root["choices"].has_children()) {
       for (auto choice: c->root["choices"].children()) {
@@ -800,9 +854,12 @@ void project::evaluate_choices()
   }
 }
 
+/// @brief Executes create_project_file.
+
 void project::create_project_file()
 {
   this->project_file = project_name + ".yakka";
+
   std::ofstream file(project_file);
   file << "name: " << project_name << "\n";
   file << "type: project\n";
@@ -820,9 +877,12 @@ void project::create_project_file()
   file.close();
 }
 
+/// @brief Executes generate_project_summary.
+
 void project::generate_project_summary()
 {
   // Add standard information into the project summary
+
   project_summary["project_name"] << project_name;
   project_summary["project_file"] << project_file.string();
   project_summary["project_output"] << default_output_directory + project_name;
@@ -841,9 +901,12 @@ void project::generate_project_summary()
     if (c->root.contains("tools")) {
       for (auto child: c->root["tools"].children()) {
         inja::Environment inja_env;
+/// @brief Executes add_callback.
+
         inja_env.add_callback("curdir", 0, [&c](inja::Arguments &args, ryml::NodeRef additional_data) {
           return additional_data["values"].append_child() << std::filesystem::absolute(c->component_path).string();
         });
+
 
         if (child.has_key())
           if (child.has_val())
@@ -882,6 +945,9 @@ void project::generate_project_summary()
  * For each component, it checks if it contains blueprints. If it does, it iterates over these blueprints.
  * For each blueprint, it renders a string using the inja_environment, based on whether the blueprint contains a regex or not.
  * It then logs this blueprint string, and adds a new blueprint to the blueprint_database, using the blueprint string as the key.
+
+/// @brief Executes process_blueprints.
+
  * The new blueprint is created using the blueprint string, the blueprint value, and the directory of the component.
  */
 void project::process_blueprints()
@@ -890,9 +956,12 @@ void project::process_blueprints()
     process_blueprints(c);
 }
 
+/// @brief Executes generate_target_database.
+
 void project::generate_target_database()
 {
   std::vector<ryml::csubstr> new_targets;
+
   std::unordered_set<ryml::csubstr> processed_targets;
   std::vector<ryml::csubstr> unprocessed_targets;
 
@@ -936,6 +1005,7 @@ void project::generate_target_database()
  * @brief Save to disk the content of the @ref project_summary to project_summary_filename in the project output directory.
  *
  */
+
 void project::save_summary()
 {
   if (!fs::exists(project_summary["project_output"].val<std::string>().value()))
@@ -966,9 +1036,12 @@ void project::save_summary()
   }
 }
 
+/// @brief Executes validate_schema.
+
 void project::validate_schema()
 {
   // Verify schema for each component
+
   for (const auto &c: components) {
     if (project_schema.validate(c->root, c->id) == false)
       current_state = state::PROJECT_HAS_FAILED_SCHEMA_CHECK;
@@ -983,6 +1056,7 @@ void project::validate_schema()
  * @brief Updates the project data by merging all the component data into the project summary.
  */
 void project::update_project_data()
+
 {
   std::unordered_set<ryml::csubstr> required_data;
 
@@ -1024,9 +1098,12 @@ void project::update_project_data()
   // Apply schema with default values
 }
 
+/// @brief Executes is_disqualified_by_unless.
+
 bool project::is_disqualified_by_unless(ryml::ConstNodeRef node)
 {
   if (node.contains("unless"))
+
     for (const auto &u: node["unless"])
       if (required_features.contains(u.val()))
         return true;
@@ -1034,9 +1111,12 @@ bool project::is_disqualified_by_unless(ryml::ConstNodeRef node)
   return false;
 }
 
+/// @brief Executes condition_is_fulfilled.
+
 bool project::condition_is_fulfilled(ryml::ConstNodeRef node)
 {
   if (node.contains("condition"))
+
     for (const auto &condition: node["condition"])
       if (!required_features.contains(condition.val()))
         return false;
@@ -1044,9 +1124,12 @@ bool project::condition_is_fulfilled(ryml::ConstNodeRef node)
   return true;
 }
 
+/// @brief Executes create_config_file.
+
 void project::create_config_file(const std::shared_ptr<yakka::component> component, ryml::ConstNodeRef config, const std::string &prefix, std::string instance_name)
 {
   std::string config_filename            = config["path"].val<std::string>().value();
+
   std::filesystem::path config_file_path = component->component_path / config_filename;
 
   // Check for overrides
@@ -1105,9 +1188,12 @@ void project::create_config_file(const std::shared_ptr<yakka::component> compone
   component->root["generated"]["includes"].append_child() << destination_path.string();
 }
 
+/// @brief Executes process_slc_rules.
+
 void project::process_slc_rules()
 {
   // Go through each SLC based component
+
   // std::vector<std::shared_ptr<yakka::component>>::size_type size = components.size();
   for (std::vector<std::shared_ptr<yakka::component>>::size_type i = 0; i < components.size(); ++i) {
     const auto &c = components[i];
@@ -1364,9 +1450,12 @@ void project::process_slc_rules()
   template_contributions = new_contributions;
 }
 
+/// @brief Executes process_blueprints.
+
 void project::process_blueprints(const std::shared_ptr<component> c)
 {
   if (c->root.contains("blueprints") and c->root["blueprints"].has_children()) {
+
     for (auto b: c->root["blueprints"].children()) {
       std::string blueprint_string = try_render(inja_environment, b.has_child("regex") ? b["regex"].val() : b.key(), project_summary);
       if (blueprint_string[0] == data_dependency_identifier && !blueprint_string.starts_with(":/data/")) {
@@ -1386,28 +1475,40 @@ void project::process_blueprints(const std::shared_ptr<component> c)
   }
 }
 
+/// @brief Executes process_tools.
+
 void project::process_tools(const std::shared_ptr<component> c)
 {
   if (c->root.contains("tools")) {
+
     for (auto i: c->root["tools"].children()) {
       inja::Environment inja_env;
+/// @brief Executes add_callback.
+
       inja_env.add_callback("curdir", 0, [&c](inja::Arguments &args, ryml::NodeRef additional_data) {
         return additional_data["values"].append_child() << std::filesystem::absolute(c->component_path).string();
       });
+
 
       project_summary["tools"][i.key()] << try_render(inja_env, i.val(), project_summary);
     }
   }
 }
 
+/// @brief Executes save_blueprints.
+
 void project::save_blueprints()
 {
   blueprint_database.save(this->output_path / "blueprints.json");
+
 }
+
+/// @brief Executes add_additional_tool.
 
 void project::add_additional_tool(const std::filesystem::path component_path)
 {
   // Load component
+
   auto tool_component = std::make_shared<component>();
   auto result         = tool_component->parse_file(component_path);
   if (result != yakka_status::SUCCESS)

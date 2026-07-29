@@ -1,7 +1,13 @@
+/**
+ * @file yakka_cli.cpp
+ * @brief Implements the Yakka command-line entry point and command execution flow.
+ */
+
 #include "yakka.hpp"
 #include "yakka_workspace.hpp"
 #include "task_engine.hpp"
 #include "yakka_project.hpp"
+
 #include "target_database.hpp"
 #include "utilities.hpp"
 #include "yakka_config.hpp"
@@ -33,9 +39,12 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
   DynamicProgress<ProgressBar> task_progress_ui;
   std::vector<std::shared_ptr<ProgressBar>> task_progress_bars;
 
+/// @brief Executes init.
+
   void init(yakka::task_engine &task_engine)
   {
     // Find the longest name of the task groups
+
     size_t largest_name_length = 0;
     for (const auto &i: task_engine.todo_task_groups) {
       if (i.second->name.size() > largest_name_length)
@@ -56,9 +65,12 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
     //    };
   };
 
+/// @brief Executes update.
+
   void update(yakka::task_engine &task_engine)
   {
     for (const auto &i: task_engine.todo_task_groups) {
+
       if (i.second->current_count != i.second->last_progress_update) {
         task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
         //size_t new_progress = (100 * i.second->current_count) / i.second->total_count;
@@ -71,9 +83,12 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
     }
   };
 
+/// @brief Executes finish.
+
   void finish(yakka::task_engine &task_engine)
   {
     for (const auto &i: task_engine.todo_task_groups) {
+
       task_progress_ui[i.second->ui_id].set_option(option::PostfixText{ std::to_string(i.second->current_count) + "/" + std::to_string(i.second->total_count) });
       task_progress_ui[i.second->ui_id].set_progress(i.second->current_count);
     }
@@ -85,9 +100,12 @@ static const semver::version yakka_version{
 #include "yakka_version.h"
 };
 
+/// @brief Executes main.
+
 int main(int argc, char **argv)
 {
   auto yakka_start_time = fs::file_time_type::clock::now();
+
 
   // Setup logging
   std::error_code error_code;
@@ -402,9 +420,12 @@ int main(int argc, char **argv)
     return 0;
 }
 
+/// @brief Executes evaluate_project_dependencies.
+
 static void evaluate_project_dependencies(yakka::workspace &workspace, yakka::project &project)
 {
   auto t1 = std::chrono::high_resolution_clock::now();
+
 
   if (project.evaluate_dependencies() == yakka::project::state::PROJECT_HAS_INVALID_COMPONENT)
     exit(1);
@@ -423,9 +444,12 @@ static void evaluate_project_dependencies(yakka::workspace &workspace, yakka::pr
   spdlog::info("{}ms to process components", duration);
 }
 
+/// @brief Executes print_project_choice_errors.
+
 static void print_project_choice_errors(yakka::project &project)
 {
   for (auto &i: project.incomplete_choices) {
+
     spdlog::error("Component '{}' has a choice '{}' - Must choose from the following", i.first, i.second);
     for (const auto &b: project.project_summary["choices"][i.second]["options"]) {
       if (b.contains("feature"))

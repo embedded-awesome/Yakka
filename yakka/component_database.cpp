@@ -1,7 +1,13 @@
+/**
+ * @file component_database.cpp
+ * @brief Implements component indexing, lookup, and metadata persistence for workspaces.
+ */
+
 #include "yakka.hpp"
 #include "component_database.hpp"
 #include "toml_parser_ryml.hpp"
 #include "spdlog/spdlog.h"
+
 #include "ryml.hpp"
 #include "ryml_std.hpp"
 #include <c4/yml/emit.hpp>
@@ -19,20 +25,29 @@ using error  = std::error_code;
 
 namespace {
 
+/// @brief Executes has_component_toml_extension.
+
 bool has_component_toml_extension(const fs::path &path)
 {
   const auto filename = path.filename().string();
+
   return filename.ends_with(yakka_component_toml_extension);
 }
+
+/// @brief Executes is_yakka_component_file.
 
 bool is_yakka_component_file(const fs::path &path)
 {
   return path.extension() == yakka_component_extension || path.extension() == yakka_component_old_extension || has_component_toml_extension(path);
+
 }
+
+/// @brief Executes component_id_from_path.
 
 std::string component_id_from_path(const fs::path &path)
 {
   const auto filename = path.filename().string();
+
   if (filename.ends_with(yakka_component_toml_extension)) {
     return filename.substr(0, filename.size() - yakka_component_toml_extension.size());
   }
@@ -41,9 +56,12 @@ std::string component_id_from_path(const fs::path &path)
 
 } // namespace
 
+/// @brief Executes initialize_database.
+
 static void initialize_database(ryml::Tree &database)
 {
   // database.clear();
+
   auto root = database.rootref();
   root |= ryml::MAP;
 
@@ -61,15 +79,21 @@ static void initialize_database(ryml::Tree &database)
 }
 
 // Constructor initializes empty database with default values
+/// @brief Executes component_database.
+
 component_database::component_database() : workspace_path(""), database_is_dirty(false), has_scanned(false)
 {
   initialize_database(database);
+
 }
 
 // Destructor saves if dirty
+/// @brief Executes ~component_database.
+
 component_database::~component_database()
 {
   if (database_is_dirty) {
+
     auto result = save();
     if (!result) {
       spdlog::error("Failed to save database: {}", result.error().message());
@@ -77,9 +101,12 @@ component_database::~component_database()
   }
 }
 
+/// @brief Executes insert.
+
 void component_database::insert(ryml::csubstr id, const path &config_file)
 {
   auto pointer         = ryml::Pointer{ "components" } / id;
+
   auto components_node = database.rootref()[pointer]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "components", std::string{ id } }, true);
   if (components_node.is_seed() || !components_node.is_seq()) {
     components_node |= ryml::SEQ;
@@ -89,9 +116,12 @@ void component_database::insert(ryml::csubstr id, const path &config_file)
   database_is_dirty = true;
 }
 
+/// @brief Executes load.
+
 std::expected<void, error> component_database::load(const path &workspace_path)
 {
   this->workspace_path = workspace_path;
+
   database_filename    = this->workspace_path / yakka::database_filename;
 
   try {
@@ -115,9 +145,12 @@ std::expected<void, error> component_database::load(const path &workspace_path)
   }
 }
 
+/// @brief Executes save.
+
 std::expected<void, error> component_database::save() const
 {
   try {
+
     std::ofstream ofs(database_filename);
     ofs << ryml::emitrs_json<std::string>(database);
     return {};
@@ -126,29 +159,41 @@ std::expected<void, error> component_database::save() const
   }
 }
 
+/// @brief Executes erase.
+
 void component_database::erase() noexcept
 {
   if (!database_filename.empty()) {
+
     std::error_code ec;
     fs::remove(database_filename, ec);
   }
 }
 
+/// @brief Executes clear.
+
 void component_database::clear() noexcept
 {
   database.clear();
+
   initialize_database(database);
   database_is_dirty = true;
 }
 
+/// @brief Executes add_component.
+
 [[nodiscard]] std::expected<bool, std::error_code> component_database::add_component(std::string component_id, const path &path)
 {
   return add_component(c4::to_csubstr(component_id), path);
+
 }
+
+/// @brief Executes add_component.
 
 std::expected<bool, error> component_database::add_component(ryml::csubstr component_id, const path &path)
 {
   auto abs_path = fs::absolute(path);
+
 
   if (!fs::exists(abs_path)) {
     return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
@@ -178,9 +223,12 @@ std::expected<bool, error> component_database::add_component(ryml::csubstr compo
   return true;
 }
 
+/// @brief Executes scan_for_components.
+
 void component_database::scan_for_components(std::optional<path> search_start_path)
 {
   const auto scan_path = search_start_path.value_or(workspace_path);
+
 
   if (!fs::exists(scan_path)) {
     return;
@@ -205,9 +253,12 @@ void component_database::scan_for_components(std::optional<path> search_start_pa
     }
   };
 
+/// @brief Executes recursive_directory_iterator.
+
   auto entries = fs::recursive_directory_iterator(scan_path) | std::views::filter([](const auto &e) {
                    std::error_code ec;
                    fs::perms permissions = fs::status(e.path()).permissions();
+
                    if ((permissions & fs::perms::owner_read) == fs::perms::none) {
                      return false;
                    }
@@ -223,19 +274,28 @@ void component_database::scan_for_components(std::optional<path> search_start_pa
   has_scanned = true;
 }
 
+/// @brief Executes get_path.
+
 const path &component_database::get_path() const noexcept
 {
   return workspace_path;
+
 }
+
+/// @brief Executes get_component.
 
 std::expected<path, std::error_code> component_database::get_component(const std::string &id, flag flags) const
 {
   return get_component(c4::to_csubstr(id), flags);
+
 }
+
+/// @brief Executes get_component.
 
 std::expected<path, error> component_database::get_component(ryml::csubstr id, flag flags) const
 {
   auto components_node = database["components"];
+
   if (!components_node.has_child(id)) {
     return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
@@ -277,9 +337,12 @@ std::expected<path, error> component_database::get_component(ryml::csubstr id, f
   return {};
 }
 
+/// @brief Executes get_component_id.
+
 std::expected<std::string, error> component_database::get_component_id(const path &path) const
 {
   auto components_node = database["components"];
+
 
   for (const auto &entry: components_node.children()) {
     if (!entry.has_key()) {
@@ -301,9 +364,12 @@ std::expected<std::string, error> component_database::get_component_id(const pat
   return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
 }
 
+/// @brief Executes get_blueprint_provider.
+
 std::optional<ryml::ConstNodeRef> component_database::get_blueprint_provider(ryml::csubstr blueprint) const
 {
   // const auto blueprint_str = std::string{ blueprint };
+
   auto blueprints_node = database["blueprints"];
   if (blueprints_node.has_child(blueprint)) {
     return blueprints_node[blueprint];
@@ -312,18 +378,24 @@ std::optional<ryml::ConstNodeRef> component_database::get_blueprint_provider(rym
   return std::nullopt;
 }
 
+/// @brief Executes get_serve_endpoint_provider.
+
 std::optional<ryml::ConstNodeRef> component_database::get_serve_endpoint_provider(ryml::csubstr endpoint) const
 {
   // const auto endpoint_str = std::string{ endpoint };
+
   if (database["serve"].has_child(endpoint)) {
     return database["serve"][endpoint];
   }
   return std::nullopt;
 }
 
+/// @brief Executes parse_yakka_file.
+
 std::expected<void, std::error_code> component_database::parse_yakka_file(const path &path, ryml::csubstr id)
 {
   auto result = yakka::get_file_contents<std::vector<char>>(path.string());
+
   if (!result) {
     return std::unexpected(result.error());
   }
@@ -371,9 +443,12 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
   return {};
 }
 
+/// @brief Executes get_feature_provider.
+
 std::optional<ryml::ConstNodeRef> component_database::get_feature_provider(ryml::csubstr feature) const
 {
   // const auto feature_str = std::string{ feature };
+
   auto features_node = database.crootref()["features"];
   if (features_node.valid() && features_node.contains(feature)) {
     return features_node[feature];
@@ -381,9 +456,12 @@ std::optional<ryml::ConstNodeRef> component_database::get_feature_provider(ryml:
   return std::nullopt;
 }
 
+/// @brief Executes parse_slcc_file.
+
 std::expected<void, std::error_code> component_database::parse_slcc_file(const path &path)
 {
   try {
+
     auto file_content = yakka::get_file_contents<std::vector<char>>(path.string());
     if (!file_content) {
       return std::unexpected(file_content.error());
@@ -464,9 +542,12 @@ std::expected<void, std::error_code> component_database::parse_slcc_file(const p
   }
 }
 
+/// @brief Executes process_blueprint.
+
 static void process_blueprint(ryml::Tree &database, ryml::csubstr id_string, const c4::yml::ConstNodeRef blueprint_node)
 {
   // Ignore regex blueprints
+
   if (blueprint_node.has_child("regex")) {
     return;
   }

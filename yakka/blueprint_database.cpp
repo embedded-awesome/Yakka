@@ -1,7 +1,13 @@
+/**
+ * @file blueprint_database.cpp
+ * @brief Implements blueprint provider indexing and lookup routines.
+ */
+
 #include "blueprint_database.hpp"
 #include "utilities.hpp"
 #include "yakka.hpp"
 #include "inja.hpp"
+
 #include "glob/glob.h"
 #include "spdlog/spdlog.h"
 #include <regex>
@@ -17,9 +23,12 @@ blueprint_database::blueprint_database()
   database["dependencies"] |= ryml::SEQ;
 }
 
+/// @brief Executes find_match.
+
 std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(ryml::csubstr target, ryml::ConstNodeRef project_summary)
 {
   bool blueprint_match_found = false;
+
   std::vector<std::shared_ptr<blueprint_match>> result;
 
   for (const auto &blueprint: blueprints) {
@@ -52,22 +61,34 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
 
     add_common_template_commands(local_inja_env);
 
+/// @brief Executes add_callback.
+
     local_inja_env.add_callback("$", 1, [&match](inja::Arguments &args, ryml::NodeRef additional_data) {
       const int32_t index = args[0].val<int32_t>().value();
       if (index < match->regex_matches.size())
+
         return additional_data["values"].append_child() << match->regex_matches[index];
 
       return ryml::NodeRef{};
     });
+/// @brief Executes add_callback.
+
     local_inja_env.add_callback("curdir", 0, [&match](inja::Arguments &args, ryml::NodeRef additional_data) {
       return additional_data["values"].append_child() << match->blueprint->parent_path;
     });
+
+/// @brief Executes add_callback.
+
     local_inja_env.add_callback("render", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
       return additional_data["values"].append_child() << local_inja_env.render(args[0].val<std::string>().value(), project_summary);
     });
+
+/// @brief Executes add_callback.
+
     local_inja_env.add_callback("select", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
       // TODO
       return ryml::NodeRef{};
+
       // inja::ryml_json choice;
       // for (const auto &option: args.at(0)->items()) {
       //   const auto option_type = option.key();
@@ -79,9 +100,12 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
       // }
       // return choice;
     });
+/// @brief Executes add_callback.
+
     local_inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
       auto aggregate = additional_data["values"].append_child();
       aggregate |= ryml::MAP;
+
       auto path = ryml::Pointer{ args[0].val() };
 
       // Loop through components, check if object path exists, if so add it to the aggregate
@@ -175,16 +199,22 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
   return result;
 }
 
+/// @brief Executes load.
+
 void blueprint_database::load(const std::filesystem::path filename)
 {
   database = ryml_load_file(filename).value();
 
+
   // Generate blueprints from database
 }
+
+/// @brief Executes save.
 
 void blueprint_database::save(const std::filesystem::path filename)
 {
   ryml::Tree output;
+
   output.reserve_arena(2 * 1024 * 1024); // Reserve 2MB for the arena to avoid reallocations during saving, which would invalidate all node references
   auto output_root = output.rootref();
   output_root |= ryml::MAP;
@@ -214,6 +244,9 @@ void blueprint_database::save(const std::filesystem::path filename)
  * @brief Parses dependency files as output by GCC or Clang generating a vector of filenames as found in the named file
  *
  * @param filename  Name of the dependency file. Typically ending in '.d'
+
+/// @brief Executes parse_gcc_dependency_file.
+
  * @return std::vector<ryml::csubstr>  Vector of files specified as dependencies
  */
 std::vector<ryml::csubstr> blueprint_database::parse_gcc_dependency_file(const std::string &filename)
@@ -250,9 +283,12 @@ std::vector<ryml::csubstr> blueprint_database::parse_gcc_dependency_file(const s
   return dependencies;
 }
 
+/// @brief Executes create_blueprint.
+
 void blueprint_database::create_blueprint(const std::string &target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path)
 {
   auto blueprint_target     = database["blueprints"].append_child() << target;
+
   auto new_blueprint = std::make_shared<blueprint>(blueprint_target.val(), blueprint_data, parent_path);
   blueprints.insert({ blueprint_target.val(), new_blueprint });
 }

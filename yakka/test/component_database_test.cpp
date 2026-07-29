@@ -1,6 +1,12 @@
+/**
+ * @file component_database_test.cpp
+ * @brief Implements unit tests for component database behavior and edge cases.
+ */
+
 #include <gtest/gtest.h>
 #include "component_database.hpp"
 #include <filesystem>
+
 
 namespace yakka::test {
 
@@ -15,33 +21,45 @@ protected:
     fs::create_directories(test_path);
   }
 
+/// @brief Executes TearDown.
+
   void TearDown() override
   {
     // Cleanup test directory
+
     fs::remove_all(test_path);
   }
 
   std::filesystem::path test_path;
 };
 
+/// @brief Executes TEST_F.
+
 TEST_F(ComponentDatabaseTest, InitializationTest)
 {
   component_database db;
+
   EXPECT_FALSE(fs::exists(db.get_path()));
 }
+
+/// @brief Executes TEST_F.
 
 TEST_F(ComponentDatabaseTest, LoadEmptyDatabase)
 {
   component_database db;
+
   auto result = db.load(test_path);
   EXPECT_TRUE(result.has_value());
   EXPECT_EQ(db.get_path(), test_path);
   EXPECT_TRUE(fs::exists(test_path / yakka::database_filename));
 }
 
+/// @brief Executes TEST_F.
+
 TEST_F(ComponentDatabaseTest, InsertComponent)
 {
   component_database db;
+
   db.load(test_path).value();
 
   std::filesystem::path config_file = test_path / "test.yakka";
@@ -53,9 +71,12 @@ TEST_F(ComponentDatabaseTest, InsertComponent)
   EXPECT_EQ(result.value(), config_file);
 }
 
+/// @brief Executes TEST_F.
+
 TEST_F(ComponentDatabaseTest, ComponentScanning)
 {
   component_database db;
+
   db.load(test_path).value();
 
   // Create test component files
@@ -70,9 +91,12 @@ TEST_F(ComponentDatabaseTest, ComponentScanning)
   EXPECT_TRUE(db.get_component("comp2").has_value());
 }
 
+/// @brief Executes TEST_F.
+
 TEST_F(ComponentDatabaseTest, ComponentScanningTomlExtension)
 {
   component_database db;
+
   db.load(test_path).value();
 
   fs::create_directories(test_path / "comp_toml");
@@ -85,9 +109,12 @@ TEST_F(ComponentDatabaseTest, ComponentScanningTomlExtension)
   EXPECT_TRUE(db.get_component("comp_toml").has_value());
 }
 
+/// @brief Executes TEST_F.
+
 TEST_F(ComponentDatabaseTest, SaveAndReload)
 {
   {
+
     component_database db;
     db.load(test_path).value();
     db.insert("test_component", test_path / "test.yakka");
@@ -99,9 +126,12 @@ TEST_F(ComponentDatabaseTest, SaveAndReload)
   EXPECT_TRUE(result.has_value());
 }
 
+/// @brief Executes TEST_F.
+
 TEST_F(ComponentDatabaseTest, ErrorHandling)
 {
   component_database db;
+
 
   // Test non-existent path
   auto result = db.get_component("non_existent");
@@ -112,9 +142,12 @@ TEST_F(ComponentDatabaseTest, ErrorHandling)
   EXPECT_FALSE(add_result.has_value());
 }
 
+/// @brief Executes TEST_F.
+
 TEST_F(ComponentDatabaseTest, DatabaseModification)
 {
   component_database db;
+
   db.load(test_path).value();
 
   // Test clear

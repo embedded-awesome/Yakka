@@ -1,7 +1,13 @@
+/**
+ * @file yakka_cli_actions.cpp
+ * @brief Implements CLI subcommand handlers for component and workspace operations.
+ */
+
 #include "yakka_cli_actions.hpp"
 #include "utilities.hpp"
 #include <indicators/dynamic_progress.hpp>
 #include <indicators/progress_bar.hpp>
+
 #include <indicators/cursor_control.hpp>
 #include <indicators/termcolor.hpp>
 
@@ -10,9 +16,12 @@ using namespace std::chrono_literals;
 
 namespace yakka {
 
+/// @brief Executes register_action.
+
 int register_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   if (result.unmatched().size() == 0) {
+
     spdlog::error("Must provide URL of component registry");
     return -1;
   }
@@ -28,9 +37,12 @@ int register_action(workspace &workspace, const cxxopts::ParseResult &result)
   return 0;
 }
 
+/// @brief Executes list_action.
+
 int list_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   workspace.load_component_registries();
+
   // Print components found in registries
   for (auto registry: workspace.registries) {
     // Group components by type
@@ -88,9 +100,12 @@ int list_action(workspace &workspace, const cxxopts::ParseResult &result)
   return 0;
 }
 
+/// @brief Executes update_action.
+
 int update_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   for (auto &i: result.unmatched()) {
+
     std::cout << "Updating: " << i << "\n";
     auto result = workspace.update_component(i);
     if (!result.has_value()) {
@@ -102,9 +117,12 @@ int update_action(workspace &workspace, const cxxopts::ParseResult &result)
   return 0;
 }
 
+/// @brief Executes remove_action.
+
 int remove_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   for (auto &i: result.unmatched()) {
+
     auto optional_location = workspace.find_component(c4::to_csubstr(i));
     if (optional_location) {
       auto [path, package] = optional_location.value();
@@ -116,9 +134,12 @@ int remove_action(workspace &workspace, const cxxopts::ParseResult &result)
   return 0;
 }
 
+/// @brief Executes git_action.
+
 int git_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   auto iter                 = result.unmatched().begin();
+
   const auto component_name = *iter;
   auto component_path = workspace.find_component(c4::to_csubstr(component_name));
   if (!component_path) {
@@ -151,9 +172,12 @@ int git_action(workspace &workspace, const cxxopts::ParseResult &result)
   return 0;
 }
 
+/// @brief Executes fetch_action.
+
 int fetch_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   yakka::project project(workspace);
+
   // Identify components named on command line and add to unknown components
   for (auto s: result.unmatched()) {
     if (s.front() == '+' || s.back() == '!')
@@ -167,9 +191,12 @@ int fetch_action(workspace &workspace, const cxxopts::ParseResult &result)
   return 0;
 }
 
+/// @brief Executes serve_action.
+
 int serve_action(workspace &workspace, const cxxopts::ParseResult &result)
 {
   spdlog::info("Starting configuration server...");
+
   bool server_running = false;
   yakka::start_config_server(workspace, server_running);
   return 0;
@@ -188,9 +215,12 @@ int serve_action(workspace &workspace, const cxxopts::ParseResult &result)
 // clang-format on
 
 
+/// @brief Executes download_unknown_components.
+
 void download_unknown_components(yakka::workspace &workspace, yakka::project &project)
 {
   auto t1 = std::chrono::high_resolution_clock::now();
+
 
   // If there are still missing components, try and download them
   if (!project.unknown_components.empty()) {
@@ -224,9 +254,12 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
           fetch_progress_bars.insert({i, new_progress_bar});
           size_t id = fetch_progress_ui.push_back(*new_progress_bar);
           
+/// @brief Executes fetch_component.
+
           auto result = workspace.fetch_component(i, *node, [&fetch_progress_ui, &largest_name_length, id, i](std::string postfix, size_t number) {
             fetch_progress_ui[id].set_option(option::PostfixText{ postfix });
             auto prefix_test = "Fetching " + std::string(i.str, i.len) + " ";
+
             if (prefix_test.size() < largest_name_length) {
               prefix_test.append(largest_name_length - prefix_test.size(), ' ');
               fetch_progress_ui[id].set_option(option::PrefixText{ prefix_test });

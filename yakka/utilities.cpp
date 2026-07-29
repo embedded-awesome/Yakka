@@ -1,7 +1,13 @@
+/**
+ * @file utilities.cpp
+ * @brief Implements shared utility helpers used across Yakka subsystems.
+ */
+
 #include "yakka_project.hpp"
 #include "utilities.hpp"
 #include "subprocess.hpp"
 #include "spdlog/spdlog.h"
+
 #include "glob/glob.h"
 #include "yakka_schema.hpp"
 #include "blake3.h"
@@ -34,9 +40,12 @@ if(0 == CreateProcess(argv[2], params, NULL, NULL, false, 0, NULL, NULL, &si, &p
         //runas word is a hack to require UAC elevation
         ShellExecute(NULL, "runas", argv[2], params, NULL, SW_SHOWNORMAL);
 }
+/// @brief Executes exec.
+
 */
 std::pair<std::string, int> exec(const std::string &command_text, const std::string &arg_text)
 {
+
   spdlog::info("{} {}", command_text, arg_text);
   try {
     std::string command = command_text;
@@ -64,9 +73,12 @@ std::pair<std::string, int> exec(const std::string &command_text, const std::str
   }
 }
 
+/// @brief Executes exec.
+
 int exec(const std::string &command_text, const std::string &arg_text, std::function<void(std::string &)> function)
 {
   spdlog::info("{} {}", command_text, arg_text);
+
   try {
     std::string command = command_text;
     if (!arg_text.empty())
@@ -110,9 +122,12 @@ int exec(const std::string &command_text, const std::string &arg_text, std::func
   return -1;
 }
 
+/// @brief Executes yaml_diff.
+
 bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2)
 {
   std::vector<std::pair<const YAML::Node &, const YAML::Node &>> compare_list;
+
   compare_list.push_back({ node1, node2 });
   for (size_t i = 0; i < compare_list.size(); ++i) {
     const YAML::Node &left  = compare_list[i].first;
@@ -155,9 +170,12 @@ bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2)
   return false;
 }
 
+/// @brief Executes yaml_path.
+
 YAML::Node yaml_path(const YAML::Node &node, std::string path)
 {
   YAML::Node temp = node;
+
   std::stringstream ss(path);
   std::string s;
   while (std::getline(ss, s, '.'))
@@ -218,9 +236,12 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path)
 //   return segments;
 // }
 
+/// @brief Executes generate_project_name.
+
 std::string generate_project_name(const component_list_t &components, const feature_list_t &features)
 {
   std::string project_name = "";
+
 
   // Generate the project name from the project string
   for (const auto &i: components)
@@ -242,6 +263,9 @@ std::string generate_project_name(const component_list_t &components, const feat
  * @brief Merges a node into a merge_target node according to the rules defined in the provided schema, if any.
  *       If no schema is provided, the node is merged according to the default rules: scalars are overwritten, sequences are concatenated, and maps are merged with new keys added and existing keys overwritten.
  * @param path  Path relative to Yakka component schema
+
+/// @brief Executes copy_node_recursive.
+
  * @param merge_target  Node to merge into. This node is modified in place.
  * @param node  Node to merge. This node is not modified.
  * @param schema  Optional schema to define merge behavior. If not provided, default merge behavior is used.
@@ -265,21 +289,30 @@ static void copy_node_recursive(ryml::ConstNodeRef source, ryml::NodeRef destina
   }
 }
 
+/// @brief Executes append_duplicate_children.
+
 static void append_duplicate_children(ryml::ConstNodeRef source, ryml::NodeRef destination_parent)
 {
   const auto after = destination_parent.num_children() > 0 ? destination_parent.last_child().id() : c4::yml::NONE;
+
   destination_parent.tree()->duplicate_children(source.tree(), source.id(), destination_parent.id(), after);
 }
+
+/// @brief Executes append_duplicate_node.
 
 static void append_duplicate_node(ryml::ConstNodeRef source, ryml::NodeRef destination_parent)
 {
   const auto after = destination_parent.num_children() > 0 ? destination_parent.last_child().id() : c4::yml::NONE;
+
   destination_parent.tree()->duplicate(source.tree(), source.id(), destination_parent.id(), after);
 }
+
+/// @brief Executes merge_nodes.
 
 void merge_nodes(ryml::NodeRef dst, ryml::ConstNodeRef src)
 {
   // If src is a map
+
   if (src.is_map()) {
     // dst.to_map(); // ensure type
     if (!dst.has_val() && !dst.is_seq())
@@ -327,9 +360,12 @@ void merge_nodes(ryml::NodeRef dst, ryml::ConstNodeRef src)
   }
 }
 
+/// @brief Executes merge_node_default.
+
 static void merge_node_default(ryml::NodeRef target, ryml::ConstNodeRef source)
 {
   if (source.is_map()) {
+
     if (!target.is_map()) {
       copy_node_recursive(source, target);
       return;
@@ -371,9 +407,12 @@ static void merge_node_default(ryml::NodeRef target, ryml::ConstNodeRef source)
   copy_node_recursive(source, target);
 }
 
+/// @brief Executes json_node_merge.
+
 void json_node_merge(ryml::Pointer path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema *schema)
 {
   (void)schema;
+
 
   if (!merge_target.valid() || !node.valid()) {
     return;
@@ -386,14 +425,20 @@ void json_node_merge(ryml::Pointer path, ryml::NodeRef merge_target, ryml::Const
   merge_node_default(merge_target, node);
 }
 
+/// @brief Executes component_dotname_to_id.
+
 ryml::csubstr component_dotname_to_id(const ryml::csubstr dotname)
 {
   return dotname.find('.') != std::string::npos ? dotname.sub(dotname.rfind('.') + 1) : dotname;
+
 }
+
+/// @brief Executes try_render_file.
 
 std::string try_render_file(inja::Environment &env, const std::string &filename, ryml::ConstNodeRef data)
 {
   try {
+
     // auto json_data = ryml_to_inja_json(data.crootref());
     return env.render_file(filename, data);
   } catch (std::exception &e) {
@@ -403,22 +448,34 @@ std::string try_render_file(inja::Environment &env, const std::string &filename,
 }
 
 // RapidYAML overloads
+/// @brief Executes try_render.
+
 std::string try_render(inja::Environment &env, ryml::csubstr input, ryml::ConstNodeRef data)
 {
   return try_render(env, std::string_view(input.data(), input.len), data);
+
 }
+/// @brief Executes try_render.
+
 std::string try_render(inja::Environment &env, ryml::ConstNodeRef input, ryml::ConstNodeRef data)
 {
   return try_render(env, input.val<std::string>().value(), data);
+
 }
+
+/// @brief Executes try_render.
 
 std::string try_render(inja::Environment &env, const std::string &input, ryml::ConstNodeRef data)
 {
   return try_render(env, std::string_view(input), data);
+
 }
+/// @brief Executes try_render.
+
 std::string try_render(inja::Environment &env, std::string_view input, ryml::ConstNodeRef data)
 {
   try {
+
     return env.render(input, data);
   } catch (std::exception &e) {
     spdlog::error("Template error: {}\n{}", input, e.what());
@@ -426,14 +483,20 @@ std::string try_render(inja::Environment &env, std::string_view input, ryml::Con
   }
 }
 
+/// @brief Executes try_render_file.
+
 std::string try_render_file(inja::Environment &env, const std::filesystem::path &file_path, ryml::ConstNodeRef data)
 {
   return try_render_file(env, file_path.string(), data);
+
 }
+
+/// @brief Executes bytes_to_hex.
 
 static std::string bytes_to_hex(const unsigned char *bytes, std::size_t len)
 {
   std::ostringstream out;
+
   out << std::hex << std::setfill('0');
   for (std::size_t i = 0; i < len; ++i) {
     out << std::setw(2) << static_cast<unsigned int>(bytes[i]);
@@ -441,16 +504,22 @@ static std::string bytes_to_hex(const unsigned char *bytes, std::size_t len)
   return out.str();
 }
 
+/// @brief Executes u64_to_hex.
+
 static std::string u64_to_hex(uint64_t value)
 {
   std::ostringstream out;
+
   out << std::hex << std::setfill('0') << std::setw(16) << value;
   return out.str();
 }
 
+/// @brief Executes template_arg_to_string.
+
 static std::string template_arg_to_string(ryml::ConstNodeRef arg)
 {
   if (!arg.valid()) {
+
     return {};
   }
   if (arg.has_val()) {
@@ -459,9 +528,12 @@ static std::string template_arg_to_string(ryml::ConstNodeRef arg)
   return ryml::emitrs_json<std::string>(arg);
 }
 
+/// @brief Executes add_common_template_commands.
+
 void add_common_template_commands(inja::Environment &inja_env)
 {
   inja_env.add_callback("sha256sum", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+
     const auto input = template_arg_to_string(args[0]);
     unsigned char digest[crypto_hash_sha256_BYTES];
     if (crypto_hash_sha256(digest,
@@ -472,24 +544,39 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return additional_data["values"].append_child() << bytes_to_hex(digest, crypto_hash_sha256_BYTES);
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("xxh64sum", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto input = template_arg_to_string(args[0]);
     const auto hash  = XXH64(input.data(), input.size(), 0);
+
     return additional_data["values"].append_child() << u64_to_hex(hash);
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     auto path = std::filesystem::path{ args[0].val<std::string>().value() };
     return additional_data["values"].append_child() << (path.has_filename() ? path.parent_path().string() : path.string());
+
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("not_dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.filename().string();
   });
+
+/// @brief Executes add_callback.
+
   inja_env.add_callback("parent_path", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.parent_path().string();
   });
+
+/// @brief Executes add_callback.
+
   inja_env.add_callback("glob", [](inja::Arguments &args, inja::NodeRef additional_data) {
     ryml::NodeRef aggregate = additional_data["values"].append_child();
     aggregate |= ryml::SEQ;
+
     std::vector<std::string> string_args;
     for (const auto i: args)
       string_args.push_back(i.val<std::string>().value());
@@ -497,45 +584,75 @@ void add_common_template_commands(inja::Environment &inja_env)
       aggregate.append_child() << p.generic_string();
     return aggregate;
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("absolute_dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     const auto path = std::filesystem::path{ args[0].val<std::string>().value() };
     return additional_data["values"].append_child() << std::filesystem::absolute(path).generic_string();
+
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("absolute_path", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     const auto path = std::filesystem::path{ args[0].val<std::string>().value() };
     return additional_data["values"].append_child() << std::filesystem::absolute(path).generic_string();
+
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("relative_path", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     auto path          = std::filesystem::path{ args[0].val<std::string>().value() };
     const auto current = std::filesystem::current_path();
+
     auto new_path      = std::filesystem::relative(path, current);
     return additional_data["values"].append_child() << new_path.generic_string();
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("relative_path", 2, [](inja::Arguments &args, inja::NodeRef additional_data) {
     const auto path1 = args[0].val<std::string>().value();
     const auto path2 = std::filesystem::absolute(args[1].val<std::string>().value());
+
     return additional_data["values"].append_child() << std::filesystem::relative(path1, path2).generic_string();
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("extension", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.extension().string().substr(1);
   });
+
+/// @brief Executes add_callback.
+
   inja_env.add_callback("filesize", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     return additional_data["values"].append_child() << fs::file_size(args[0].val<std::string>().value());
   });
+
+/// @brief Executes add_callback.
+
   inja_env.add_callback("file_exists", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     return additional_data["values"].append_child() << fs::exists(args[0].val<std::string>().value());
   });
+
+/// @brief Executes add_callback.
+
   inja_env.add_callback("hex2dec", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     std::string hex_string = args[0].val<std::string>().value();
     return additional_data["values"].append_child() << std::stoul(hex_string, nullptr, 16);
+
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("read_file", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto file = std::ifstream(args[0].val<std::string>().value());
     return additional_data["values"].append_child() << std::string{ std::istreambuf_iterator<char>{ file }, {} };
+
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("load_yaml", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
     if (std::filesystem::exists(file_path)) {
+
       auto file_content = yakka::get_file_contents<std::string>(file_path);
       auto new_node     = additional_data["values"].append_child();
       ryml::parse_in_arena(ryml::to_csubstr(*file_content), new_node);
@@ -543,9 +660,12 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return ryml::NodeRef{};
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("load_xml", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
     if (std::filesystem::exists(file_path)) {
+
       pugi::xml_document doc;
       pugi::xml_parse_result result = doc.load_file(file_path.c_str());
       if (result.status == pugi::xml_parse_status::status_ok) {
@@ -556,9 +676,12 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return ryml::NodeRef{};
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("load_json", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
     if (std::filesystem::exists(file_path)) {
+
       auto file_content = yakka::get_file_contents<std::string>(file_path);
       auto new_node     = additional_data["values"].append_child();
       ryml::parse_in_arena(ryml::to_csubstr(*file_content), new_node);
@@ -566,25 +689,37 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return ryml::NodeRef{};
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("quote", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     std::stringstream ss;
     ss << std::quoted(args[0].val<std::string>().value());
+
     return additional_data["values"].append_child() << ss.str();
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("replace", 3, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input  = args[0].val<std::string>().value();
     auto target = std::regex(args[1].val<std::string>().value());
+
     auto match  = args[2].val<std::string>().value();
     return additional_data["values"].append_child() << std::regex_replace(input, target, match);
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("regex_escape", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     const std::regex metacharacters(R"([\.\^\$\+\(\)\[\]\{\}\|\?])");
+
     return additional_data["values"].append_child() << std::regex_replace(input, metacharacters, "\\$&");
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("split", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input  = args[0].val<std::string>().value();
     auto delim  = args[1].val<std::string>().value();
+
     auto output = additional_data["values"].append_child();
     output |= ryml::SEQ;
     for (auto word: std::views::split(input, delim)) {
@@ -592,33 +727,50 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return output;
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("starts_with", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     auto start = args[1].val<std::string>().value();
+
     return additional_data["values"].append_child() << (input.rfind(start, 0) == 0);
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("substring", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
     auto index = args[1].val<int>().value();
+
     return additional_data["values"].append_child() << input.substr(index);
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("trim", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input = args[0].val<std::string>().value();
+/// @brief Executes erase.
+
     input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) {
+
                   return !std::isspace(ch);
                 }));
+/// @brief Executes erase.
+
     input.erase(std::find_if(input.rbegin(),
                              input.rend(),
                              [](unsigned char ch) {
+
                                return !std::isspace(ch);
                              })
                   .base(),
                 input.end());
     return additional_data["values"].append_child() << input;
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("filter", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto output = additional_data["values"].append_child();
     output |= ryml::SEQ;
+
     const auto input       = args[0];
     const auto regex_match = std::regex(args[1].val<std::string>().value());
     for (const auto &item: input.children()) {
@@ -628,9 +780,12 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return output;
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("join", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto input = args[0];
     if (!input.valid() || !input.is_seq()) {
+
       spdlog::error("join() expects an array as the first argument");
       return ryml::NodeRef{};
     }
@@ -645,33 +800,45 @@ void add_common_template_commands(inja::Environment &inja_env)
     auto result = additional_data["values"].append_child() << output;
     return result;
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("find_json", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto input            = args[0];
     const auto search_key = args[1].val<std::string>().value();
+
     auto output           = additional_data["values"].append_child();
     output |= ryml::SEQ;
     find_json_keys(input, search_key, "", output);
     return output;
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("merge", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto target = args[0];
     // const auto data = args[1];
+
     // TODO:
     // target.update(data, true);
     return target;
   });
+/// @brief Executes add_callback.
+
   inja_env.add_callback("concatenate", [](const inja::Arguments &args, inja::NodeRef additional_data) {
     std::string aggregate;
     for (const auto i: args)
+
       aggregate.append(i.val<std::string>().value());
     auto result = additional_data["values"].append_child() << aggregate;
     return result;
   });
 }
 
+/// @brief Executes download_resource.
+
 std::pair<std::string, int> download_resource(const std::string url, std::filesystem::path destination)
 {
   std::filesystem::path filename = destination / url.substr(url.find_last_not_of('/'));
+
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
   return exec("powershell", std::format("Invoke-WebRequest {} -OutFile {}", url, filename.generic_string()));
 #else
@@ -680,9 +847,12 @@ std::pair<std::string, int> download_resource(const std::string url, std::filesy
 }
 
 #ifdef NOT_USED
+/// @brief Executes create_condition_pointer.
+
 ryml::Pointer create_condition_pointer(const ryml::Tree condition)
 {
   ryml::Pointer pointer;
+
 
   auto root = condition.crootref();
   if (!root.valid()) {
@@ -708,9 +878,12 @@ struct ComparisonResult {
   std::string error_message;
 };
 
+/// @brief Executes has_data_dependency_changed.
+
 [[nodiscard]]
 std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, ryml::ConstNodeRef left, ryml::ConstNodeRef right) noexcept
 {
+
   if (data_path.empty() || data_path[0] != data_dependency_identifier) {
     return false;
   }
@@ -817,9 +990,12 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
   }
 }
 
+/// @brief Executes find_json_keys.
+
 void find_json_keys(ryml::ConstNodeRef j, const std::string &target_key, const std::string &current_path, ryml::NodeRef paths)
 {
   if (j.is_map()) {
+
     for (auto it: j.children()) {
       std::string new_path = current_path.empty() ? ryml_string(it.key()) : current_path + "." + ryml_string(it.key());
 
@@ -837,9 +1013,12 @@ void find_json_keys(ryml::ConstNodeRef j, const std::string &target_key, const s
   }
 }
 
+/// @brief Executes hash_file.
+
 void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept
 {
   try {
+
     auto start = std::chrono::steady_clock::now();
 
     std::ifstream file(filename, std::ios::binary);
@@ -867,6 +1046,9 @@ void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept
  * This is a very naive implementation that creates a new tree for each node and merges it into the parent. It also uses a lot of string copying. 
  * A more efficient implementation would build the tree in place without merging and avoid unnecessary string copies.
  */
+
+/// @brief Executes xml_to_json.
+
 void xml_to_json(const pugi::xml_node &node, ryml::NodeRef &target)
 {
   target |= ryml::MAP;
@@ -906,9 +1088,12 @@ void xml_to_json(const pugi::xml_node &node, ryml::NodeRef &target)
 }
 
 // Load file content and parse using RapidYAML
+/// @brief Executes ryml_load_file.
+
 std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem::path &path)
 {
   auto file_content = yakka::get_file_contents<std::string>(path);
+
   if (!file_content) {
     return std::unexpected(file_content.error());
   }
@@ -993,9 +1178,12 @@ std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem:
 // }
 
 // Helper function to check if ryml node has a child with given key
+/// @brief Executes ryml_has_child.
+
 bool ryml_has_child(ryml::ConstNodeRef node, c4::csubstr key)
 {
   if (!node.valid() || !node.is_map()) {
+
     return false;
   }
   return node.has_child(key);
@@ -1049,17 +1237,23 @@ bool ryml_has_child(ryml::ConstNodeRef node, c4::csubstr key)
 //   return ryml_get_path(node, path).valid();
 // }
 
+/// @brief Executes ryml_path.
+
 std::filesystem::path ryml_path(c4::csubstr path)
 {
   std::string path_str;
+
   c4::from_chars(path, &path_str);
   return fs::path{ path_str };
 }
 
 // Merge two ryml nodes
+/// @brief Executes ryml_node_merge.
+
 void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const schema *schema)
 {
   // For now, implement basic merging
+
   // Full implementation would need to handle merge strategies from schema
   if (!source.valid() || !target.valid()) {
     return;
@@ -1180,9 +1374,12 @@ void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const sche
 //   return ryml_navigate_path(node, path.parts(), create_if_missing);
 // }
 
+/// @brief Executes ryml_save_file.
+
 void ryml_save_file(const std::filesystem::path &path, ryml::ConstNodeRef node)
 {
   try {
+
     std::ofstream file(path);
     if (!file.is_open()) {
       spdlog::error("Failed to open file for writing: {}", path.generic_string());

@@ -1,7 +1,13 @@
+/**
+ * @file yakka_component.cpp
+ * @brief Implements component parsing, validation, and rule extraction logic.
+ */
+
 #include "yakka_component.hpp"
 // #include "yakka_schema.hpp"
 #include "utilities.hpp"
 #include "toml_parser_ryml.hpp"
+
 #include "spdlog/spdlog.h"
 #include "semver/semver.hpp"
 #include <fstream>
@@ -11,15 +17,21 @@ using namespace semver::literals;
 namespace yakka {
 namespace {
 
+/// @brief Executes has_component_toml_extension.
+
 bool has_component_toml_extension(const std::filesystem::path &file_path)
 {
   const auto filename = file_path.filename().string();
+
   return filename.ends_with(yakka_component_toml_extension);
 }
+
+/// @brief Executes component_id_from_path.
 
 std::string component_id_from_path(const std::filesystem::path &file_path)
 {
   const auto filename = file_path.filename().string();
+
   if (filename.ends_with(yakka_component_toml_extension)) {
     return filename.substr(0, filename.size() - yakka_component_toml_extension.size());
   }
@@ -28,9 +40,12 @@ std::string component_id_from_path(const std::filesystem::path &file_path)
 
 } // namespace
 
+/// @brief Executes parse_file.
+
 yakka_status component::parse_file(std::filesystem::path file_path, std::filesystem::path package_path, ryml::NodeRef parent_node)
 {
   this->file_path         = file_path;
+
   this->package_path      = package_path;
   std::string path_string = file_path.generic_string();
   spdlog::info("Parsing '{}'", path_string);
@@ -247,9 +262,12 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
   return yakka_status::SUCCESS;
 }
 
+/// @brief Executes convert_to_yakka.
+
 void component::convert_to_yakka()
 {
   auto root = tree.rootref();
+
 
   // Set basic data such as directory and name
   if (root.has_child("id")) {

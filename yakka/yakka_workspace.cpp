@@ -1,7 +1,13 @@
+/**
+ * @file yakka_workspace.cpp
+ * @brief Implements workspace discovery, database management, and package source handling.
+ */
+
 #include "yakka.hpp"
 #include "yakka_workspace.hpp"
 #include "component_database.hpp"
 #include "utilities.hpp"
+
 #include "spdlog/sinks/basic_file_sink.h"
 #include <filesystem>
 #include <fstream>
@@ -15,17 +21,23 @@ namespace fs = std::filesystem;
 
 namespace yakka {
 
+/// @brief Executes ensure_map_node.
+
 ryml::NodeRef ensure_map_node(ryml::NodeRef node)
 {
   if (!node.is_map()) {
+
     node |= ryml::MAP;
   }
   return node;
 }
 
+/// @brief Executes ensure_child_map.
+
 ryml::NodeRef ensure_child_map(ryml::NodeRef parent, c4::csubstr key)
 {
   ensure_map_node(parent);
+
   if (parent.has_child(key)) {
     auto child = parent.find_child(key);
     if (!child.is_map()) {
@@ -40,9 +52,12 @@ ryml::NodeRef ensure_child_map(ryml::NodeRef parent, c4::csubstr key)
   return child;
 }
 
+/// @brief Executes ensure_child_seq.
+
 ryml::NodeRef ensure_child_seq(ryml::NodeRef parent, c4::csubstr key)
 {
   ensure_map_node(parent);
+
   ryml::NodeRef child = parent.has_child(key) ? parent.find_child(key) : parent.append_child();
   if (!child.has_key()) {
     child << ryml::key(key);
@@ -53,9 +68,12 @@ ryml::NodeRef ensure_child_seq(ryml::NodeRef parent, c4::csubstr key)
   return child;
 }
 
+/// @brief Executes ensure_child_scalar.
+
 ryml::NodeRef ensure_child_scalar(ryml::NodeRef parent, c4::csubstr key, c4::csubstr value)
 {
   ensure_map_node(parent);
+
   ryml::NodeRef child = parent.has_child(key) ? parent.find_child(key) : parent.append_child();
   if (!child.has_key()) {
     child << ryml::key(key);
@@ -65,9 +83,12 @@ ryml::NodeRef ensure_child_scalar(ryml::NodeRef parent, c4::csubstr key, c4::csu
 }
 
 // Using std::expected for error handling
+/// @brief Executes init.
+
 std::expected<void, std::error_code> workspace::init(const std::filesystem::path &workspace_path)
 {
   this->workspace_path = workspace_path;
+
   ensure_map_node(summary.rootref());
 
   if (auto result = load_config_file(workspace_path / "config.yaml"); !result)
@@ -115,9 +136,12 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
   // Using ranges for package database loading
   if (!this->packages.empty()) {
     package_databases.reserve(packages.size());
+/// @brief Executes for_each.
+
     std::ranges::for_each(packages, [this](const auto &p) {
       auto result = package_databases.emplace_back().load(p);
       if (!result) {
+
         spdlog::error("Failed to load package database at {}: {}\n", p.string(), result.error().message());
       }
     });
@@ -167,16 +191,22 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
   return {};
 }
 
+/// @brief Executes load_component_registries.
+
 void workspace::load_component_registries()
 {
   const auto registry_path = workspace_path / ".yakka/registries";
+
   if (!fs::exists(registry_path))
     return;
 
   // Using ranges and views for directory traversal
+/// @brief Executes filter.
+
   auto yaml_files = std::views::filter(fs::recursive_directory_iterator(registry_path), [](const auto &entry) {
     return entry.path().extension() == ".yaml";
   });
+
 
   for (const auto &entry: yaml_files) {
     try {
@@ -194,15 +224,21 @@ void workspace::load_component_registries()
 }
 
 // Using std::expected for error handling in component registry addition
+/// @brief Executes add_component_registry.
+
 std::expected<void, std::error_code> workspace::add_component_registry(ryml::csubstr url)
 {
   return fetch_registry(url);
+
 }
 
 // Using std::optional for registry component lookup
+/// @brief Executes find_registry_component.
+
 std::optional<ryml::ConstNodeRef> workspace::find_registry_component(ryml::csubstr name) const
 {
   for (const auto &[registry_name, registry_tree]: registries) {
+
     const auto registry = registry_tree.crootref();
     if (!registry.valid() || !registry.has_child("provides")) {
       continue;
@@ -220,18 +256,24 @@ std::optional<ryml::ConstNodeRef> workspace::find_registry_component(ryml::csubs
 }
 
 // Modern implementation of component finding with structured bindings
+/// @brief Executes find_component.
+
 std::optional<std::pair<std::filesystem::path, std::filesystem::path>> workspace::find_component(ryml::csubstr component_dotname, component_database::flag flags)
 {
   const bool try_update_the_database = false;
+
   const auto component_id            = yakka::component_dotname_to_id(component_dotname);
 
   const auto [local, shared] = std::tuple{ local_database.get_component(component_id, flags), shared_database.get_component(component_id, flags) };
 
   if (!local.has_value() && !shared.has_value()) {
     // Using ranges to search package databases
+/// @brief Executes find_if.
+
     auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
       return db.get_component(component_id, flags).has_value();
     });
+
 
     if (found != package_databases.end()) {
       return std::pair{ found->get_component(component_id, flags).value(), found->get_path() };
@@ -253,9 +295,12 @@ std::optional<std::pair<std::filesystem::path, std::filesystem::path>> workspace
   return std::nullopt;
 }
 
+/// @brief Executes find_feature.
+
 std::optional<ryml::ConstNodeRef> workspace::find_feature(ryml::csubstr feature) const
 {
   // Using structured bindings and if-init statement
+
   if (auto node = local_database.get_feature_provider(feature); node.has_value()) {
     return node;
   }
@@ -265,9 +310,12 @@ std::optional<ryml::ConstNodeRef> workspace::find_feature(ryml::csubstr feature)
   }
 
   // Using ranges to search package databases
+/// @brief Executes find_if.
+
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
     return db.get_feature_provider(feature).has_value();
   });
+
 
   if (found != package_databases.end()) {
     return found->get_feature_provider(feature);
@@ -276,9 +324,12 @@ std::optional<ryml::ConstNodeRef> workspace::find_feature(ryml::csubstr feature)
   return std::nullopt;
 }
 
+/// @brief Executes find_blueprint.
+
 std::optional<ryml::ConstNodeRef> workspace::find_blueprint(ryml::csubstr blueprint) const
 {
   if (auto node = local_database.get_blueprint_provider(blueprint); node.has_value()) {
+
     return node;
   }
 
@@ -286,9 +337,12 @@ std::optional<ryml::ConstNodeRef> workspace::find_blueprint(ryml::csubstr bluepr
     return node;
   }
 
+/// @brief Executes find_if.
+
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
     return db.get_blueprint_provider(blueprint).has_value();
   });
+
 
   if (found != package_databases.end()) {
     return found->get_blueprint_provider(blueprint);
@@ -298,9 +352,12 @@ std::optional<ryml::ConstNodeRef> workspace::find_blueprint(ryml::csubstr bluepr
 }
 
 // Config file loading with modern error handling
+/// @brief Executes load_config_file.
+
 std::expected<void, std::error_code> workspace::load_config_file(const std::filesystem::path &config_file_path)
 {
   try {
+
     if (!fs::exists(config_file_path))
       return {};
 
@@ -367,9 +424,12 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
 }
 
 // Modern implementation of component fetching
+/// @brief Executes fetch_component.
+
 std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name, ryml::ConstNodeRef node, std::function<void(std::string, size_t)> progress_handler)
 {
   const auto url_node = node["packages"]["default"]["url"];
+
   const auto url      = try_render(inja_environment, url_node.val<std::string>().value(), summary.crootref());
 
   const auto branch_node = node["packages"]["default"]["branch"];
@@ -384,9 +444,12 @@ std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name
 
   const auto checkout_location = (is_tool && shared_components_write_access) ? shared_components_path / "repos" / ryml_string(name) : workspace_path / "components" / ryml_string(name);
 
+/// @brief Executes async.
+
   return std::async(std::launch::async, [=]() -> std::filesystem::path {
     auto result = do_fetch_component(name, url, branch, git_location, checkout_location, progress_handler);
     if (result) {
+
       return *result;
     } else {
       spdlog::error("Failed to fetch '{}'. error: {}", name, result.error().message());
@@ -395,9 +458,12 @@ std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name
   });
 }
 
+/// @brief Executes execute_git_command.
+
 std::expected<void, std::error_code> workspace::execute_git_command(ryml::csubstr command, ryml::csubstr git_directory_string)
 {
   constexpr auto GIT_STRING = "git";
+
   auto [output, result]     = yakka::exec(GIT_STRING, ryml_string(git_directory_string) + ryml_string(command));
 
   if (result != 0) {
@@ -409,9 +475,12 @@ std::expected<void, std::error_code> workspace::execute_git_command(ryml::csubst
 };
 
 // Modern implementation of registry fetching using std::expected
+/// @brief Executes fetch_registry.
+
 std::expected<void, std::error_code> workspace::fetch_registry(ryml::csubstr url)
 {
   constexpr auto GIT_STRING = "git";
+
   const auto fetch_string   = std::format("-C .yakka/registries/ clone {} --progress --single-branch", ryml_string(url));
 
   auto [output, result] = yakka::exec(GIT_STRING, fetch_string);
@@ -424,9 +493,12 @@ std::expected<void, std::error_code> workspace::fetch_registry(ryml::csubstr url
 }
 
 // Modern implementation of component updating using std::expected
+/// @brief Executes update_component.
+
 std::expected<void, std::error_code> workspace::update_component(std::string name)
 {
   std::string git_directory_string;
+
 
   // Determine git directory string based on component location
   if (local_database.get_component(name).has_value()) {
@@ -444,6 +516,9 @@ std::expected<void, std::error_code> workspace::update_component(std::string nam
 std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_component(ryml::csubstr name,
                                                                        std::string url,
                                                                        std::string branch,
+
+/// @brief Executes void.
+
                                                                        const std::filesystem::path &git_location,
                                                                        const std::filesystem::path &checkout_location,
                                                                        std::function<void(std::string, size_t)> progress_handler)
@@ -488,9 +563,12 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
       auto start_time = std::chrono::steady_clock::now();
       auto logger     = fetch_log;
 
+/// @brief Executes exec.
+
       auto result = yakka::exec(cmd, args, [&](std::string data) {
         logger->info(data);
         progress_callback(data);
+
       });
 
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
@@ -575,6 +653,7 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
 void workspace::update_versions()
 {
   // Scan registries
+
   const auto registry_path = workspace_path / ".yakka/registries";
   if (!fs::exists(registry_path))
     return;
@@ -583,6 +662,7 @@ void workspace::update_versions()
   auto registry_files = std::views::filter(fs::recursive_directory_iterator(registry_path), [](const auto &entry) {
     return entry.path().extension() == ".yaml";
   });
+
 
   for (const auto &file_path: registry_files) {
     std::string registry_name = file_path.path().filename().string();
@@ -637,6 +717,9 @@ void workspace::update_versions()
  * @brief Returns the path corresponding to the home directory of BOB
  *        Typically this would be ~/.yakka or /Users/<username>/.yakka or $HOME/.yakka
  * @return std::string
+
+/// @brief Executes get_yakka_shared_home.
+
  */
 std::filesystem::path workspace::get_yakka_shared_home()
 {
@@ -656,9 +739,12 @@ std::filesystem::path workspace::get_yakka_shared_home()
 
 #if 0
 // Modern implementation of get_yakka_shared_home using C++23 features
+/// @brief Executes get_yakka_shared_home.
+
 static std::expected<std::filesystem::path, std::error_code> get_yakka_shared_home()
 {
   // Define possible environment variables to check
+
   static constexpr std::array env_vars = {
     "HOME"sv,
     "USERPROFILE"sv,
@@ -713,9 +799,12 @@ static std::expected<std::filesystem::path, std::error_code> get_yakka_shared_ho
 }
 
 // Helper method to validate a potential yakka home directory
+/// @brief Executes is_valid_yakka_home.
+
 static bool is_valid_yakka_home(const std::filesystem::path &path) noexcept
 {
   try {
+
     // clang-format off
     return fs::exists(path) && 
           fs::is_directory(path) && 
@@ -727,9 +816,12 @@ static bool is_valid_yakka_home(const std::filesystem::path &path) noexcept
 }
 
 // Helper to ensure proper permissions on yakka home directory
+/// @brief Executes ensure_yakka_home_permissions.
+
 static std::expected<void, std::error_code> ensure_yakka_home_permissions(const std::filesystem::path &path) noexcept
 {
   try {
+
     std::error_code ec;
 
     // Ensure proper directory permissions
@@ -748,9 +840,12 @@ static std::expected<void, std::error_code> ensure_yakka_home_permissions(const 
 }
 
 // Helper to create standard yakka directory structure
+/// @brief Executes create_yakka_directory_structure.
+
 static std::expected<void, std::error_code> create_yakka_directory_structure(const std::filesystem::path &base_path) noexcept
 {
   try {
+
     // Define standard subdirectories
     static constexpr std::array subdirs = { "registries"sv, "repos"sv, "components"sv, "cache"sv, "logs"sv };
 
@@ -776,9 +871,12 @@ static std::expected<void, std::error_code> create_yakka_directory_structure(con
 }
 
 // Method to initialize yakka home directory with proper structure
+/// @brief Executes initialize_yakka_home.
+
 static std::expected<std::filesystem::path, std::error_code> initialize_yakka_home()
 {
   auto home_result = get_yakka_shared_home();
+
   if (!home_result) {
     return std::unexpected(home_result.error());
   }

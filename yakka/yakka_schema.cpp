@@ -1,7 +1,13 @@
+/**
+ * @file yakka_schema.cpp
+ * @brief Implements schema loading, merging, and validation utilities.
+ */
+
 #include "yakka_schema.hpp"
 #include "yakka_component.hpp"
 #include "utilities.hpp"
 #include "slcc_schema.hpp"
+
 
 #include <valijson/adapters/rapidyaml_adapter.hpp>
 #include <valijson/schema.hpp>
@@ -11,9 +17,12 @@
 
 namespace yakka {
 
+/// @brief Executes schema.
+
 schema::schema(const std::string &schema_yaml) : schema_data()
 {
   if (schema_yaml.empty()) {
+
     return;
   }
 
@@ -24,9 +33,12 @@ schema::schema(const std::string &schema_yaml) : schema_data()
   }
 }
 
+/// @brief Executes schema.
+
 schema::schema(const std::filesystem::path &schema_path) : schema_data()
 {
   const auto loaded_schema = ryml_load_file(schema_path);
+
   if (!loaded_schema.has_value()) {
     spdlog::error("Failed to load schema file '{}': {}", schema_path.generic_string(), loaded_schema.error().message());
     return;
@@ -35,9 +47,12 @@ schema::schema(const std::filesystem::path &schema_path) : schema_data()
   schema_data = std::move(loaded_schema.value());
 }
 
+/// @brief Executes add_schema_data.
+
 void schema::add_schema_data(ryml::ConstNodeRef schema_data)
 {
   if (!schema_data.valid()) {
+
     return;
   }
 
@@ -52,9 +67,12 @@ void schema::add_schema_data(ryml::ConstNodeRef schema_data)
   validator_updated = false;
 }
 
+/// @brief Executes validate.
+
 bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id)
 {
   if (!data.valid()) {
+
     spdlog::error("Schema validation failed for '{}': input data node is invalid", ryml_string(id));
     return false;
   }
@@ -172,9 +190,12 @@ ryml::ConstNodeRef schema::operator[](const std::string &path) const
   return current;
 }
 
+/// @brief Executes get_merge_strategy.
+
 schema::merge_strategy schema::get_merge_strategy(const ryml::Pointer &path) const
 {
   // ryml::Tree temp_schema = this->schema_data;
+
   // std::string path_str = path.to_string();
   // for (const auto &part_range: std::views::split(path_str, '/')) {
   //   std::string part(part_range.begin(), part_range.end());
@@ -205,12 +226,16 @@ schema::merge_strategy schema::get_merge_strategy(const ryml::Pointer &path) con
 yakka_schema_validator::yakka_schema_validator() : 
   yakka_component_schema(yakka_component_schema_yaml), 
   slcc_component_schema(slcc_schema_yaml)
+
 {
 }
+
+/// @brief Executes validate.
 
 bool yakka_schema_validator::validate(yakka::component *component)
 {
   if (component == nullptr) {
+
     spdlog::error("Cannot validate null component");
     return false;
   }

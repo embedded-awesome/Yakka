@@ -1,7 +1,13 @@
+/**
+ * @file yakka_config.cpp
+ * @brief Implements loading and interpretation of Yakka configuration files.
+ */
+
 #include "yakka.hpp"
 #include "yakka_config.hpp"
 #include "yakka_component.hpp"
 #include "yakka_workspace.hpp"
+
 #include "component_database.hpp"
 #include "yakka_project.hpp"
 #include "utilities.hpp"
@@ -17,9 +23,12 @@ namespace yakka {
 
 namespace fs = std::filesystem;
 
+/// @brief Executes extract_start_of_url_path.
+
 static std::string extract_start_of_url_path(const std::string &url_path)
 {
   if (url_path.empty() || url_path[0] != '/')
+
     return "";
 
   size_t start = 1;
@@ -27,9 +36,12 @@ static std::string extract_start_of_url_path(const std::string &url_path)
   return url_path.substr(start, end - start);
 }
 
+/// @brief Executes start_config_server.
+
 void start_config_server(yakka::workspace &workspace, bool &server_running)
 {
   httplib::Server server;
+
 
   if (!server.is_valid()) {
     spdlog::error("Server has an error...\n");
@@ -39,16 +51,22 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
   // Load the component registries
   workspace.load_component_registries();
 
+/// @brief Executes Options.
+
   server.Options("/(.*)", [&](const httplib::Request & /*req*/, httplib::Response &res) {
     res.set_header("Access-Control-Allow-Methods", "*");
     res.set_header("Access-Control-Allow-Headers", "*");
+
     res.set_header("Access-Control-Allow-Origin", "*");
     res.set_header("Connection", "close");
   });
 
+/// @brief Executes set_pre_routing_handler.
+
   server.set_pre_routing_handler([&](const auto &req, auto &res) {
     const auto start = extract_start_of_url_path(req.path);
     if (start == "api" || start == "assets") {
+
       return httplib::Server::HandlerResponse::Unhandled;
     }
 
@@ -63,9 +81,12 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
         if (component_path.has_value()) {
         // Check if the request is for an endpoint or a file
           auto full_path      = (*component_path).parent_path();
+/// @brief Executes substr.
+
           std::filesystem::path req_path = req.path.substr(1); // 1 to skip the leading '/'
           if (req_path.extension() != "") {
             return httplib::Server::HandlerResponse::Unhandled;
+
           }
           full_path /= "index.html";
 
@@ -109,21 +130,30 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     }
   }
 
+/// @brief Executes Get.
+
   server.Get("/api/components", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/components\n");
     res.set_header("Access-Control-Allow-Origin", "*");
+
     res.set_content(workspace.local_database.dump(), "application/json");
   });
+
+/// @brief Executes Get.
 
   server.Get("/api/projects", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/projects\n");
     res.set_header("Access-Control-Allow-Origin", "*");
+
     res.set_content(ryml::emitrs_json<std::string>(workspace.projects), "application/json");
   });
+
+/// @brief Executes Get.
 
   server.Get("/api/registries", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/registries\n");
     res.set_header("Access-Control-Allow-Origin", "*");
+
     ryml::Tree registries_tree;
     auto root = registries_tree.rootref();
     root |= ryml::MAP;
@@ -136,9 +166,12 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     res.set_content(ryml::emitrs_json<std::string>(registries_tree), "application/json");
   });
 
+/// @brief Executes Get.
+
   server.Get("/api/project/:id", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/project/{}\n", req.path_params.at("id"));
     res.set_header("Access-Control-Allow-Origin", "*");
+
     auto project = req.path_params.at("id");
     if (!workspace.projects.crootref().has_child(c4::to_csubstr(project))) {
       res.status = 404;
@@ -173,16 +206,22 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
       }
 
       // std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+/// @brief Executes set_content.
+
       res.set_content(ryml::emitrs_json<std::string>(project_summary), "application/json"); // Set appropriate Content-Type
     } else {
       res.status = 404;
+
       return;
     }
   });
 
+/// @brief Executes Post.
+
   server.Post("/api/project/:id/data", [&](const httplib::Request &req, httplib::Response &res) {
     res.set_header("Access-Control-Allow-Origin", "*");
     spdlog::get("console")->info("POST /api/project/{}/data\n", req.path_params.at("id"));
+
     auto project_id = req.path_params.at("id");
 
     // Load up project summary and see if the project file exists
@@ -217,9 +256,12 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     }
   });
 
+/// @brief Executes Get.
+
   server.Get("/api/component/:id", [&](const httplib::Request &req, httplib::Response &res) {
     spdlog::info("GET /api/component/{}\n", req.path_params.at("id"));
     res.set_header("Access-Control-Allow-Origin", "*");
+
     auto component      = req.path_params.at("id");
     auto component_path = workspace.local_database.get_component(component);
     if (component_path.has_value()) {
@@ -231,16 +273,22 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
     }
   });
 
+/// @brief Executes set_error_handler.
+
   server.set_error_handler([](const httplib::Request & /*req*/, httplib::Response &res) {
     const char *fmt = "<p>Error Status: <span style='color:red;'>%d</span></p>";
     char buf[BUFSIZ];
+
     snprintf(buf, sizeof(buf), fmt, res.status);
     res.set_content(buf, "text/html");
   });
 
+/// @brief Executes set_logger.
+
   server.set_logger([](const httplib::Request &req, const httplib::Response &res) {
     spdlog::debug(dump_request_response(req, res));
   });
+
 
   spdlog::get("console")->info("Server is running on http://localhost:8080");
   server_running = true;
@@ -248,9 +296,12 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
   server_running = false;
 }
 
+/// @brief Executes dump_headers.
+
 std::string dump_headers(const httplib::Headers &headers)
 {
   std::string s;
+
   char buf[BUFSIZ];
 
   for (auto it = headers.begin(); it != headers.end(); ++it) {
@@ -262,9 +313,12 @@ std::string dump_headers(const httplib::Headers &headers)
   return s;
 }
 
+/// @brief Executes dump_request_response.
+
 std::string dump_request_response(const httplib::Request &req, const httplib::Response &res)
 {
   std::string s;
+
   char buf[BUFSIZ];
 
   s += "================================\n";

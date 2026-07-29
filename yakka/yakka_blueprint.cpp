@@ -1,6 +1,12 @@
+/**
+ * @file yakka_blueprint.cpp
+ * @brief Implements blueprint model parsing and value handling.
+ */
+
 #include "yakka_blueprint.hpp"
 #include "utilities.hpp"
 #include <iostream>
+
 
 namespace yakka {
 blueprint::blueprint(c4::csubstr target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path)
