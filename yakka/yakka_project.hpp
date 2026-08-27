@@ -78,6 +78,7 @@ public:
   void process_construction(indicators::ProgressBar &bar);
   void save_summary();
   void save_blueprints();
+  void load_projects();
 
   void validate_schema();
   void update_project_data();
@@ -113,7 +114,6 @@ public:
   component_database::flag component_flags;
   bool project_has_slcc;
 
-  YAML::Node project_summary_yaml;
   std::string project_directory;
   std::filesystem::path project_summary_file;
   std::filesystem::path project_file;

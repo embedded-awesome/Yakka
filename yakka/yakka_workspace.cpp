@@ -73,9 +73,9 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
   if (auto result = load_config_file(workspace_path / "config.yaml"); !result)
     return std::unexpected(result.error());
 
-  // Determine shared home
+  // Keep the default component store scoped to this workspace.
   if (yakka_shared_home.empty()) {
-    yakka_shared_home = get_yakka_shared_home();
+    yakka_shared_home = workspace_path / ".yakka";
   }
 
   this->shared_components_path = yakka_shared_home;

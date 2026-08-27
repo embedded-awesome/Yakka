@@ -335,9 +335,19 @@ int main(int argc, char **argv)
   }
 
   t1 = std::chrono::high_resolution_clock::now();
-  project.process_blueprints();
 
-  project.save_blueprints();
+  // Check for existing blueprints file
+  if (std::filesystem::exists(project.output_path / "blueprints.json")) {
+    project.blueprint_database.load(project.output_path / "blueprints.json");
+  } else {
+    project.process_blueprints();
+    project.save_blueprints();
+  }
+  t2       = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  spdlog::info("{}ms to process blueprints", duration);
+
+  t1 = t2;
 
   // Ensure all the commands have a blueprint
   spdlog::info("Checking for missing blueprints");
@@ -369,21 +379,42 @@ int main(int argc, char **argv)
       spdlog::info("Did not find a blueprint for {}", c);
     }
   }
-
+  t2       = std::chrono::high_resolution_clock::now();
+  duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  spdlog::info("{}ms to validate blueprints", duration);
+  
+  t1 =t2;
   try {
-    spdlog::debug("Generating target database");
-    project.generate_target_database();
+    if (project.target_database.load(project.output_path / "target_database.json") == yakka::yakka_status::SUCCESS) {
+      // TODO: Sort out additional tools
+      spdlog::info("Loaded target database from {}", (project.output_path / "target_database.json").string());
+    } else {
+      spdlog::info("No target database found. Generating a new one");
+      project.generate_target_database();
+      project.target_database.save(project.output_path / "target_database.json");
+    }
   } catch (const std::exception &e) {
     spdlog::error("Failed to generate target database: {}", e.what());
     return -1;
   }
   t2       = std::chrono::high_resolution_clock::now();
   duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-  spdlog::info("{}ms to process blueprints", duration);
+  spdlog::info("{}ms to process target database", duration);
 
   yakka::task_engine task_engine;
   progress_bar_task_ui progress_bar_ui;
+  bool taskflow_loaded = false;
   try {
+    if (task_engine.load_taskflow(project.output_path / "taskflow.json") == yakka::yakka_status::SUCCESS && 
+        task_engine.load_todolist(project.output_path / "todolist.json", project) == yakka::yakka_status::SUCCESS) {
+      spdlog::info("Loaded taskflow from {}", (project.output_path / "taskflow.json").string());
+      spdlog::info("Loaded todolist from {}", (project.output_path / "todolist.json").string());
+      taskflow_loaded = true;
+    } else {
+      spdlog::info("No taskflow found. Generating a new one");
+      task_engine.create_taskflow(project);
+      task_engine.save_taskflow(project.output_path / "taskflow.json");
+    }
     task_engine.run_taskflow(project, &progress_bar_ui);
   } catch (const std::exception &e) {
     spdlog::error("Running task engine failed: {}", e.what());
@@ -392,6 +423,10 @@ int main(int argc, char **argv)
 
   auto yakka_end_time = fs::file_time_type::clock::now();
   std::cout << "Complete in " << std::chrono::duration_cast<std::chrono::milliseconds>(yakka_end_time - yakka_start_time).count() << " milliseconds" << std::endl;
+
+  // Save the todo list with the current state of the tasks. This allows resuming the build later if needed.
+  if (!taskflow_loaded)
+    task_engine.save_todolist(project.output_path / "todolist.json");
 
   spdlog::shutdown();
   show_console_cursor(true);

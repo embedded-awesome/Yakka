@@ -53,9 +53,11 @@ struct project_description {
   std::vector<ryml::csubstr> features;
 };
 
-enum yakka_status {
+enum class yakka_status {
   SUCCESS = 0,
   FAIL,
+  FILE_NOT_FOUND,
+  LOAD_FAILED,
 };
 
 using component_list_t = std::unordered_set<ryml::csubstr>;

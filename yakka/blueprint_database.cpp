@@ -180,6 +180,38 @@ void blueprint_database::load(const std::filesystem::path filename)
   database = ryml_load_file(filename).value();
 
   // Generate blueprints from database
+  blueprints.clear();
+  for (const auto &blueprint_group: database.rootref().children()) {
+    auto load_blueprint = [&](ryml::ConstNodeRef blueprint_node) {
+      if (!blueprint_node.is_map())
+        return;
+
+      auto target = blueprint_node.has_child("target") ? blueprint_node["target"].val() : blueprint_group.key();
+      auto new_blueprint = std::make_shared<blueprint>(target, blueprint_node, blueprint_node.has_child("parent_path") ? blueprint_node["parent_path"].val() : c4::csubstr{});
+      if (new_blueprint->regex.has_value() && new_blueprint->regex->empty())
+        new_blueprint->regex.reset();
+
+      if (blueprint_node.has_child("dependencies") && blueprint_node["dependencies"].is_seq()) {
+        new_blueprint->dependencies.clear();
+        for (const auto &dependency_node: blueprint_node["dependencies"].children()) {
+          if (!dependency_node.is_map() || !dependency_node.has_child("type") || !dependency_node.has_child("name"))
+            continue;
+
+          auto dependency_type = dependency_node["type"].val<int>().value();
+          new_blueprint->dependencies.push_back({ static_cast<blueprint::dependency::dependency_type>(dependency_type), dependency_node["name"].val() });
+        }
+      }
+
+      blueprints.insert({ target, new_blueprint });
+    };
+
+    if (blueprint_group.is_seq()) {
+      for (const auto &blueprint_node: blueprint_group.children())
+        load_blueprint(blueprint_node);
+    } else {
+      load_blueprint(blueprint_group);
+    }
+  }
 }
 
 void blueprint_database::save(const std::filesystem::path filename)
@@ -190,7 +222,15 @@ void blueprint_database::save(const std::filesystem::path filename)
   output_root |= ryml::MAP;
 
   for (const auto &bp: blueprints) {
-    auto blueprint = output_root.append_child() << ryml::Key(bp.first);
+    ryml::NodeRef blueprint_list;
+    if (output_root.has_child(bp.first)) {
+      blueprint_list = output_root[bp.first];
+    } else {
+      blueprint_list = output_root.append_child() << ryml::Key(bp.first);
+      blueprint_list |= ryml::SEQ;
+    }
+
+    auto blueprint = blueprint_list.append_child();
     blueprint |= ryml::MAP;
     blueprint["target"] << bp.second->target;
     blueprint["regex"] << bp.second->regex.value_or("");

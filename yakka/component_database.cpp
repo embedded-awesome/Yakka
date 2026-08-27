@@ -236,7 +236,7 @@ std::expected<path, std::error_code> component_database::get_component(const std
 std::expected<path, error> component_database::get_component(ryml::csubstr id, flag flags) const
 {
   auto components_node = database["components"];
-  if (!components_node.has_child(id)) {
+  if (!components_node.is_map() || !components_node.has_child(id)) {
     return std::unexpected(std::make_error_code(std::errc::no_such_file_or_directory));
   }
 

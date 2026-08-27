@@ -447,6 +447,26 @@ static std::string u64_to_hex(uint64_t value)
   return out.str();
 }
 
+static std::string u32_to_hex(uint32_t value)
+{
+  std::ostringstream out;
+  out << std::hex << std::setfill('0') << std::setw(8) << value;
+  return out.str();
+}
+
+static uint32_t fnv1a_32_hash(std::string_view input)
+{
+  constexpr uint32_t offset_basis = 0x811C9DC5;
+  constexpr uint32_t prime        = 0x01000193;
+
+  uint32_t hash = offset_basis;
+  for (unsigned char c: input) {
+    hash ^= c;
+    hash *= prime;
+  }
+  return hash;
+}
+
 static std::string template_arg_to_string(ryml::ConstNodeRef arg)
 {
   if (!arg.valid()) {
@@ -475,6 +495,11 @@ void add_common_template_commands(inja::Environment &inja_env)
     const auto input = template_arg_to_string(args[0]);
     const auto hash  = XXH64(input.data(), input.size(), 0);
     return additional_data["values"].append_child() << u64_to_hex(hash);
+  });
+  inja_env.add_callback("fnv1a_32", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+    const auto input = template_arg_to_string(args[0]);
+    const auto hash  = fnv1a_32_hash(input);
+    return additional_data["values"].append_child() << u32_to_hex(hash);
   });
   inja_env.add_callback("dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     auto path = std::filesystem::path{ args[0].val<std::string>().value() };

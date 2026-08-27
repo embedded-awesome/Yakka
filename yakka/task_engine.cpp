@@ -4,6 +4,7 @@
 #include "utilities.hpp"
 #include <future>
 #include <chrono>
+#include <unordered_map>
 
 using namespace std::chrono_literals;
 
@@ -48,6 +49,144 @@ void task_engine::init(task_complete_type task_complete_handler)
   this->task_complete_handler = task_complete_handler;
 }
 
+void task_engine::process_data_dependency(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, project &project, std::filesystem::file_time_type start_time)
+{
+  spdlog::info("{}: data", target_name);
+  auto result = has_data_dependency_changed(target_name, project.previous_summary, project.project_summary);
+  if (result) {
+    construct_task->last_modified = *result ? fs::file_time_type::max() : fs::file_time_type::min();
+  } else {
+    spdlog::error("Data dependency '{}' error: {}", target_name, result.error());
+    return;
+  }
+  if (construct_task->last_modified > start_time)
+    spdlog::info("{} has been updated", target_name);
+}
+
+void task_engine::update_file_timestamp(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name)
+{
+  construct_task->last_modified = fs::last_write_time(target_name);
+  // spdlog::info("{}: timestamp {}", target_name, (uint)construct_task->last_modified.time_since_epoch().count());
+}
+
+void task_engine::process_task(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, task_engine &engine, project &project)
+{
+  if (engine.abort_build)
+    return;
+  // spdlog::info("{}: process --- {}", target_name, construct_task->task.hash_value());
+  if (construct_task->last_modified != fs::file_time_type::min()) {
+    spdlog::info("{} already done", target_name);
+    return;
+  }
+  if (fs::exists(target_name))
+    construct_task->last_modified = fs::last_write_time(target_name);
+  if (construct_task->match) {
+    if (construct_task->match->dependencies.size() == 0) {
+      if (!fs::exists(target_name)) {
+        try {
+          auto result                   = engine.run_command(target_name, construct_task->match, project, project.project_summary["data"]);
+          construct_task->last_modified = fs::file_time_type::clock::now();
+          if (result.second != 0) {
+            spdlog::info("Aborting: {} returned {}", target_name, result.second);
+            engine.abort_build = true;
+            return;
+          }
+        } catch (const std::exception &e) {
+          spdlog::error("Error running command for {}: {}", target_name, e.what());
+          engine.abort_build = true;
+          return;
+        }
+      }
+    } else if (construct_task->match->blueprint->process.valid()) {
+      auto max_element = engine.todo_list.end();
+      for (auto j: construct_task->match->dependencies) {
+        auto temp         = engine.todo_list.equal_range(j);
+        if (temp.first == temp.second) {
+          continue;
+        }
+        auto temp_element = std::max_element(temp.first, temp.second, [](auto const &i, auto const &j) {
+          return i.second->last_modified < j.second->last_modified;
+        });
+        if (max_element == engine.todo_list.end() || temp_element->second->last_modified > max_element->second->last_modified)
+          max_element = temp_element;
+      }
+      if (!fs::exists(target_name) || max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch()) {
+        spdlog::info("{}: Updating because of {}", target_name, max_element->first);
+        try {
+          auto [output, retcode]        = engine.run_command(target_name, construct_task->match, project, project.project_summary["data"]);
+          construct_task->last_modified = fs::file_time_type::clock::now();
+          if (retcode < 0) {
+            spdlog::info("Aborting: {} returned {}", target_name, retcode);
+            engine.abort_build = true;
+            return;
+          }
+        } catch (const std::exception &e) {
+          spdlog::error("Error running command for {}: {}", target_name, e.what());
+          engine.abort_build = true;
+          return;
+        }
+      }
+    }
+  }
+#if USING_THE_OLD_TASK_COMPLETE_HANDLER
+  if (engine.task_complete_handler)
+    engine.task_complete_handler(construct_task->group);
+#else
+  ++construct_task->group->current_count;
+#endif
+}
+
+std::shared_ptr<construction_task> task_engine::create_task_leaf_node(ryml::csubstr target_name, yakka::project &project, std::filesystem::file_time_type start_time)
+{
+  // spdlog::info("Creating node {}: leaf node", target_name);
+  auto construct_task = std::make_shared<construction_task>();
+  todo_list.insert(std::make_pair(target_name, construct_task));
+  const std::string target_name_string = ryml_string(target_name);
+  construct_task->task                 = taskflow.placeholder().name(target_name_string);
+
+  // Check if target is a data dependency
+  if (target_name.front() == data_dependency_identifier) {
+    construct_task->task.work(std::function<void()>(std::bind(&task_engine::process_data_dependency, construct_task, target_name_string, std::ref(project), start_time)));
+  }
+  // Check if target name matches an existing file in filesystem
+  else if (fs::exists(target_name_string)) {
+    // Create a new task to retrieve the file timestamp
+    construct_task->task.work(std::function<void()>(std::bind(&task_engine::update_file_timestamp, construct_task, target_name_string)));
+  } else {
+    spdlog::info("Target {} has no action", target_name_string);
+  }
+  // construct_task->task.precede(parent);
+  // new_todo->second.task = task;
+  return construct_task;
+}
+
+std::shared_ptr<construction_task> task_engine::create_task_node(ryml::csubstr target_name, yakka::project &project, std::shared_ptr<blueprint_match> i, const std::string &target_name_string)
+{
+  // spdlog::info("Creating node {}: Not a leaf node", target_name);
+  // ++work_task_count;
+  auto construct_task = std::make_shared<construction_task>();
+  todo_list.insert(std::make_pair(target_name, construct_task));
+  construct_task->match = i;
+
+  if (i->blueprint->task_group.empty()) {
+    construct_task->group = todo_task_groups["Processing"];
+  } else {
+    if (todo_task_groups.contains(i->blueprint->task_group))
+      construct_task->group = todo_task_groups[i->blueprint->task_group];
+    else {
+      construct_task->group                      = std::make_shared<yakka::task_group>(i->blueprint->task_group);
+      todo_task_groups[i->blueprint->task_group] = construct_task->group;
+    }
+  }
+  ++construct_task->group->total_count;
+
+  construct_task->task = taskflow.placeholder().name(target_name_string);
+  construct_task->task.work(std::function<void()>(std::bind(&task_engine::process_task, construct_task, target_name_string, std::ref(*this), std::ref(project))));
+  // new_todo->second.task = task;
+
+  return construct_task;
+}
+
 void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakka::project &project)
 {
   const std::string target_name_string = ryml_string(target_name);
@@ -57,7 +196,7 @@ void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakk
   if (target_name.empty()) {
     spdlog::error("Empty target name");
   }
-  //spdlog::info("Create tasks for: {}", target_name);
+  spdlog::info("Create tasks for: {}", target_name);
 
   // Check if this target has already been processed
   const auto &existing_todo = todo_list.equal_range(target_name);
@@ -76,152 +215,20 @@ void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakk
 
   // If there is no targets then it must be a leaf node (source file, data dependency, etc)
   if (targets.empty()) {
-    //spdlog::info("{}: leaf node", target_name);
-    auto construct_task = std::make_shared<construction_task>();
-    todo_list.insert(std::make_pair(target_name, construct_task));
-    construct_task->task = taskflow.placeholder().name(target_name_string);
-
-    // Check if target is a data dependency
-    if (target_name.front() == data_dependency_identifier) {
-      construct_task->task.work([&, construct_task, target_name_string]() {
-        // spdlog::info("{}: data", target_name);
-        // auto d     = static_cast<std::shared_ptr<construction_task>>(task.data());
-        auto result = has_data_dependency_changed(target_name_string, project.previous_summary, project.project_summary);
-        if (result) {
-          construct_task->last_modified = *result ? fs::file_time_type::max() : fs::file_time_type::min();
-        } else {
-          spdlog::error("Data dependency '{}' error: {}", target_name_string, result.error());
-          return;
-        }
-        if (construct_task->last_modified > start_time)
-          spdlog::info("{} has been updated", target_name_string);
-        return;
-      });
-    }
-    // Check if target name matches an existing file in filesystem
-    else if (fs::exists(target_name_string)) {
-      // Create a new task to retrieve the file timestamp
-      construct_task->task.work([construct_task, target_name_string]() {
-        // uint8_t hash[32];
-        // hash_file(target_name, hash);
-        construct_task->last_modified = fs::last_write_time(target_name_string);
-        //spdlog::info("{}: timestamp {}", target_name, (uint)d->last_modified.time_since_epoch().count());
-        return;
-      });
-    } else {
-      spdlog::info("Target {} has no action", target_name_string);
-    }
+    auto construct_task = create_task_leaf_node(target_name, project, start_time);
     construct_task->task.precede(parent);
-    // new_todo->second.task = task;
-    return;
-  }
+  } else {
+    for (const auto &i: targets) {
+      auto construct_task = create_task_node(target_name, project, i, target_name_string);
+      construct_task->task.precede(parent);
 
-  for (const auto &i: targets) {
-    // spdlog::info("{}: Not a leaf node", target_name);
-    // ++work_task_count;
-    auto construct_task = std::make_shared<construction_task>();
-    todo_list.insert(std::make_pair(target_name, construct_task));
-    construct_task->match = i;
-
-    if (i->blueprint->task_group.empty()) {
-      construct_task->group = todo_task_groups["Processing"];
-    } else {
-      if (todo_task_groups.contains(i->blueprint->task_group))
-        construct_task->group = todo_task_groups[i->blueprint->task_group];
-      else {
-        construct_task->group                      = std::make_shared<yakka::task_group>(i->blueprint->task_group);
-        todo_task_groups[i->blueprint->task_group] = construct_task->group;
-      }
+      // For each dependency described in blueprint, retrieve or create task, add relationship, and add item to todo list
+      if (i)
+        for (auto &dep_target: i->dependencies)
+          create_tasks(dep_target.first(2) == "./" ? dep_target.sub(dep_target.first_not_of('/', 2)) : dep_target, construct_task->task, project);
+      // else
+      //     spdlog::info("{} does not have blueprint match", i->first);
     }
-    ++construct_task->group->total_count;
-
-    construct_task->task = taskflow.placeholder().name(target_name_string);
-
-    construct_task->task.work([construct_task, target_name_string, this, i, &project]() {
-      if (abort_build)
-        return;
-      // spdlog::info("{}: process --- {}", target_name, task.hash_value());
-      if (construct_task->last_modified != fs::file_time_type::min()) {
-        // I don't think this event happens. This check can probably be removed
-        spdlog::info("{} already done", target_name_string);
-        return;
-      }
-      if (fs::exists(target_name_string)) {
-        construct_task->last_modified = fs::last_write_time(target_name_string);
-        // spdlog::info("{}: timestamp {}", target_name, (uint)d->last_modified.time_since_epoch().count());
-      }
-      if (construct_task->match) {
-        // Check if there are no dependencies
-        if (construct_task->match->dependencies.size() == 0) {
-          // If it doesn't exist as a file, run the command
-          if (!fs::exists(target_name_string)) {
-            try {
-              auto result                   = run_command(target_name_string, construct_task->match, project, project.project_summary["data"]);
-              construct_task->last_modified = fs::file_time_type::clock::now();
-              if (result.second != 0) {
-                spdlog::info("Aborting: {} returned {}", target_name_string, result.second);
-                abort_build = true;
-                return;
-              }
-            } catch (const std::exception &e) {
-              spdlog::error("Error running command for {}: {}", target_name_string, e.what());
-              abort_build = true;
-              return;
-            }
-          }
-        } else if (construct_task->match->blueprint->process.valid()) {
-          auto max_element = todo_list.end();
-          for (auto j: construct_task->match->dependencies) {
-            auto temp         = todo_list.equal_range(j);
-            auto temp_element = std::max_element(temp.first, temp.second, [](auto const &i, auto const &j) {
-              return i.second->last_modified < j.second->last_modified;
-            });
-            //spdlog::info("{}: Check max element {}: {} vs {}", target_name, temp_element->first, (int64_t)temp_element->second.last_modified.time_since_epoch().count(), (int64_t)max_element->second.last_modified.time_since_epoch().count());
-            if (max_element == todo_list.end() || temp_element->second->last_modified > max_element->second->last_modified) {
-              max_element = temp_element;
-            }
-          }
-          //spdlog::info("{}: Max element is {}", target_name, max_element->first);
-          if (!fs::exists(target_name_string) || max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch()) {
-            spdlog::info("{}: Updating because of {}", target_name_string, max_element->first);
-            try {
-              auto [output, retcode]        = run_command(target_name_string, construct_task->match, project, project.project_summary["data"]);
-              construct_task->last_modified = fs::file_time_type::clock::now();
-              if (retcode < 0) {
-                spdlog::info("Aborting: {} returned {}", target_name_string, retcode);
-                abort_build = true;
-                return;
-              }
-            } catch (const std::exception &e) {
-              spdlog::error("Error running command for {}: {}", target_name_string, e.what());
-              abort_build = true;
-              return;
-            }
-          }
-        } else {
-          //spdlog::info("{} has no process", target_name_string);
-        }
-      }
-#if USING_THE_OLD_TASK_COMPLETE_HANDLER
-      if (task_complete_handler) {
-        task_complete_handler(d->group);
-      }
-#else
-      ++construct_task->group->current_count;
-#endif
-
-      return;
-    });
-
-    construct_task->task.precede(parent);
-    // new_todo->second.task = task;
-
-    // For each dependency described in blueprint, retrieve or create task, add relationship, and add item to todo list
-    if (i)
-      for (auto &dep_target: i->dependencies)
-        create_tasks(dep_target.first(2) == "./" ? dep_target.sub(dep_target.first_not_of('/', 2)) : dep_target, construct_task->task, project);
-    // else
-    //     spdlog::info("{} does not have blueprint match", i->first);
   }
 }
 
@@ -229,7 +236,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 {
   std::string captured_output = "";
   inja::Environment inja_env;
-  auto curdir_path     = blueprint->blueprint->parent_path;
+  auto curdir_path = blueprint->blueprint->parent_path;
 
   add_common_template_commands(inja_env);
   inja_env.add_callback("$", 1, [&blueprint](inja::Arguments &args, ryml::NodeRef additional_data) {
@@ -334,7 +341,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       // std::string command_name;
       // c4::from_chars(command.key(), &command_name);
       const auto command_name = command.key();
-      int retcode = 0;
+      int retcode             = 0;
 
       try {
         if (project.project_summary["tools"].has_child(command_name)) {
@@ -385,9 +392,8 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   return { captured_output, 0 };
 }
 
-void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
+void task_engine::create_taskflow(yakka::project &project)
 {
-  tf::Executor executor(std::min(32U, std::thread::hardware_concurrency()));
   todo_task_groups["Processing"] = std::make_shared<yakka::task_group>("Processing");
   auto finish                    = taskflow.emplace([&]() {
     // execution_progress = 100;
@@ -411,14 +417,19 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
   auto t2       = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to create tasks", duration);
+}
 
-  t1 = std::chrono::high_resolution_clock::now();
+void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
+{
+  tf::Executor executor(std::min(32U, std::thread::hardware_concurrency()));
+
+  auto t1 = std::chrono::high_resolution_clock::now();
   if (!is_valid()) {
     spdlog::error("Blueprints have circular dependency");
     return;
   }
-  t2       = std::chrono::high_resolution_clock::now();
-  duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  auto t2       = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to validate task graph", duration);
 
   ui->init(*this);
@@ -430,6 +441,332 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
   } while (execution_future.wait_for(500ms) != std::future_status::ready);
 
   ui->finish(*this);
+}
+
+void task_engine::save_todolist(const std::filesystem::path &filename)
+{
+  ryml::Tree output;
+  auto root = output.rootref();
+  root |= ryml::MAP;
+  root["version"] << 1;
+
+  auto serialized_items = root["items"];
+  serialized_items |= ryml::MAP;
+
+  for (const auto &[target_name, construct_task]: todo_list) {
+    auto item = serialized_items[target_name];
+    item |= ryml::MAP;
+
+    if (construct_task) {
+      item["task_name"] << construct_task->task.name();
+      item["task_hash"] << construct_task->task.hash_value();
+      item["last_modified"] << static_cast<int64_t>(construct_task->last_modified.time_since_epoch().count());
+      item["has_match"] << static_cast<int>(construct_task->match != nullptr);
+
+      auto group_name = item["group_name"];
+      if (construct_task->group) {
+        group_name << ryml_string(construct_task->group->name);
+        item["group_total_count"] << construct_task->group->total_count;
+        item["group_current_count"] << construct_task->group->current_count.load();
+      } else {
+        group_name << "";
+        item["group_total_count"] << 0;
+        item["group_current_count"] << 0;
+      }
+      item["successors"] |= ryml::SEQ;
+      construct_task->task.for_each_successor([&](tf::Task successor) {
+        item["successors"].append_child() << successor.name();
+      });
+    } else {
+      item["task_name"] << "";
+      item["task_hash"] << 0;
+      item["last_modified"] << 0;
+      item["has_match"] << 0;
+      item["group_name"] << "";
+      item["group_total_count"] << 0;
+      item["group_current_count"] << 0;
+    }
+  }
+
+  std::ofstream file(filename, std::ios::binary | std::ios::trunc);
+  if (!file) {
+    spdlog::error("Failed to open todo list file '{}' for writing", filename.string());
+    return;
+  }
+
+  file << ryml::emitrs_json<std::string>(output);
+  if (!file)
+    spdlog::error("Failed to write todo list file '{}'", filename.string());
+}
+
+std::shared_ptr<yakka::construction_task> task_engine::build_tasks_from_todo_list(const c4::yml::NodeRef &item, yakka::project &project, std::filesystem::file_time_type start_time)
+{
+  const auto target_name        = item.key();
+  const auto target_name_string = ryml_string(target_name);
+  const auto has_match          = item["has_match"].val<bool>();
+
+  // If it has a match, retrieve the blueprint match from the project target database
+  std::shared_ptr<blueprint_match> match = nullptr;
+  if (has_match) {
+    const auto &targets = project.target_database.get_target(target_name);
+    for (const auto &i: targets) {
+      if (i) {
+        match = i;
+        break;
+      }
+    }
+  }
+
+  // Create a node for the current match
+  auto construct_task = (!has_match || match == nullptr) ? create_task_leaf_node(target_name, project, start_time) : create_task_node(target_name, project, match, target_name_string);
+
+  // Create parent nodes
+  if (item.has_child("successors") && item["successors"].is_seq()) {
+    for (const auto successor: item["successors"].children()) {
+      if (!successor.has_val())
+        continue;
+      const auto successor_name = successor.val();
+      if (successor_name.empty())
+        continue;
+
+      const auto successor_item = todo_list_tree.rootref()["items"][successor_name];
+
+      const auto successor_task = build_tasks_from_todo_list(successor_item, project, start_time);
+      if (successor_task)
+        construct_task->task.precede(successor_task->task);
+    }
+  }
+  return construct_task;
+}
+
+yakka_status task_engine::load_todolist(const std::filesystem::path &filename, yakka::project &project)
+{
+  if (!fs::exists(filename)) {
+    return yakka_status::FILE_NOT_FOUND;
+  }
+
+  todo_list_tree = ryml_load_file(filename).value();
+  if (todo_list_tree.empty()) {
+    spdlog::error("Failed to load todo list file '{}'", filename.string());
+    return yakka_status::FAIL;
+  }
+
+  auto root = todo_list_tree.rootref();
+  if (!root.is_map() || !root.has_child("version") || !root.has_child("items")) {
+    spdlog::error("Todo list file '{}' has an invalid root", filename.string());
+    return yakka_status::FAIL;
+  }
+
+  const auto version = root["version"].val<int>();
+  if (!version || *version != 1) {
+    spdlog::error("Todo list file '{}' has an unsupported version", filename.string());
+    return yakka_status::FAIL;
+  }
+
+  auto serialized_items = root["items"];
+  if (!serialized_items.is_map()) {
+    spdlog::error("Todo list file '{}' has an invalid items map", filename.string());
+    return yakka_status::FAIL;
+  }
+
+  todo_list.clear();
+  todo_task_groups.clear();
+  todo_task_groups["Processing"] = std::make_shared<yakka::task_group>("Processing");
+  // auto finish                    = taskflow.emplace([&]() {
+  //   // execution_progress = 100;
+  // });
+  // auto start_time = std::filesystem::file_time_type::clock::now();
+
+  const auto is_valid_item = [&](const ryml::NodeRef &item) -> bool {
+    return item.is_map() && item.has_key() && !item.key().empty();
+  };
+
+  const auto has_item_changed = [&](const ryml::NodeRef &item) -> bool {
+    const auto target_name        = ryml_string(item.key());
+    const auto last_modified      = fs::file_time_type{ fs::file_time_type::duration(item["last_modified"].val<int64_t>().value_or(0)) };
+    const auto file_last_modified = fs::exists(target_name) ? fs::last_write_time(target_name) : fs::file_time_type::min();
+    return file_last_modified > last_modified;
+  };
+
+  auto start_time = std::filesystem::file_time_type::clock::now();
+
+  for (const auto serialized_item: serialized_items.children()) {
+    if (!is_valid_item(serialized_item)) {
+      spdlog::warn("Skipping invalid todo list item");
+      continue;
+    }
+    if (!has_item_changed(serialized_item)) {
+      continue;
+    }
+
+    build_tasks_from_todo_list(serialized_item, project, start_time);
+
+    // const auto target_name        = serialized_item["target"].val();
+    // const auto target_name_string = ryml_string(target_name);
+    // const auto has_match          = serialized_item["has_match"].val<bool>();
+
+    // if (!has_match) {
+    //   auto construct_task = create_task_leaf_node(target_name, project, start_time);
+    //   construct_task->task.precede(finish);
+    // } else {
+    //   auto construct_task = create_task_node(target_name, project, target_name_string);
+    //   construct_task->task.precede(finish);
+    // }
+
+    // auto construct_task = std::make_shared<construction_task>();
+    // if (serialized_item.has_child("task_name") && serialized_item["task_name"].has_val()) {
+    //   const auto task_name = ryml_string(serialized_item["task_name"].val());
+    //   construct_task->task = restore_task(task_name);
+    // }
+
+    // const auto last_modified = serialized_item.has_child("last_modified") ? serialized_item["last_modified"].val<int64_t>() : std::optional<int64_t>{};
+    // if (last_modified)
+    //   construct_task->last_modified = fs::file_time_type{ fs::file_time_type::duration(*last_modified) };
+
+    // std::string group_name = "Processing";
+    // if (serialized_item.has_child("group_name") && serialized_item["group_name"].has_val())
+    //   group_name = ryml_string(serialized_item["group_name"].val());
+    // if (group_name.empty())
+    //   group_name = "Processing";
+
+    // const auto group_key = [&]() {
+    //   persistent_strings.emplace_back(group_name);
+    //   const auto &value = persistent_strings.back();
+    //   return ryml::csubstr{ value.data(), value.size() };
+    // }();
+
+    // if (!todo_task_groups.contains(group_key)) {
+    //   auto group = std::make_shared<task_group>(group_key);
+    //   if (serialized_item.has_child("group_total_count"))
+    //     group->total_count = serialized_item["group_total_count"].val<int>().value_or(0);
+    //   if (serialized_item.has_child("group_current_count"))
+    //     group->current_count = serialized_item["group_current_count"].val<int>().value_or(0);
+    //   todo_task_groups[group_key] = group;
+    //   construct_task->group       = group;
+    // } else {
+    //   construct_task->group = todo_task_groups[group_key];
+    // }
+
+    // todo_list.emplace(target_key, construct_task);
+
+    // if (serialized_item.has_child("successors") && serialized_item["successors"].is_seq()) {
+    //   for (const auto serialized_successor: serialized_item["successors"].children()) {
+    //     if (!serialized_successor.has_val())
+    //       continue;
+    //     const auto successor_name = ryml_string(serialized_successor.val());
+    //     if (successor_name.empty())
+    //       continue;
+    //     const auto successor_task = restore_task(successor_name);
+    //     if (!successor_task.empty())
+    //       construct_task->task.precede(successor_task);
+    //   }
+    // }
+  }
+
+  return yakka_status::SUCCESS;
+}
+
+void task_engine::save_taskflow(const std::filesystem::path &filename)
+{
+  ryml::Tree output;
+  auto root = output.rootref();
+  root |= ryml::MAP;
+  root["version"] << 1;
+
+  auto serialized_tasks = root["tasks"];
+  serialized_tasks |= ryml::SEQ;
+
+  std::vector<tf::Task> tasks;
+  std::unordered_map<tf::Task, size_t> task_ids;
+  taskflow.for_each_task([&](tf::Task task) {
+    task_ids.emplace(task, tasks.size());
+    tasks.push_back(task);
+  });
+
+  for (const auto &task: tasks) {
+    auto serialized_task = serialized_tasks.append_child();
+    serialized_task |= ryml::MAP;
+    serialized_task["name"] << task.name();
+
+    auto successors = serialized_task["successors"];
+    successors |= ryml::SEQ;
+    task.for_each_successor([&](tf::Task successor) {
+      successors.append_child() << task_ids.at(successor);
+    });
+  }
+
+  std::ofstream file(filename, std::ios::binary | std::ios::trunc);
+  if (!file) {
+    spdlog::error("Failed to open taskflow file '{}' for writing", filename.string());
+    return;
+  }
+
+  file << ryml::emitrs_json<std::string>(output);
+  if (!file)
+    spdlog::error("Failed to write taskflow file '{}'", filename.string());
+}
+
+yakka_status task_engine::load_taskflow(const std::filesystem::path &filename)
+{
+  if (!fs::exists(filename)) {
+    return yakka_status::FILE_NOT_FOUND;
+  }
+  auto serialized = ryml_load_file(filename);
+  if (!serialized) {
+    spdlog::error("Failed to load taskflow file '{}': {}", filename.string(), serialized.error().message());
+    return yakka_status::FAIL;
+  }
+
+  auto root = serialized->rootref();
+  if (!root.is_map() || !root.has_child("version") || !root.has_child("tasks")) {
+    spdlog::error("Taskflow file '{}' has an invalid root", filename.string());
+    return yakka_status::FAIL;
+  }
+
+  const auto version = root["version"].val<int>();
+  if (!version || *version != 1) {
+    spdlog::error("Taskflow file '{}' has an unsupported version", filename.string());
+    return yakka_status::FAIL;
+  }
+
+  auto serialized_tasks = root["tasks"];
+  if (!serialized_tasks.is_seq()) {
+    spdlog::error("Taskflow file '{}' has an invalid tasks list", filename.string());
+    return yakka_status::FAIL;
+  }
+
+  tf::Taskflow loaded_taskflow;
+  std::vector<tf::Task> tasks;
+  tasks.reserve(serialized_tasks.num_children());
+
+  for (const auto serialized_task: serialized_tasks.children()) {
+    if (!serialized_task.is_map() || !serialized_task.has_child("name") || !serialized_task["name"].has_val() || !serialized_task.has_child("successors") || !serialized_task["successors"].is_seq()) {
+      spdlog::error("Taskflow file '{}' contains an invalid task", filename.string());
+      return yakka_status::FAIL;
+    }
+
+    tasks.push_back(loaded_taskflow.placeholder().name(ryml_string(serialized_task["name"].val())));
+  }
+
+  size_t task_id = 0;
+  for (const auto serialized_task: serialized_tasks.children()) {
+    std::unordered_set<size_t> seen_successors;
+    for (const auto serialized_successor: serialized_task["successors"].children()) {
+      const auto successor_id = serialized_successor.val<size_t>();
+      if (!successor_id || *successor_id >= tasks.size() /*|| !seen_successors.insert(*successor_id).second*/) {
+        spdlog::error("Taskflow file '{}' contains an invalid successor", filename.string());
+        return yakka_status::FAIL;
+      }
+      tasks[task_id].precede(tasks[*successor_id]);
+    }
+    ++task_id;
+  }
+
+  taskflow = std::move(loaded_taskflow);
+  todo_list.clear();
+  todo_task_groups.clear();
+
+  return yakka_status::SUCCESS;
 }
 
 } // namespace yakka

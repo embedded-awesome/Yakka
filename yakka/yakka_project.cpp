@@ -65,8 +65,16 @@ void project::set_project_directory(const std::string path)
   project_directory = path;
 }
 
+void project::parse_project_string(const std::vector<std::string> &project_string)
+{
+  init_project(project_string);
+}
+
 void project::process_build_string(const std::string word)
 {
+  if (word.empty())
+    return;
+
   // Identify features, commands, and components
   if (word.front() == '+') {
     auto feature_node = project_data["initial_features"].append_child() << word.substr(1);
@@ -100,7 +108,8 @@ void project::init_project(const std::string build_string)
 
 void project::init_project(std::vector<ryml::csubstr> components, std::vector<ryml::csubstr> features, std::unordered_set<ryml::csubstr> commands)
 {
-  initial_features = features;
+  initial_features.clear();
+  initial_components.clear();
 
   for (const auto &c: components) {
     unprocessed_components.insert(c);
@@ -121,7 +130,8 @@ void project::init_project()
     // Generate a project name based on the components and features
     for (auto c: initial_components)
       project_name += ryml_string(c) + "-";
-    project_name.pop_back();
+    if (!initial_components.empty())
+      project_name.pop_back();
     for (auto f: initial_features)
       project_name += "+" + ryml_string(f);
 
@@ -337,6 +347,7 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
   if (new_component->parse_file(component_path, package_path, new_component_node) == yakka::yakka_status::SUCCESS) {
     components.push_back(new_component);
   } else {
+    project_summary["components"].remove_child(component_id);
     current_state = project::state::PROJECT_HAS_INVALID_COMPONENT;
     return false;
   }
@@ -436,7 +447,7 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
     }
 
   if (new_component->root.contains(_replaces_components_pointer)) {
-    const auto &replaced = new_component->root["replaces"]["component"].val();
+    const auto &replaced = new_component->root["replaces"]["components"].val();
 
     if (replacements.contains(replaced)) {
       if (replacements[replaced] != component_id) {
@@ -958,6 +969,8 @@ void project::save_summary()
       // if (patch.size() == 0) {
       //   return;
       // }
+      if (!template_contributions.empty())
+        ryml_save_file(template_contribution_filename, template_contributions);
     }
   } else {
     // Create the template contributions file
@@ -1262,78 +1275,78 @@ void project::process_slc_rules()
         else
           create_config_file(c, config, instance_prefix, instance_prefix);
       }
+    }
 
-      // Process 'template_file'
-      if (c->root.contains("template_file")) {
-        for (auto t: c->root["template_file"]) {
-          if (is_disqualified_by_unless(t) || !condition_is_fulfilled(t))
-            continue;
+    // Process template_file
+    if (c->root.contains("template_file")) {
+      for (auto t: c->root["template_file"]) {
+        if (is_disqualified_by_unless(t) || !condition_is_fulfilled(t))
+          continue;
 
-          std::filesystem::path template_file = t["path"].val<std::string>().value();
-          std::filesystem::path target_file   = template_file.filename();
-          target_file.replace_extension();
+        std::filesystem::path template_file = t["path"].val<std::string>().value();
+        std::filesystem::path target_file   = template_file.filename();
+        target_file.replace_extension();
 
-          auto target = "{{project_output}}/generated/" + target_file.string();
+        auto target = "{{project_output}}/generated/" + target_file.string();
 
-          if (target_file.extension() == ".c" || target_file.extension() == ".cpp")
-            c->root["generated"]["sources"].append_child() << target;
-          else if (target_file.extension() == ".h" || target_file.extension() == ".hpp")
-            c->root["generated"]["includes"].append_child() << target;
-          else if (target_file.extension() == ".ld")
-            c->root["generated"]["linker_script"].append_child() << target;
-          else
-            c->root["generated"]["files"].append_child() << target;
+        if (target_file.extension() == ".c" || target_file.extension() == ".cpp")
+          c->root["generated"]["sources"].append_child() << target;
+        else if (target_file.extension() == ".h" || target_file.extension() == ".hpp")
+          c->root["generated"]["includes"].append_child() << target;
+        else if (target_file.extension() == ".ld")
+          c->root["generated"]["linker_script"].append_child() << target;
+        else
+          c->root["generated"]["files"].append_child() << target;
 
-          // Create blueprints
-          auto blueprint = c->root["blueprints"].append_child() << ryml::key(target);
-          blueprint |= ryml::MAP;
-          blueprint["depends"] |= ryml::SEQ;
-          blueprint["process"] |= ryml::SEQ;
-          blueprint["depends"].append_child() << c->root["directory"].val<std::string>().value() + "/" + template_file.string();
-          blueprint["depends"].append_child() << "{{project_output}}/template_contributions.json";
-          blueprint["process"].append_child() << ryml::key("jinja") << "-t " + c->root["directory"].val<std::string>().value() + "/" + template_file.string() + " -d {{project_output}}/template_contributions.json";
-          blueprint["process"].append_child() << ryml::key("save");
+        // Create blueprints
+        auto blueprint = c->root["blueprints"].append_child() << ryml::key(target);
+        blueprint |= ryml::MAP;
+        blueprint["depends"] |= ryml::SEQ;
+        blueprint["process"] |= ryml::SEQ;
+        blueprint["depends"].append_child() << c->root["directory"].val<std::string>().value() + "/" + template_file.string();
+        blueprint["depends"].append_child() << "{{project_output}}/template_contributions.json";
+        blueprint["process"].append_child() << ryml::key("jinja") << "-t " + c->root["directory"].val<std::string>().value() + "/" + template_file.string() + " -d {{project_output}}/template_contributions.json";
+        blueprint["process"].append_child() << ryml::key("save");
 
-          // c->root["blueprints"][target] = blueprint;
-        }
-      }
-
-      // Process special toolchain settings
-      if (c->root.contains("toolchain_settings")) {
-        for (const auto &s: c->root["toolchain_settings"]) {
-          if (s["option"] == "linkerfile") {
-            if (is_disqualified_by_unless(s) || !condition_is_fulfilled(s))
-              continue;
-
-            c->root["generated"]["linker_script"] << "{{project_output}}/generated/" + std::filesystem::path{ s["value"].val<std::string>().value() }.filename().string();
-          }
-        }
+        // c->root["blueprints"][target] = blueprint;
       }
     }
 
-    // Process toolchain settings
-    project_summary["toolchain_settings"] |= ryml::MAP;
-    for (const auto &c: components) {
-      if (c->root.contains("toolchain_settings") == false)
+    // Process special toolchain settings
+    if (c->root.contains("toolchain_settings")) {
+      for (const auto &s: c->root["toolchain_settings"]) {
+        if (s["option"] == "linkerfile") {
+          if (is_disqualified_by_unless(s) || !condition_is_fulfilled(s))
+            continue;
+
+          c->root["generated"]["linker_script"] << "{{project_output}}/generated/" + std::filesystem::path{ s["value"].val<std::string>().value() }.filename().string();
+        }
+      }
+    }
+  }
+
+  // Process toolchain settings
+  project_summary["toolchain_settings"] |= ryml::MAP;
+  for (const auto &c: components) {
+    if (c->root.contains("toolchain_settings") == false)
+      continue;
+
+    for (const auto &s: c->root["toolchain_settings"]) {
+      if (is_disqualified_by_unless(s) || !condition_is_fulfilled(s))
         continue;
 
-      for (const auto &s: c->root["toolchain_settings"]) {
-        if (is_disqualified_by_unless(s) || !condition_is_fulfilled(s))
-          continue;
-
-        const auto key = s["option"].val();
-        if (project_summary["toolchain_settings"].contains(key))
-          if (project_summary["toolchain_settings"][key].is_seq())
-            project_summary["toolchain_settings"][key].append_child() << s["value"].val();
-          else {
-            auto current_value = project_summary["toolchain_settings"][key].val();
-            project_summary["toolchain_settings"][key].set_type(ryml::SEQ);
-            project_summary["toolchain_settings"][key].append_child() << current_value;
-            project_summary["toolchain_settings"][key].append_child() << s["value"].val();
-          }
-        else
-          project_summary["toolchain_settings"][key] << s["value"].val();
-      }
+      const auto key = s["option"].val();
+      if (project_summary["toolchain_settings"].contains(key))
+        if (project_summary["toolchain_settings"][key].is_seq())
+          project_summary["toolchain_settings"][key].append_child() << s["value"].val();
+        else {
+          auto current_value = project_summary["toolchain_settings"][key].val();
+          project_summary["toolchain_settings"][key].set_type(ryml::SEQ);
+          project_summary["toolchain_settings"][key].append_child() << current_value;
+          project_summary["toolchain_settings"][key].append_child() << s["value"].val();
+        }
+      else
+        project_summary["toolchain_settings"][key] << s["value"].val();
     }
   }
 
@@ -1369,6 +1382,10 @@ void project::process_blueprints(const std::shared_ptr<component> c)
   if (c->root.contains("blueprints") and c->root["blueprints"].has_children()) {
     for (auto b: c->root["blueprints"].children()) {
       std::string blueprint_string = try_render(inja_environment, b.has_child("regex") ? b["regex"].val() : b.key(), project_summary);
+      if (blueprint_string.empty()) {
+        spdlog::error("Invalid empty blueprint generated from component '{}'", c->id);
+        continue;
+      }
       if (blueprint_string[0] == data_dependency_identifier && !blueprint_string.starts_with(":/data/")) {
         spdlog::error("Invalid data blueprint: {}", blueprint_string);
         continue;
@@ -1400,9 +1417,22 @@ void project::process_tools(const std::shared_ptr<component> c)
   }
 }
 
+void project::load_projects()
+{
+  if (!fs::exists(this->output_path / "blueprints.json"))
+    return;
+
+  blueprint_database.load(this->output_path / "blueprints.json");
+}
+
 void project::save_blueprints()
 {
   blueprint_database.save(this->output_path / "blueprints.json");
+}
+
+void project::process_construction(indicators::ProgressBar &bar)
+{
+  (void)bar;
 }
 
 void project::add_additional_tool(const std::filesystem::path component_path)
