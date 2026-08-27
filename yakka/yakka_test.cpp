@@ -1,10 +1,19 @@
+/**
+ * @file yakka_test.cpp
+ * @brief Implements Yakka test command and project-level test integration helpers.
+ */
+
 #include "yakka_project.hpp"
 #include "spdlog/spdlog.h"
 #include "taskflow.hpp"
 
+
+/// @brief Executes main.
+
 int main(int argc, char **argv)
 {
   auto console = spdlog::stderr_color_mt("yakkaconsole");
+
   console->flush_on(spdlog::level::level_enum::off);
   console->set_pattern("[%^%l%$]: %v");
   auto yakkalog = spdlog::basic_logger_mt("yakkalog", "yakka_test.log");
@@ -24,9 +33,12 @@ int main(int argc, char **argv)
 
   // Task flow test
   tf::Executor executor;
+/// @brief Executes emplace.
+
   auto finish = project.taskflow.emplace([=]() {
     std::cout << "FINISHED\n";
   });
+
   for (auto &i: project.commands)
     project.create_tasks(i, finish);
 

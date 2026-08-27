@@ -1,7 +1,13 @@
+/**
+ * @file task_engine.cpp
+ * @brief Implements task graph execution and build orchestration workflows.
+ */
+
 #include "yakka_project.hpp"
 #include "task_engine.hpp"
 #include "blueprint_commands.hpp"
 #include "utilities.hpp"
+
 #include <future>
 #include <chrono>
 #include <unordered_map>
@@ -10,9 +16,12 @@ using namespace std::chrono_literals;
 
 namespace yakka {
 
+/// @brief Executes is_valid.
+
 bool task_engine::is_valid()
 {
   std::unordered_set<tf::Task> visited;
+
   std::unordered_set<tf::Task> recursion_stack;
 
   std::function<bool(tf::Task)> search_dependencies = [&](tf::Task task) {
@@ -24,6 +33,8 @@ bool task_engine::is_valid()
     recursion_stack.insert(task);
 
     bool is_circular = false;
+    /// @brief Executes for_each_dependent.
+
     task.for_each_dependent([&](tf::Task dependent) {
       if (search_dependencies(dependent))
         is_circular = true;
@@ -35,14 +46,19 @@ bool task_engine::is_valid()
   };
 
   bool is_circular = false;
+  /// @brief Executes for_each_task.
+
   taskflow.for_each_task([&](tf::Task task) {
     if (task.num_successors() == 0)
       if (search_dependencies(task))
+
         is_circular = true;
   });
 
   return !is_circular;
 }
+
+/// @brief Executes init.
 
 void task_engine::init(task_complete_type task_complete_handler)
 {
@@ -100,7 +116,7 @@ void task_engine::process_task(const std::shared_ptr<construction_task> &constru
     } else if (construct_task->match->blueprint->process.valid()) {
       auto max_element = engine.todo_list.end();
       for (auto j: construct_task->match->dependencies) {
-        auto temp         = engine.todo_list.equal_range(j);
+        auto temp = engine.todo_list.equal_range(j);
         if (temp.first == temp.second) {
           continue;
         }
@@ -190,6 +206,7 @@ std::shared_ptr<construction_task> task_engine::create_task_node(ryml::csubstr t
 void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakka::project &project)
 {
   const std::string target_name_string = ryml_string(target_name);
+
   // XXX: Start time should be determined at the start of the executable and not here
   auto start_time = std::filesystem::file_time_type::clock::now();
 
@@ -235,30 +252,46 @@ void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakk
 std::pair<std::string, int> task_engine::run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::NodeRef project_data)
 {
   std::string captured_output = "";
+
   inja::Environment inja_env;
   auto curdir_path = blueprint->blueprint->parent_path;
 
   add_common_template_commands(inja_env);
+  /// @brief Executes add_callback.
+
   inja_env.add_callback("$", 1, [&blueprint](inja::Arguments &args, ryml::NodeRef additional_data) {
     return additional_data["values"].append_child() << blueprint->regex_matches[args[0].val<int>().value()];
   });
+
+  /// @brief Executes add_callback.
+
   inja_env.add_callback("curdir", 0, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
     return additional_data["values"].append_child() << curdir_path;
   });
+
+  /// @brief Executes add_callback.
+
   inja_env.add_callback("render", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
     return additional_data["values"].append_child() << try_render(inja_env, args[0].val<std::string>().value(), project.project_summary);
   });
+
+  /// @brief Executes add_callback.
+
   inja_env.add_callback("render", 2, [&curdir_path, &inja_env, &project](inja::Arguments &args, ryml::NodeRef additional_data) {
-    auto backup               = curdir_path;
-    curdir_path               = args[1].val();
+    auto backup = curdir_path;
+    curdir_path = args[1].val();
+
     std::string render_output = try_render(inja_env, args[0].val<std::string>().value(), project.project_summary);
     curdir_path               = backup;
     return additional_data["values"].append_child() << render_output;
   });
 
+  /// @brief Executes add_callback.
+
   inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
     ryml::NodeRef aggregate = additional_data["values"].append_child();
     aggregate |= ryml::MAP;
+
     auto path = ryml::Pointer{ args[0].val() };
     // Loop through components, check if object path exists, if so add it to the aggregate
     for (const auto node: project.project_summary["components"].children()) {
@@ -294,9 +327,12 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     }
     return aggregate;
   });
+  /// @brief Executes add_callback.
+
   inja_env.add_callback("load_component", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
     // const auto component_name     = args[0].val<std::string>().value();
     const auto component_location = project.workspace.find_component(args[0].val());
+
     if (!component_location.has_value()) {
       return ryml::NodeRef{};
     }
@@ -308,9 +344,12 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       return ryml::NodeRef{};
     }
   });
+  /// @brief Executes set_include_callback.
+
   inja_env.set_include_callback([&](const std::filesystem::path &path, const std::string &template_name) {
     const auto template_path = try_render(inja_env, template_name, project.project_summary);
     std::ifstream file;
+
     file.open(template_path);
     if (!file.fail()) {
       const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -392,10 +431,14 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   return { captured_output, 0 };
 }
 
+/// @brief Executes run_taskflow.
+
 void task_engine::create_taskflow(yakka::project &project)
 {
   todo_task_groups["Processing"] = std::make_shared<yakka::task_group>("Processing");
-  auto finish                    = taskflow.emplace([&]() {
+  /// @brief Executes emplace.
+
+  auto finish = taskflow.emplace([&]() {
     // execution_progress = 100;
   });
 
