@@ -638,7 +638,7 @@ yakka_status task_engine::load_todolist(const std::filesystem::path &filename, y
       spdlog::warn("Skipping invalid todo list item");
       continue;
     }
-    if (!has_item_changed(serialized_item)) {
+    if (!has_item_changed(serialized_item) && !project.commands.contains(serialized_item.key())) {
       continue;
     }
 
