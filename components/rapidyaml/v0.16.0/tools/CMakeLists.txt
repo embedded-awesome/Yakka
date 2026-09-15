@@ -1,0 +1,10 @@
+
+c4_add_executable(ryml-parse-emit
+    SOURCES parse_emit.cpp
+      ../test/testsuite/testsuite_events.hpp
+      ../test/testsuite/testsuite_events_emitter.cpp
+    INC_DIRS ../test
+    LIBS ryml c4fs
+    FOLDER tools)
+ryml_add_c4core_dev_to_target(ryml-parse-emit)
+ryml_maybe_dump_test_yaml(ryml-parse-emit)

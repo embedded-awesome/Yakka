@@ -2,20 +2,29 @@ name: Rapid YAML
 
 includes:
   global:
-    - master/src
-    - master/src/c4/yml
-    - master/ext/c4core/src
+    - v0.16.0/src
+    - v0.16.0/src/c4/yml
+    - v0.16.0/ext/c4core.src
 
 sources:
-  - master/src/c4/yml/common.cpp
-  - master/src/c4/yml/node.cpp
-  - master/src/c4/yml/parse.cpp
-  - master/src/c4/yml/preprocess.cpp
-  - master/src/c4/yml/tree.cpp
-  - master/src/c4/yml/pointer.cpp
-  - master/ext/c4core/src/c4/error.cpp
-  - master/ext/c4core/src/c4/utf.cpp
-  - master/ext/c4core/src/c4/base64.cpp
+  - v0.16.0/src/c4/yml/common.cpp
+  - v0.16.0/src/c4/yml/emit_buf.cpp
+  - v0.16.0/src/c4/yml/emit_file.cpp
+  - v0.16.0/src/c4/yml/node_type.cpp
+  - v0.16.0/src/c4/yml/parse.cpp
+  - v0.16.0/src/c4/yml/pointer.cpp
+  - v0.16.0/src/c4/yml/reference_resolver.cpp
+  - v0.16.0/src/c4/yml/scalar_style.cpp
+  - v0.16.0/src/c4/yml/tag.cpp
+  - v0.16.0/src/c4/yml/tree.cpp
+  - v0.16.0/src/c4/yml/version.cpp
+  - v0.16.0/ext/c4core.src/c4/base64.cpp
+  - v0.16.0/ext/c4core.src/c4/error.cpp
+  - v0.16.0/ext/c4core.src/c4/format.cpp
+  - v0.16.0/ext/c4core.src/c4/language.cpp
+  - v0.16.0/ext/c4core.src/c4/memory_util.cpp
+  - v0.16.0/ext/c4core.src/c4/utf.cpp
+  - v0.16.0/ext/c4core.src/c4/version.cpp
 
 defines:
   local:

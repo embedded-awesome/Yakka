@@ -1,0 +1,336 @@
+# DO NOT EDIT - GENERATED FROM release.ys
+
+name: release
+defaults:
+  run:
+    shell: bash -e -x {0}
+'on':
+  workflow_dispatch: null
+  push:
+    tags:
+    - v0.*
+    - v1.*
+    - v2.*
+    branches:
+    - master
+  pull_request:
+    branches:
+    - '**'
+env:
+  PROJ_PKG_NAME: rapidyaml-
+  PROJ_PFX_TARGET: ryml-
+  PROJ_PFX_CMAKE: RYML_
+  CMAKE_FLAGS: -DRYML_TEST_SUITE=OFF
+  NUM_JOBS_BUILD: null
+jobs:
+  gettag:
+    if: always()
+    continue-on-error: false
+    runs-on: ubuntu-latest
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: Variables (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        set -exo pipefail
+        # https://github.community/t/how-to-get-just-the-tag-name/16241/11
+        SRC_TAG=${GITHUB_REF#refs/tags/}
+        SRC_VERSION=${GITHUB_REF#refs/tags/v}
+        SRC_VERSION_BODY=`pwd`/changelog/$SRC_VERSION.md
+        if [ ! -f $SRC_VERSION_BODY ] ; then
+          echo "version body file was not found: $SRC_VERSION_BODY"
+          exit 1
+        fi
+        cat <<EOF >> vars.sh
+        export SRC_TAG=$SRC_TAG
+        export SRC_VERSION=$SRC_VERSION
+        export SRC_VERSION_BODY=$SRC_VERSION_BODY
+        EOF
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: |
+        set -exo pipefail
+        branch_name=${GITHUB_REF#refs/heads/}
+        # builds triggered from PRs have the branch_name like this: refs/pull/150/merge
+        # so filter to eg pr0150_merge
+        branch_name=`echo $branch_name | sed "s:refs/pull/\([0-9]*\)/\(.*\):pr0\1_\2:"`
+        # sanitize the branch name; eg merge/foo-bar -> merge_foo_bar
+        branch_name=`echo $branch_name | sed 's:[/.-]:_:g'`
+        SRC_TAG=$(git describe || git rev-parse --short HEAD)  # eg v0.2.0-110-gda837e0
+        SRC_VERSION="${branch_name}-${SRC_TAG}"
+        cat <<EOF > vars.sh
+        export SRC_TAG=$SRC_TAG
+        export SRC_VERSION=$SRC_VERSION
+        EOF
+    - name: Save vars.sh
+      uses: actions/upload-artifact@v7
+      with:
+        name: vars.sh
+        path: ./vars.sh
+    - name: Show vars.sh
+      run: cat vars.sh
+    - name: Source vars.sh
+      run: source vars.sh
+    - name: Env (common)
+      run: |
+        source vars.sh
+        echo "SRC_TAG=$SRC_TAG" >> $GITHUB_ENV
+        echo "SRC_VERSION=$SRC_VERSION" >> $GITHUB_ENV
+    - name: Env (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        source vars.sh
+        echo "SRC_VERSION_BODY=$SRC_VERSION_BODY" >> $GITHUB_ENV
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: echo 'nothing to do'
+    - name: Verify vars.sh
+      run: env | grep SRC
+  src:
+    if: always()
+    continue-on-error: false
+    needs: gettag
+    runs-on: ubuntu-latest
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: Download vars.sh
+      uses: actions/download-artifact@v7
+      with:
+        name: vars.sh
+        path: ./
+    - name: Show vars.sh
+      run: cat vars.sh
+    - name: Source vars.sh
+      run: source vars.sh
+    - name: Env (common)
+      run: |
+        source vars.sh
+        echo "SRC_TAG=$SRC_TAG" >> $GITHUB_ENV
+        echo "SRC_VERSION=$SRC_VERSION" >> $GITHUB_ENV
+    - name: Env (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        source vars.sh
+        echo "SRC_VERSION_BODY=$SRC_VERSION_BODY" >> $GITHUB_ENV
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: echo 'nothing to do'
+    - name: Verify vars.sh
+      run: env | grep SRC
+    - name: Install python 3.12
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install requirements
+      run: sudo -E pip install git-archive-all
+    - name: Create source packages
+      run: make -C proj src
+    - name: Save source artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: assets-src
+        path: assets/
+  cpp:
+    if: always()
+    continue-on-error: false
+    name: cpp/${{matrix.config.os}}/${{matrix.config.gen}}
+    needs: gettag
+    runs-on: ${{matrix.config.os}}
+    env:
+      DEV: 'OFF'
+      BT: Release
+      OS: ${{matrix.config.os}}
+      CXX_: ${{matrix.config.cxx}}
+      GEN: ${{matrix.config.gen}}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - name: Ubuntu 24.04 deb
+          sfxg: unix64.deb
+          sfxp: ubuntu-24.04.deb
+          gen: DEB
+          mime: vnd.debian.binary-package
+          os: ubuntu-24.04
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: Download vars.sh
+      uses: actions/download-artifact@v7
+      with:
+        name: vars.sh
+        path: ./
+    - name: Show vars.sh
+      run: cat vars.sh
+    - name: Source vars.sh
+      run: source vars.sh
+    - name: Env (common)
+      run: |
+        source vars.sh
+        echo "SRC_TAG=$SRC_TAG" >> $GITHUB_ENV
+        echo "SRC_VERSION=$SRC_VERSION" >> $GITHUB_ENV
+    - name: Env (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        source vars.sh
+        echo "SRC_VERSION_BODY=$SRC_VERSION_BODY" >> $GITHUB_ENV
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: echo 'nothing to do'
+    - name: Verify vars.sh
+      run: env | grep SRC
+    - name: install requirements
+      run: source .github/reqs.sh && c4_install_test_requirements $OS
+    - name: show info
+      run: source .github/setenv.sh && c4_show_info
+    - name: shared64-configure-------------------------------------------------
+      run: source .github/setenv.sh && c4_cfg_test shared64
+    - name: shared64-build
+      run: source .github/setenv.sh && c4_build_target shared64
+    - name: shared64-pack
+      run: source .github/setenv.sh && c4_package shared64 $GEN
+    - name: shared64-normalize
+      run: |
+        set -x
+        source vars.sh
+        mkdir -p assets
+        asset_src=`ls -1 ./build/shared64/*-${{matrix.config.sfxg}}`
+        asset_dst=./assets/${PROJ_PKG_NAME}${SRC_VERSION}-${{matrix.config.sfxp}}
+        [ ! -f $asset_src ] && exit 1
+        cp -fav $asset_src $asset_dst
+    - name: Save artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: assets-${{matrix.config.sfxp}}
+        path: assets/
+  merge_artifacts:
+    if: always()
+    continue-on-error: false
+    runs-on: ubuntu-latest
+    needs:
+    - src
+    - cpp
+    steps:
+    - name: Merge assets artifacts
+      uses: actions/upload-artifact/merge@v7
+      with:
+        name: assets
+        pattern: assets-*
+        separate-directories: true
+        delete-merged: true
+  release:
+    if: always()
+    continue-on-error: false
+    runs-on: ubuntu-latest
+    needs:
+    - merge_artifacts
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: Download vars.sh
+      uses: actions/download-artifact@v7
+      with:
+        name: vars.sh
+        path: ./
+    - name: Show vars.sh
+      run: cat vars.sh
+    - name: Source vars.sh
+      run: source vars.sh
+    - name: Env (common)
+      run: |
+        source vars.sh
+        echo "SRC_TAG=$SRC_TAG" >> $GITHUB_ENV
+        echo "SRC_VERSION=$SRC_VERSION" >> $GITHUB_ENV
+    - name: Env (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        source vars.sh
+        echo "SRC_VERSION_BODY=$SRC_VERSION_BODY" >> $GITHUB_ENV
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: echo 'nothing to do'
+    - name: Verify vars.sh
+      run: env | grep SRC
+    - name: Verify existing artifacts
+      run: |
+        ls -lFhp .
+        ls -lFhp assets*/ || echo 'none found'
+    - name: Gather artifacts - ./assets
+      uses: actions/download-artifact@v7
+      with:
+        pattern: assets
+    - name: Verify existing artifacts
+      run: |
+        mkdir -p assets
+        ls -lFhp .
+        ls -lFhp assets*/ || echo 'none found'
+        ( \
+          for a in assets-*/ ; do \
+            ls -lFhpA $a/ ; \
+            mv -v $a/* assets/. ; \
+            rmdir $a ; \
+          done ;
+        )
+        ls -lFhp assets*/ || echo 'none found'
+    - name: Download vars.sh
+      uses: actions/download-artifact@v7
+      with:
+        name: vars.sh
+        path: ./
+    - name: Show vars.sh
+      run: cat vars.sh
+    - name: Source vars.sh
+      run: source vars.sh
+    - name: Env (common)
+      run: |
+        source vars.sh
+        echo "SRC_TAG=$SRC_TAG" >> $GITHUB_ENV
+        echo "SRC_VERSION=$SRC_VERSION" >> $GITHUB_ENV
+    - name: Env (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        source vars.sh
+        echo "SRC_VERSION_BODY=$SRC_VERSION_BODY" >> $GITHUB_ENV
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: echo 'nothing to do'
+    - name: Verify vars.sh
+      run: env | grep SRC
+    - name: Create Github Release
+      if: contains(github.ref, 'tags/v')
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      with:
+        tag_name: ${{github.ref}}
+        release_name: Release ${{env.SRC_VERSION}}
+        body_path: ${{env.SRC_VERSION_BODY}}
+        draft: true
+        prerelease: ${{contains(github.ref, 'rc')}}
+    - name: Upload assets to Github Release
+      if: contains(github.ref, 'tags/v')
+      uses: dwenegar/upload-release-assets@v1
+      env:
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      with:
+        release_id: ${{steps.create_release.outputs.id}}
+        assets_path: ./assets/

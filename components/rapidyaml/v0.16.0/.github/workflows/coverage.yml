@@ -1,0 +1,123 @@
+# DO NOT EDIT - GENERATED FROM coverage.ys
+
+name: coverage
+defaults:
+  run:
+    shell: bash -e -x {0}
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - '**'
+env:
+  PROJ_PKG_NAME: rapidyaml-
+  PROJ_PFX_TARGET: ryml-
+  PROJ_PFX_CMAKE: RYML_
+  CMAKE_FLAGS: -DRYML_TEST_SUITE=ON
+  NUM_JOBS_BUILD: null
+jobs:
+  coverage:
+    if: always()
+    continue-on-error: false
+    name: cov/c++${{matrix.std}}/${{matrix.namesfx}}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 11
+          namesfx: 64bit
+          cmk: -DCMAKE_CXX_FLAGS=-m64
+        - std: 11
+          namesfx: 64bit_nocb
+          cmk: -DCMAKE_CXX_FLAGS=-m64 -DRYML_DEFAULT_CALLBACKS=OFF
+        - std: 11
+          namesfx: 64bit_noexc
+          cmk: -DCMAKE_CXX_FLAGS='-m64 -fno-exceptions -fno-rtti'
+        - std: 11
+          namesfx: 64bit_exc
+          cmk: -DCMAKE_CXX_FLAGS=-m64 -DRYML_DEFAULT_CALLBACK_USES_EXCEPTIONS=ON
+        - std: 11
+          namesfx: 64bit_17
+          cmk: -DCMAKE_CXX_FLAGS=-m64 -DCMAKE_CXX_STANDARD=17
+        - std: 11
+          namesfx: 64bit_dbg
+          cmk: -DCMAKE_CXX_FLAGS=-m64 -DRYML_DBG=ON
+          halfprocs: 'yes'
+        - std: 11
+          namesfx: 32bit
+          cmk: -DCMAKE_CXX_FLAGS=-m32
+          halfprocs: 'yes'
+    env:
+      GCC_VERSION: 13
+      LCOV_ARGS: -v --ignore-errors mismatch,mismatch --ignore-errors unused,unused
+      BUILD_ID: cpp${{matrix.std}}_${{matrix.namesfx}}
+      CODECOV_TOKEN: ${{secrets.CODECOV_TOKEN}}
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: install compiler
+      run: |
+        if [[ ${{matrix.namesfx}} == *"32"* ]] ; then
+           sudo dpkg --add-architecture i386
+        fi
+        sudo apt-get update
+        if [[ ${{matrix.namesfx}} == *"32"* ]] ; then
+          sudo apt-get install -y \
+              linux-libc-dev:i386 \
+              libc6:i386 \
+              libc6-dev:i386 \
+              libc6-dbg:i386
+        fi
+        sudo apt-get install -y \
+            build-essential \
+            cmake \
+            git \
+            lcov \
+            g++-$GCC_VERSION
+        if [[ ${{matrix.namesfx}} == *"32"* ]] ; then
+          sudo apt-get install -y \
+            g++-$GCC_VERSION-multilib
+        fi
+    - name: show info
+      run: source .github/setenv.sh && c4_show_info
+    - name: configure
+      run: |
+        cmake -B build/$BUILD_ID \
+            -DCMAKE_BUILD_TYPE=Coverage \
+            -DRYML_BUILD_TESTS=ON \
+            -DRYML_COVERAGE_LCOV_ARGS=" $LCOV_ARGS " \
+            -DRYML_COVERAGE_CODECOV=ON \
+            ${{matrix.cmk}}
+    - name: build
+      run: |
+        numprocs=`nproc`
+        if [ -n "${{matrix.halfprocs}}" ] ; then
+            if (( $numprocs > 1 )) ; then
+                numprocs=$(($numprocs / 2))
+            fi
+        fi
+        export CMAKE_BUILD_PARALLEL_LEVEL=$numprocs
+        cmake --build build/$BUILD_ID --verbose --target ryml-test-build \
+            --parallel $numprocs
+    - name: run
+      run: |
+        export CTEST_PARALLEL_LEVEL=`nproc`
+        cmake --build build/$BUILD_ID --verbose --target ryml-coverage
+    - name: upload artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: coverage-${{env.BUILD_ID}}
+        path: |
+          build/${{env.BUILD_ID}}/lcov-tmp
+          build/${{env.BUILD_ID}}/lcov-tmp/result.lcov
+    - name: upload codecov
+      run: |
+        cmake --build build/$BUILD_ID --target ryml-coverage-submit-codecov --verbose

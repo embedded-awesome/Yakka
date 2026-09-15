@@ -1,0 +1,589 @@
+# DO NOT EDIT - GENERATED FROM windows.ys
+
+name: windows
+defaults:
+  run:
+    shell: bash -e -x {0}
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - '**'
+env:
+  PROJ_PKG_NAME: rapidyaml-
+  PROJ_PFX_TARGET: ryml-
+  PROJ_PFX_CMAKE: RYML_
+  CMAKE_FLAGS: -DRYML_TEST_SUITE=ON
+  NUM_JOBS_BUILD: null
+jobs:
+  vsdebug:
+    if: always()
+    continue-on-error: false
+    name: ${{matrix.name}}bit/c++${{matrix.std}}/debug
+    runs-on: windows-${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 11
+          name: vs2022/64
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: x64
+        - std: 11
+          name: vs2022/32
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: Win32
+        - std: 17
+          name: vs2022/64
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: x64
+        - std: 17
+          name: vs2022/32
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: Win32
+        - std: 20
+          name: vs2022/64
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: x64
+        - std: 20
+          name: vs2022/32
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: Win32
+        - std: 11
+          name: vs2026/64
+          os: latest
+          gen: Visual Studio 18 2026
+          arch: x64
+        - std: 11
+          name: vs2026/32
+          os: latest
+          gen: Visual Studio 18 2026
+          arch: Win32
+        - std: 23
+          name: vs2026/64
+          os: latest
+          gen: Visual Studio 18 2026
+          arch: x64
+        - std: 23
+          name: vs2026/32
+          os: latest
+          gen: Visual Studio 18 2026
+          arch: Win32
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Debug ::: /MDd /Zi /Ob0 /Od /RTC1 shared=ON"
+    - name: 'configure Debug ::: /MDd /Zi /Ob0 /Od /RTC1 shared=ON'
+      run: |
+        rm -rf build/Debug
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Debug \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_CXX_FLAGS_DEBUG=" /MDd /Zi /Ob0 /Od /RTC1" \
+          -DCMAKE_C_FLAGS_DEBUG=" /MDd /Zi /Ob0 /Od /RTC1" \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+           \
+          -DRYML_DBG=OFF
+    - name: 'build Debug ::: /MDd /Zi /Ob0 /Od /RTC1 shared=ON'
+      run: |
+        cmake --build build/Debug --target ryml-test-build --config Debug --parallel --verbose
+    - name: 'run Debug ::: /MDd /Zi /Ob0 /Od /RTC1 shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Debug --target ryml-test-run --config Debug
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Debug ::: /MDd /Zi /Ob0 /Od /RTC1 shared=OFF"
+    - name: 'configure Debug ::: /MDd /Zi /Ob0 /Od /RTC1 shared=OFF'
+      run: |
+        rm -rf build/Debug
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Debug \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_CXX_FLAGS_DEBUG=" /MDd /Zi /Ob0 /Od /RTC1" \
+          -DCMAKE_C_FLAGS_DEBUG=" /MDd /Zi /Ob0 /Od /RTC1" \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=OFF \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+           \
+          -DRYML_DBG=OFF
+    - name: 'build Debug ::: /MDd /Zi /Ob0 /Od /RTC1 shared=OFF'
+      run: |
+        cmake --build build/Debug --target ryml-test-build --config Debug --parallel --verbose
+    - name: 'run Debug ::: /MDd /Zi /Ob0 /Od /RTC1 shared=OFF'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Debug --target ryml-test-run --config Debug
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Release ::: /MD /Os /DNDEBUG shared=ON"
+    - name: 'configure Release ::: /MD /Os /DNDEBUG shared=ON'
+      run: |
+        rm -rf build/Release
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Release \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS_RELEASE=" /MD /Os /DNDEBUG" \
+          -DCMAKE_C_FLAGS_RELEASE=" /MD /Os /DNDEBUG" \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+           \
+          -DRYML_DBG=OFF
+    - name: 'build Release ::: /MD /Os /DNDEBUG shared=ON'
+      run: |
+        cmake --build build/Release --target ryml-test-build --config Release --parallel --verbose
+    - name: 'run Release ::: /MD /Os /DNDEBUG shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Release --target ryml-test-run --config Release
+  vsrelease:
+    if: always()
+    continue-on-error: false
+    name: ${{matrix.name}}bit/c++${{matrix.std}}/release
+    runs-on: windows-${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 11
+          name: vs2022/64
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: x64
+        - std: 11
+          name: vs2022/32
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: Win32
+        - std: 17
+          name: vs2022/64
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: x64
+        - std: 17
+          name: vs2022/32
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: Win32
+        - std: 20
+          name: vs2022/64
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: x64
+        - std: 20
+          name: vs2022/32
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: Win32
+        - std: 11
+          name: vs2026/64
+          os: latest
+          gen: Visual Studio 18 2026
+          arch: x64
+        - std: 11
+          name: vs2026/32
+          os: latest
+          gen: Visual Studio 18 2026
+          arch: Win32
+        - std: 23
+          name: vs2026/64
+          os: latest
+          gen: Visual Studio 18 2026
+          arch: x64
+        - std: 23
+          name: vs2026/32
+          os: latest
+          gen: Visual Studio 18 2026
+          arch: Win32
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Release ::: /MD /O1 /Ob1 /DNDEBUG shared=ON"
+    - name: 'configure Release ::: /MD /O1 /Ob1 /DNDEBUG shared=ON'
+      run: |
+        rm -rf build/Release
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Release \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS_RELEASE=" /MD /O1 /Ob1 /DNDEBUG" \
+          -DCMAKE_C_FLAGS_RELEASE=" /MD /O1 /Ob1 /DNDEBUG" \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+           \
+          -DRYML_DBG=OFF
+    - name: 'build Release ::: /MD /O1 /Ob1 /DNDEBUG shared=ON'
+      run: |
+        cmake --build build/Release --target ryml-test-build --config Release --parallel --verbose
+    - name: 'run Release ::: /MD /O1 /Ob1 /DNDEBUG shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Release --target ryml-test-run --config Release
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Release ::: /MD /O2 /Ob2 /DNDEBUG shared=ON"
+    - name: 'configure Release ::: /MD /O2 /Ob2 /DNDEBUG shared=ON'
+      run: |
+        rm -rf build/Release
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Release \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS_RELEASE=" /MD /O2 /Ob2 /DNDEBUG" \
+          -DCMAKE_C_FLAGS_RELEASE=" /MD /O2 /Ob2 /DNDEBUG" \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+           \
+          -DRYML_DBG=OFF
+    - name: 'build Release ::: /MD /O2 /Ob2 /DNDEBUG shared=ON'
+      run: |
+        cmake --build build/Release --target ryml-test-build --config Release --parallel --verbose
+    - name: 'run Release ::: /MD /O2 /Ob2 /DNDEBUG shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Release --target ryml-test-run --config Release
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Release ::: /MD /O3 /Ob3 /DNDEBUG shared=ON"
+    - name: 'configure Release ::: /MD /O3 /Ob3 /DNDEBUG shared=ON'
+      run: |
+        rm -rf build/Release
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Release \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS_RELEASE=" /MD /O3 /Ob3 /DNDEBUG" \
+          -DCMAKE_C_FLAGS_RELEASE=" /MD /O3 /Ob3 /DNDEBUG" \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+           \
+          -DRYML_DBG=OFF
+    - name: 'build Release ::: /MD /O3 /Ob3 /DNDEBUG shared=ON'
+      run: |
+        cmake --build build/Release --target ryml-test-build --config Release --parallel --verbose
+    - name: 'run Release ::: /MD /O3 /Ob3 /DNDEBUG shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Release --target ryml-test-run --config Release
+  tabtokens:
+    if: always()
+    continue-on-error: false
+    name: tabtokens/${{matrix.name}}bit/c++${{matrix.std}}
+    runs-on: windows-${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 11
+          name: vs2022/64
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: x64
+        - std: 11
+          name: vs2022/32
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: Win32
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Debug ::: /MDd /Zi /Ob0 /Od /RTC1  shared=ON"
+    - name: 'configure Debug ::: /MDd /Zi /Ob0 /Od /RTC1  shared=ON'
+      run: |
+        rm -rf build/Debug
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Debug \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_CXX_FLAGS_DEBUG=" /MDd /Zi /Ob0 /Od /RTC1 " \
+          -DCMAKE_C_FLAGS_DEBUG=" /MDd /Zi /Ob0 /Od /RTC1 " \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+          -DRYML_WITH_TAB_TOKENS=ON \
+          -DRYML_DBG=OFF
+    - name: 'build Debug ::: /MDd /Zi /Ob0 /Od /RTC1  shared=ON'
+      run: |
+        cmake --build build/Debug --target ryml-test-build --config Debug --parallel --verbose
+    - name: 'run Debug ::: /MDd /Zi /Ob0 /Od /RTC1  shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Debug --target ryml-test-run --config Debug
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Release ::: /MDd /O3 /Ob3 /DNDEBUG  shared=ON"
+    - name: 'configure Release ::: /MDd /O3 /Ob3 /DNDEBUG  shared=ON'
+      run: |
+        rm -rf build/Release
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Release \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS_RELEASE=" /MDd /O3 /Ob3 /DNDEBUG " \
+          -DCMAKE_C_FLAGS_RELEASE=" /MDd /O3 /Ob3 /DNDEBUG " \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+          -DRYML_WITH_TAB_TOKENS=ON \
+          -DRYML_DBG=OFF
+    - name: 'build Release ::: /MDd /O3 /Ob3 /DNDEBUG  shared=ON'
+      run: |
+        cmake --build build/Release --target ryml-test-build --config Release --parallel --verbose
+    - name: 'run Release ::: /MDd /O3 /Ob3 /DNDEBUG  shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Release --target ryml-test-run --config Release
+  nocallbacks:
+    if: always()
+    continue-on-error: false
+    name: nocallbacks/${{matrix.name}}bit/c++${{matrix.std}}
+    runs-on: windows-${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 11
+          name: vs2022/64
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: x64
+        - std: 11
+          name: vs2022/32
+          os: 2022
+          gen: Visual Studio 17 2022
+          arch: Win32
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Debug ::: /MDd /Zi /Ob0 /Od /RTC1  shared=ON"
+    - name: 'configure Debug ::: /MDd /Zi /Ob0 /Od /RTC1  shared=ON'
+      run: |
+        rm -rf build/Debug
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Debug \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_CXX_FLAGS_DEBUG=" /MDd /Zi /Ob0 /Od /RTC1 " \
+          -DCMAKE_C_FLAGS_DEBUG=" /MDd /Zi /Ob0 /Od /RTC1 " \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+          -DRYML_DEFAULT_CALLBACKS=ON \
+          -DRYML_DBG=OFF
+    - name: 'build Debug ::: /MDd /Zi /Ob0 /Od /RTC1  shared=ON'
+      run: |
+        cmake --build build/Debug --target ryml-test-build --config Debug --parallel --verbose
+    - name: 'run Debug ::: /MDd /Zi /Ob0 /Od /RTC1  shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Debug --target ryml-test-run --config Debug
+    - name: '---------------------------------------------------------'
+      run: |
+        echo "Release ::: /MDd /O3 /Ob3 /DNDEBUG  shared=ON"
+    - name: 'configure Release ::: /MDd /O3 /Ob3 /DNDEBUG  shared=ON'
+      run: |
+        rm -rf build/Release
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build/Release \
+          -G "${{matrix.gen}}" -A ${{matrix.arch}} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_FLAGS_RELEASE=" /MDd /O3 /Ob3 /DNDEBUG " \
+          -DCMAKE_C_FLAGS_RELEASE=" /MDd /O3 /Ob3 /DNDEBUG " \
+          -DCMAKE_C_FLAGS=" " \
+          -DBUILD_SHARED_LIBS=ON \
+          -DC4_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_CXX_STANDARD=${{matrix.std}} \
+          -DRYML_BUILD_TESTS=ON \
+          -DRYML_DEV=ON \
+          -DRYML_BUILD_BENCHMARKS=OFF \
+          -DRYML_DEFAULT_CALLBACKS=ON \
+          -DRYML_DBG=OFF
+    - name: 'build Release ::: /MDd /O3 /Ob3 /DNDEBUG  shared=ON'
+      run: |
+        cmake --build build/Release --target ryml-test-build --config Release --parallel --verbose
+    - name: 'run Release ::: /MDd /O3 /Ob3 /DNDEBUG  shared=ON'
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build/Release --target ryml-test-run --config Release
+  othercompilers:
+    if: always()
+    continue-on-error: false
+    name: ${{matrix.name}}/${{matrix.bt}}/c++${{matrix.std}}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 11
+          name: clangcl/static
+          bt: Debug
+          shared: 'OFF'
+          cxx: -G "Visual Studio 18 2026" -T ClangCL
+        - std: 11
+          name: clangcl/shared
+          bt: Release
+          shared: 'ON'
+          cxx: -G "Visual Studio 18 2026" -T ClangCL
+        - std: 20
+          name: clangcl/static
+          bt: Debug
+          shared: 'OFF'
+          cxx: -G "Visual Studio 18 2026" -T ClangCL
+        - std: 20
+          name: clangcl/shared
+          bt: Release
+          shared: 'ON'
+          cxx: -G "Visual Studio 18 2026" -T ClangCL
+        - std: 11
+          name: clang++/static
+          bt: Debug
+          shared: 'OFF'
+          cxx: -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+        - std: 11
+          name: clang++/shared
+          bt: Release
+          shared: 'ON'
+          cxx: -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+        - std: 20
+          name: clang++/static
+          bt: Debug
+          shared: 'OFF'
+          cxx: -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+        - std: 20
+          name: clang++/shared
+          bt: Release
+          shared: 'ON'
+          cxx: -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+        - std: 11
+          name: g++/static
+          bt: Debug
+          shared: 'OFF'
+          cxx: -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+        - std: 11
+          name: g++/shared
+          bt: Debug
+          shared: 'ON'
+          cxx: -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+        - std: 20
+          name: g++/static
+          bt: Debug
+          shared: 'OFF'
+          cxx: -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+        - std: 20
+          name: g++/shared
+          bt: Debug
+          shared: 'ON'
+          cxx: -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: config
+      run: |
+        cmake -B build/ \
+              ${{matrix.cxx}} \
+              -DCMAKE_BUILD_TYPE=${{matrix.bt}} \
+              -DCMAKE_CXX_STANDARD=${{matrix.std}} \
+              -DBUILD_SHARED_LIBS=${{matrix.shared}} \
+              "${{matrix.extra}}" \
+              -DRYML_DEV=ON \
+              -DRYML_BUILD_BENCHMARKS=OFF
+    - name: build
+      run: |
+        cmake --build build --target ryml-test-build --config ${{matrix.bt}} --parallel --verbose
+    - name: test
+      run: |
+        source .github/setenv.sh
+        export CTEST_PARALLEL_LEVEL=`_c4getnumcores`
+        cmake --build build --target ryml-test-run --config ${{matrix.bt}}

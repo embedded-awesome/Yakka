@@ -1,0 +1,69 @@
+# DO NOT EDIT - GENERATED FROM clang_tidy.ys
+
+name: clang_tidy
+defaults:
+  run:
+    shell: bash -e -x {0}
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - '**'
+env:
+  PROJ_PKG_NAME: rapidyaml-
+  PROJ_PFX_TARGET: ryml-
+  PROJ_PFX_CMAKE: RYML_
+  CMAKE_FLAGS: -DRYML_TEST_SUITE=ON
+  NUM_JOBS_BUILD: null
+jobs:
+  clang_tidy:
+    if: always()
+    continue-on-error: false
+    runs-on: ubuntu-24.04
+    container: ghcr.io/biojppm/c4core/ubuntu24.04:latest
+    name: clang_tidy/c++${{matrix.std}}/${{matrix.bt}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 11
+          clang: 22
+          bt: Debug
+          bits: 64
+    env:
+      STD: ${{matrix.std}}
+      CXX_: ${{matrix.cxx}}
+      BT: ${{matrix.bt}}
+      BITLINKS: ${{matrix.bitlinks}}
+      VG: ${{matrix.vg}}
+      SAN: ${{matrix.san}}
+      LINT: ${{matrix.lint}}
+      OS: ${{matrix.os}}
+    steps:
+    - name: checkout (action + docker)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - run: git config --system --add safe.directory '*'
+    - name: install
+      run: c4core-install clang++-${{matrix.clang}}
+    - name: configure
+      run: |
+        cmake -S . -B build \
+           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+           -DCMAKE_CXX_COMPILER=clang++-${{matrix.clang}} \
+           -DCMAKE_C_COMPILER=clang-${{matrix.clang}} \
+           -DCLANG_TIDY=/usr/bin/clang-tidy-${{matrix.clang}} \
+           -DCMAKE_BUILD_TYPE=${{matrix.bt}} \
+           -DRYML_DEV=ON \
+           -DRYML_VALGRIND=OFF \
+           -DRYML_BUILD_TESTS=OFF \
+           -DRYML_BUILD_BENCHMARKS=OFF \
+           -DRYML_DBG=OFF
+    - name: clang-tidy
+      run: cmake --build build --target ryml-clang-tidy --verbose

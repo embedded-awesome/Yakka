@@ -1,0 +1,287 @@
+cmake_minimum_required(VERSION 3.13)
+project(ryml
+    VERSION 0.16.0
+    DESCRIPTION "Rapid YAML parsing and emitting"
+    HOMEPAGE_URL "https://github.com/biojppm/rapidyaml"
+    LANGUAGES CXX)
+include(./proj/compat.cmake)
+include(./proj/c4proj/c4Project.cmake)
+
+c4_project(VERSION 0.16.0 STANDALONE
+    AUTHOR "Joao Paulo Magalhaes <dev@jpmag.me>")
+
+
+#-------------------------------------------------------
+
+option(RYML_WITH_TAB_TOKENS "Enable parsing of tabs after ':' and '-'. This is costly and disabled by default." OFF)
+option(RYML_DEFAULT_CALLBACKS "Enable ryml's default implementation of callbacks: allocate(), free(), error()" ON)
+if(RYML_DEFAULT_CALLBACKS)
+    option(RYML_DEFAULT_CALLBACK_USES_EXCEPTIONS "Throw exceptions instead of calling abort in the default error handler provided by ryml" OFF)
+endif()
+option(RYML_WITH_LEGACY_OPERATORS "Do not mark legacy operators = |= << >> as deprecated" OFF)
+option(RYML_USE_ASSERT "Enable assertions regardless of build type. Default is only when NDEBUG is not defined (which is in release builds). This causes a slowdown of the code." OFF)
+option(RYML_SHORT_ERR_MSG "Use shorter error message from checks/asserts: do not show the check condition in the error message" OFF)
+option(RYML_BUILD_TOOLS "Build tools" OFF)
+option(RYML_BUILD_API "Enable API generation (python, etc)" OFF)
+option(RYML_DBG "Enable (very verbose) debug prints." OFF)
+option(RYML_SYSTEM_C4CORE "Use system-installed c4core instead of the one provided with ryml" OFF)
+
+option(RYML_INSTALL "Enable install target" ON)
+
+
+#-------------------------------------------------------
+
+c4_add_library(ryml
+    SOURCES
+        ryml.hpp
+        ryml_std.hpp
+        ryml.natvis
+        c4/yml/detail/checks.hpp
+        c4/yml/detail/dbgprint.hpp
+        c4/yml/detail/print.hpp
+        c4/yml/detail/stack.hpp
+        c4/yml/common.hpp
+        c4/yml/common.cpp
+        c4/yml/emit.hpp
+        c4/yml/emit_buf.hpp
+        c4/yml/emit_buf.cpp
+        c4/yml/emit_container.hpp
+        c4/yml/emit_file.hpp
+        c4/yml/emit_file.cpp
+        c4/yml/emit_options.hpp
+        c4/yml/emit_ostream.hpp
+        c4/yml/emitter.def.hpp
+        c4/yml/emitter.hpp
+        c4/yml/error.hpp
+        c4/yml/error.def.hpp
+        c4/yml/escape_scalar.hpp
+        c4/yml/event_handler_stack.hpp
+        c4/yml/event_handler_tree.hpp
+        c4/yml/file.hpp
+        c4/yml/filter_processor.hpp
+        c4/yml/fwd.hpp
+        c4/yml/export.hpp
+        c4/yml/node.hpp
+        c4/yml/node_type.hpp
+        c4/yml/node_type.cpp
+        c4/yml/parser_state.hpp
+        c4/yml/parse.hpp
+        c4/yml/parse.cpp
+        c4/yml/parse_engine.hpp
+        c4/yml/parse_engine.def.hpp
+        c4/yml/parse_options.hpp
+        c4/yml/reference_resolver.hpp
+        c4/yml/reference_resolver.cpp
+        c4/yml/scalar_charconv.hpp
+        c4/yml/scalar_style.hpp
+        c4/yml/scalar_style.cpp
+        c4/yml/std/map.hpp
+        c4/yml/std/std.hpp
+        c4/yml/std/string.hpp
+        c4/yml/std/vector.hpp
+        c4/yml/tag.hpp
+        c4/yml/tag.cpp
+        c4/yml/tree.hpp
+        c4/yml/tree.cpp
+        c4/yml/version.hpp
+        c4/yml/version.cpp
+        c4/yml/writer.hpp
+        c4/yml/writer_buf.hpp
+        c4/yml/writer_file.hpp
+        c4/yml/writer_ostream.hpp
+        c4/yml/yml.hpp
+    SOURCE_ROOT ${RYML_SRC_DIR}
+    INC_DIRS
+        $<BUILD_INTERFACE:${RYML_SRC_DIR}>
+        $<INSTALL_INTERFACE:include>
+    )
+
+if(RYML_SYSTEM_C4CORE)
+    find_package(c4core REQUIRED)
+    target_link_libraries(ryml PUBLIC c4core::c4core)
+elseif(NOT RYML_STANDALONE)
+    target_link_libraries(ryml PUBLIC c4core)
+else()
+    include(ext/c4core.cmake)
+    ryml_add_c4core_src_to_target(ryml)
+endif()
+
+if(RYML_WITH_TAB_TOKENS)
+    target_compile_definitions(ryml PUBLIC RYML_WITH_TAB_TOKENS)
+endif()
+
+if(NOT RYML_DEFAULT_CALLBACKS)
+    target_compile_definitions(ryml PUBLIC RYML_NO_DEFAULT_CALLBACKS)
+else()
+    if(RYML_DEFAULT_CALLBACK_USES_EXCEPTIONS)
+        target_compile_definitions(ryml PUBLIC RYML_DEFAULT_CALLBACK_USES_EXCEPTIONS)
+    endif()
+endif()
+
+if(RYML_SHORT_CHECK_MSG)
+    target_compile_definitions(ryml PUBLIC RYML_SHORT_CHECK_MSG)
+endif()
+
+if(RYML_USE_ASSERT)
+    target_compile_definitions(ryml PUBLIC RYML_USE_ASSERT=1)
+endif()
+
+if(RYML_DBG)
+    target_compile_definitions(ryml PRIVATE RYML_DBG)
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX)
+    option(RYML_FANALYZER "Compile with -fanalyzer https://gcc.gnu.org/onlinedocs/gcc-13.2.0/gcc/Static-Analyzer-Options.html" OFF)
+    if(RYML_FANALYZER)
+        target_compile_options(ryml PUBLIC -fanalyzer)
+    endif()
+endif()
+
+if(RYML_STANDALONE AND (WIN32 AND BUILD_SHARED_LIBS))
+    target_compile_definitions(ryml PUBLIC C4CORE_SHARED
+        $<BUILD_INTERFACE:C4CORE_EXPORTS>
+    )
+endif()
+
+if(RYML_WITH_LEGACY_OPERATORS)
+    target_compile_definitions(ryml PUBLIC RYML_WITH_LEGACY_OPERATORS)
+endif()
+
+
+#-------------------------------------------------------
+
+option(RYML_EXTRA_INTS "Include extra int events handler in the rapidyaml library" OFF)
+option(RYML_EXTRA_INTS_UTILS "Include extra int event utils in the rapidyaml library" OFF)
+option(RYML_EXTRA_INTS_TESTSUITE "Include extra int event conversion to test suite events in the rapidyaml library" OFF)
+option(RYML_EXTRA_ALL "Include all extra code" OFF)
+if(RYML_EXTRA_ALL OR RYML_BUILD_TESTS OR RYML_BUILD_BENCHMARKS OR RYML_BUILD_TOOLS)
+    set(RYML_EXTRA_ALL            ON CACHE BOOL "" FORCE)
+    set(RYML_EXTRA_INTS           ON CACHE BOOL "" FORCE)
+    set(RYML_EXTRA_INTS_UTILS     ON CACHE BOOL "" FORCE)
+    set(RYML_EXTRA_INTS_TESTSUITE ON CACHE BOOL "" FORCE)
+endif()
+
+if(RYML_EXTRA_ALL
+        OR RYML_EXTRA_INTS
+        OR RYML_EXTRA_INTS_UTILS
+        OR RYML_EXTRA_INTS_TESTSUITE)
+    # test the extra facilities as well
+    if(RYML_EXTRA_INTS OR RYML_EXTRA_ALL)
+        list(APPEND RYML_EXTRA_SRC
+            "${CMAKE_CURRENT_LIST_DIR}/src_extra/c4/yml/extra/event_handler_ints.cpp"
+            "${CMAKE_CURRENT_LIST_DIR}/src_extra/c4/yml/extra/event_handler_ints.hpp"
+        )
+    endif()
+    if(RYML_EXTRA_INTS_UTILS OR RYML_EXTRA_ALL)
+        list(APPEND RYML_EXTRA_SRC
+            "${CMAKE_CURRENT_LIST_DIR}/src_extra/c4/yml/extra/ints_utils.cpp"
+            "${CMAKE_CURRENT_LIST_DIR}/src_extra/c4/yml/extra/ints_utils.hpp"
+        )
+    endif()
+    if(RYML_EXTRA_TESTSUITE OR RYML_EXTRA_ALL)
+        list(APPEND RYML_EXTRA_SRC
+            "${CMAKE_CURRENT_LIST_DIR}/src_extra/c4/yml/extra/ints_to_testsuite.cpp"
+            "${CMAKE_CURRENT_LIST_DIR}/src_extra/c4/yml/extra/ints_to_testsuite.hpp"
+        )
+    endif()
+    target_include_directories(ryml PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/src_extra>
+    )
+    target_sources(ryml PRIVATE ${RYML_EXTRA_SRC})
+    _c4cat_filter_hdrs("${RYML_EXTRA_SRC}" _ryml_extra_hdr)
+    c4_install_files("${_ryml_extra_hdr}" "include" "${CMAKE_CURRENT_LIST_DIR}/src_extra")
+    # extern libraries, used only for testing/benchmarking
+    include(ext/testbm.cmake)
+endif()
+
+
+#-------------------------------------------------------
+
+if(RYML_INSTALL)
+    c4_install_target(ryml)
+    if(RYML_STANDALONE OR RYML_SYSTEM_C4CORE)
+        c4_install_exports()
+    else()
+        c4_install_exports(DEPENDENCIES c4core)
+    endif()
+    c4_pack_project()
+endif()
+
+# generate and install the install manifest
+# https://stackoverflow.com/questions/66752091/is-there-a-way-in-cmake-to-save-away-the-install-manifest-txt-for-later
+install(CODE "
+string(REPLACE \"\$\{CMAKE_INSTALL_PREFIX\}/\" \"\" ryml_manifest \"\$\{CMAKE_INSTALL_MANIFEST_FILES\}\")\n\
+list(APPEND ryml_manifest share/ryml/MANIFEST.txt)\n\
+list(SORT ryml_manifest)\n\
+string(REPLACE \";\" \"\\n\" ryml_manifest \"\$\{ryml_manifest\}\")\n\
+file(WRITE ${CMAKE_BINARY_DIR}/MANIFEST.txt \"\$\{ryml_manifest\}\")
+")
+install(FILES "${CMAKE_BINARY_DIR}/MANIFEST.txt" DESTINATION ${CMAKE_INSTALL_PREFIX}/share/ryml)
+
+# add a target to uninstall
+add_custom_target(ryml-uninstall
+    "${CMAKE_COMMAND}" -P "${PROJECT_SOURCE_DIR}/proj/uninstall.cmake"
+)
+
+
+#-------------------------------------------------------
+# developer targets
+
+
+option(RYML_SAVE_TEST_YAML "(dev) save all the parsed yaml while testing" OFF)
+if(RYML_SAVE_TEST_YAML)
+    target_compile_definitions(ryml PUBLIC RYML_SAVE_TEST_YAML)
+    set(RYML_FUZZ_TEST  OFF CACHE BOOL "" FORCE)
+    set(RYML_TEST_SUITE OFF CACHE BOOL "" FORCE)
+endif()
+function(ryml_maybe_dump_test_yaml target)
+    if(RYML_SAVE_TEST_YAML)
+        target_compile_definitions(${target} PRIVATE RYML_SAVE_TEST_YAML)
+        target_sources(${target} PRIVATE ${PROJECT_SOURCE_DIR}/test/test_lib/test_save.cpp)
+        target_link_libraries(${target} PRIVATE c4fs gtest)
+    endif()
+endfunction()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL Clang)
+    option(RYML_FUZZ_DRIVERS "Build fuzz driver binaries (other than unit tests from RYML_TEST_FUZZ)." OFF)
+    if(RYML_FUZZ_DRIVERS)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=fuzzer,address,undefined -g -O1")
+        set(RYML_FUZZ_ARGS DURATION=30)
+    endif()
+endif()
+
+if(RYML_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+
+c4_add_dev_targets()
+
+
+#-------------------------------------------------------
+# clang-tidy
+
+function(ryml_setup_clang_tidy rootdir)
+    get_target_property(srcs ryml SOURCES)
+    string(REPLACE "${rootdir}/" "./" srcs "${srcs}")
+    set(exclude ./ext/.* parse_engine.def.hpp .natvis)
+    foreach(e ${exclude})
+        list(FILTER srcs EXCLUDE REGEX ${e})
+    endforeach()
+    set(cmd ${srcs} -p ${CMAKE_BINARY_DIR}
+            "--config-file=${rootdir}/.clang-tidy"
+            "--header-filter=${rootdir}/src/.*")
+    add_custom_target(ryml-clang-tidy
+        COMMAND ${CMAKE_COMMAND} -E cat ${CMAKE_BINARY_DIR}/compile_commands.json
+        COMMAND ${CLANG_TIDY} --version
+        COMMAND ${CLANG_TIDY} ${cmd} --dump-config
+        COMMAND ${CLANG_TIDY} ${cmd} --list-checks
+        COMMAND ${CLANG_TIDY} ${cmd}
+        WORKING_DIRECTORY ${rootdir}
+        VERBATIM
+    )
+endfunction()
+
+find_program(CLANG_TIDY clang-tidy)
+if(CLANG_TIDY)
+    ryml_setup_clang_tidy(${CMAKE_CURRENT_LIST_DIR})
+endif()

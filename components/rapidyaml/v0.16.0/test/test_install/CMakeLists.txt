@@ -1,0 +1,29 @@
+cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
+project(ryml
+    DESCRIPTION "Test project for an installed ryml"
+    HOMEPAGE_URL "https://github.com/biojppm/rapidyaml"
+    LANGUAGES CXX)
+include(../../proj/c4proj/c4Project.cmake)
+c4_project(VERSION 0.16.0
+    AUTHOR "Joao Paulo Magalhaes <dev@jpmag.me>")
+
+if(RYML_TEST_INSTALL_PACKAGE_MODE)
+    find_package(ryml REQUIRED)
+    add_library(ryml ALIAS ryml::ryml)
+else()
+    find_path(RYML_INCLUDE_DIR ryml.hpp PATH_SUFFIXES include REQUIRED)
+    find_library(RYML_LIBRARY ryml REQUIRED)
+    add_library(ryml UNKNOWN IMPORTED)
+    set_target_properties(ryml PROPERTIES IMPORTED_LOCATION "${RYML_LIBRARY}")
+    target_include_directories(ryml INTERFACE "${RYML_INCLUDE_DIR}")
+endif()
+
+set(RYML_INSTALL_TEST ON)
+
+enable_testing()
+include(../../ext/c4core.cmake)
+include(../../ext/testbm.cmake)
+function(ryml_maybe_dump_test_yaml target)
+    # nothing to do
+endfunction()
+add_subdirectory(../../test test)

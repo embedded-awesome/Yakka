@@ -1,0 +1,179 @@
+#include "./testsuite_parts.hpp"
+#include "c4/span.hpp"
+
+namespace c4 {
+namespace yml {
+
+
+namespace {
+
+// g++-5 does not like creating a csubstr directly from the literal.
+// so we use this macro (undefined at the end) to make the
+// declarations less verbose:
+#define _(testcase, reason) AllowedFailure{csubstr(testcase), csubstr(reason)}
+
+// To see the test case contents, refer to this URL:
+// https://matrix.yaml.info/details/QLJ7.html
+const AllowedFailure allowed_failures[] = {
+
+    //-------------------------------------------------------------------------
+    // SECTION 1. Known issues on valid YAML (TO-DO)
+
+    // empty. yay!
+
+
+    //-------------------------------------------------------------------------
+    // SECTION 2. Missing errors on invalid YAML (TO-DO)
+
+    // empty. yay!
+
+
+    //-------------------------------------------------------------------------
+    // SECTION 3. Deliberate ryml limitations.
+    //
+    // These tests are skipped because they cover parts of YAML that
+    // are deliberately not implemented by ryml.
+
+    #ifdef RYML_WITH_TAB_TOKENS
+    // empty. yay!
+    #else
+    // '-', ':' or '?' followed directly by '\t' are
+    // supported only when the above macro is defined
+    _("6BCT-in_yaml"            , "tab after : and -"),
+    _("A2M4-in_yaml"            , "tab after -"),
+    _("DC7X-in_yaml"            , "tab after :"),
+    _("J3BT-in_yaml"            , "tab after :"),
+    _("K54U-in_yaml"            , "tab after ---"),
+    _("Y79Y_004-error"          , "tab after -"),
+    _("Y79Y_006-error"          , "tab after ?"),
+    _("Y79Y_007-error"          , "tab after :"),
+    _("Y79Y_008-error"          , "tab after ?"),
+    _("Y79Y_009-error"          , "tab after :"),
+    _("Y79Y_010-in_yaml"        , "tab after -"),
+    #endif
+
+    // Container keys are deliberately not supported by the ryml tree.
+    // But they ARE supported by the parse engine. So they are handled
+    // separately using the event parser. See below.
+
+
+    //-------------------------------------------------------------------------
+    // SECTION 4. Problems with the test suite spec.
+
+    // malformed json in the test spec
+    _("35KP-in_json"            , "malformed JSON spec from multiple documents"),
+    _("5TYM-in_json"            , "malformed JSON spec from multiple documents"),
+    _("6XDY-in_json"            , "malformed JSON spec from multiple documents"),
+    _("6WLZ-in_json"            , "malformed JSON spec from multiple documents"),
+    _("6ZKB-in_json"            , "malformed JSON spec from multiple documents"),
+    _("7Z25-in_json"            , "malformed JSON spec from multiple documents"),
+    _("9DXL-in_json"            , "malformed JSON spec from multiple documents"),
+    _("9KAX-in_json"            , "malformed JSON spec from multiple documents"),
+    _("9WXW-in_json"            , "malformed JSON spec from multiple documents"),
+    _("JHB9-in_json"            , "malformed JSON spec from multiple documents"),
+    _("KSS4-in_json"            , "malformed JSON spec from multiple documents"),
+    _("L383-in_json"            , "malformed JSON spec from multiple documents"),
+    _("M7A3-in_json"            , "malformed JSON spec from multiple documents"),
+    _("PUW8-in_json"            , "malformed JSON spec from multiple documents"),
+    _("RZT7-in_json"            , "malformed JSON spec from multiple documents"),
+    _("U9NS-in_json"            , "malformed JSON spec from multiple documents"),
+    _("UT92-in_json"            , "malformed JSON spec from multiple documents"),
+    _("W4TN-in_json"            , "malformed JSON spec from multiple documents"),
+    // malformed test spec?
+    _("4ABK-out_yaml-events"    , "out-yaml test spec contains null, while in-yaml and events contain empty scalars"),
+    _("4WA9-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("652Z-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("6CA3-emit_yaml"          , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("6FWR-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("6WPF-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("9TFX-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("B3HG-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("DK95_00-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("DK95_02-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("DK95_03-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("DK95_04-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("DK95_05-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("DK95_06-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("DK95_07-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("DK95_08-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("EX5H-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("EXG3-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("L24T_00-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("L24T_01-emit_yaml-events", "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("M6YH-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("Q8AD-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("T26H-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("T4YY-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("T5N4-out_yaml-events"    , "out-yaml test spec is missing a --- document token, which is required in the events"),
+    _("VJP3_01-out_yaml-events" , "out-yaml test spec is missing a --- document token, which is required in the events"),
+};
+
+constexpr const AllowedFailure container_key_cases[] = {
+
+    // these cases have container keys, and cannot be parsed into the
+    // ryml tree. However, they CAN be parsed by the ryml parse engine.
+    // Therefore they are treated specifically.
+
+    _("4FJ6-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("4FJ6-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("6BFJ-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("6BFJ-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("6PBE-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("6PBE-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("6PBE-emit_yaml"          , "only scalar keys allowed (keys cannot be containers)"),
+    _("9MMW-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("9MMW-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("KK5P-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("KK5P-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("KZN9-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("KZN9-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("LX3P-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("LX3P-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("M2N8_00-in_yaml"         , "only scalar keys allowed (keys cannot be containers)"),
+    _("M2N8_00-out_yaml"        , "only scalar keys allowed (keys cannot be containers)"),
+    _("M2N8_01-in_yaml"         , "only scalar keys allowed (keys cannot be containers)"),
+    _("M2N8_01-out_yaml"        , "only scalar keys allowed (keys cannot be containers)"),
+    _("M5DY-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("M5DY-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("Q9WF-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("Q9WF-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("RZP5-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("RZP5-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("SBG9-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("SBG9-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("V9D5-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("V9D5-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("X38W-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("X38W-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+    _("XW4D-in_yaml"            , "only scalar keys allowed (keys cannot be containers)"),
+    _("XW4D-out_yaml"           , "only scalar keys allowed (keys cannot be containers)"),
+
+};
+
+#undef _
+
+
+AllowedFailure is_failure_expected_(csubstr casename, cspan<AllowedFailure> afs)
+{
+    RYML_CHECK_BASIC_(casename.not_empty());
+    for(AllowedFailure const& af : afs)
+        if(af.test_name == casename || casename.begins_with(af.test_name))
+            return af;
+    return {};
+}
+} // namespace anon
+
+
+AllowedFailure is_failure_expected(csubstr casename)
+{
+    return is_failure_expected_(casename, allowed_failures);
+}
+
+AllowedFailure case_has_container_keys(csubstr casename)
+{
+    return is_failure_expected_(casename, container_key_cases);
+}
+
+
+} // namespace c4
+} // namespace yml

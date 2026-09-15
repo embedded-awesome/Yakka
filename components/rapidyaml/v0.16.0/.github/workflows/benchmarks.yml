@@ -1,0 +1,201 @@
+# DO NOT EDIT - GENERATED FROM benchmarks.ys
+
+name: benchmarks
+defaults:
+  run:
+    shell: bash -e -x {0}
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - '**'
+env:
+  PROJ_PKG_NAME: rapidyaml-
+  PROJ_PFX_TARGET: ryml-
+  PROJ_PFX_CMAKE: RYML_
+  CMAKE_FLAGS: -DRYML_TEST_SUITE=ON
+  NUM_JOBS_BUILD: null
+jobs:
+  gettag:
+    runs-on: ubuntu-latest
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: Variables (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        set -exo pipefail
+        # https://github.community/t/how-to-get-just-the-tag-name/16241/11
+        SRC_TAG=${GITHUB_REF#refs/tags/}
+        SRC_VERSION=${GITHUB_REF#refs/tags/v}
+        SRC_VERSION_BODY=`pwd`/changelog/$SRC_VERSION.md
+        if [ ! -f $SRC_VERSION_BODY ] ; then
+          echo "version body file was not found: $SRC_VERSION_BODY"
+          exit 1
+        fi
+        cat <<EOF >> vars.sh
+        export SRC_TAG=$SRC_TAG
+        export SRC_VERSION=$SRC_VERSION
+        export SRC_VERSION_BODY=$SRC_VERSION_BODY
+        EOF
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: |
+        set -exo pipefail
+        branch_name=${GITHUB_REF#refs/heads/}
+        # builds triggered from PRs have the branch_name like this: refs/pull/150/merge
+        # so filter to eg pr0150_merge
+        branch_name=`echo $branch_name | sed "s:refs/pull/\([0-9]*\)/\(.*\):pr0\1_\2:"`
+        # sanitize the branch name; eg merge/foo-bar -> merge_foo_bar
+        branch_name=`echo $branch_name | sed 's:[/.-]:_:g'`
+        SRC_TAG=$(git describe || git rev-parse --short HEAD)  # eg v0.2.0-110-gda837e0
+        SRC_VERSION="${branch_name}-${SRC_TAG}"
+        cat <<EOF > vars.sh
+        export SRC_TAG=$SRC_TAG
+        export SRC_VERSION=$SRC_VERSION
+        EOF
+    - name: Save vars.sh
+      uses: actions/upload-artifact@v7
+      with:
+        name: vars.sh
+        path: ./vars.sh
+    - name: Show vars.sh
+      run: cat vars.sh
+    - name: Source vars.sh
+      run: source vars.sh
+    - name: Env (common)
+      run: |
+        source vars.sh
+        echo "SRC_TAG=$SRC_TAG" >> $GITHUB_ENV
+        echo "SRC_VERSION=$SRC_VERSION" >> $GITHUB_ENV
+    - name: Env (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        source vars.sh
+        echo "SRC_VERSION_BODY=$SRC_VERSION_BODY" >> $GITHUB_ENV
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: echo 'nothing to do'
+    - name: Verify vars.sh
+      run: env | grep SRC
+  benchmarks:
+    name: bm/c++${{matrix.std}}/${{matrix.comp}}/${{matrix.bt}}
+    needs: gettag
+    if: always()
+    continue-on-error: false
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 17
+          comp: gcc14
+          os: ubuntu-24.04
+          cmkflags: -DCMAKE_CXX_COMPILER=g++-14     -DCMAKE_C_COMPILER=gcc-14
+        - std: 17
+          comp: clang18
+          os: ubuntu-24.04
+          cmkflags: -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_C_COMPILER=clang-18
+        - std: 17
+          comp: vs2026
+          os: windows-2025
+          cmkflags: -G 'Visual Studio 18 2026' -A x64
+        - std: 17
+          comp: xcode16
+          os: macos-15-intel
+          xcver: 16
+          cmkflags: -G Xcode -DCMAKE_OSX_ARCHITECTURES=x86_64
+    env:
+      BM: 'ON'
+      STD: ${{matrix.std}}
+      CXX_: ${{matrix.cxx}}
+      BT: ${{matrix.bt}}
+      BITLINKS: ${{matrix.bitlinks}}
+      VG: ${{matrix.vg}}
+      SAN: ${{matrix.san}}
+      LINT: ${{matrix.lint}}
+      OS: ${{matrix.os}}
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: false
+        set-safe-directory: true
+    - name: Download vars.sh
+      uses: actions/download-artifact@v7
+      with:
+        name: vars.sh
+        path: ./
+    - name: Show vars.sh
+      run: cat vars.sh
+    - name: Source vars.sh
+      run: source vars.sh
+    - name: Env (common)
+      run: |
+        source vars.sh
+        echo "SRC_TAG=$SRC_TAG" >> $GITHUB_ENV
+        echo "SRC_VERSION=$SRC_VERSION" >> $GITHUB_ENV
+    - name: Env (from tag)
+      if: contains(github.ref, 'tags/v')
+      run: |
+        source vars.sh
+        echo "SRC_VERSION_BODY=$SRC_VERSION_BODY" >> $GITHUB_ENV
+    - name: Variables (from commit, no tag)
+      if: ${{ !contains(github.ref, 'tags/v') }}
+      run: echo 'nothing to do'
+    - name: Verify vars.sh
+      run: env | grep SRC
+    - name: install requirements
+      run: source .github/reqs.sh && c4_install_test_requirements $OS
+    - name: show info
+      run: source .github/setenv.sh && c4_show_info
+    - name: Install python 3.12
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: checkout c4core
+      run: make -C ext c4core
+    - name: install benchmark plotting dependencies
+      run: |
+        which python
+        which pip
+        python --version
+        pip --version
+        pip install -v -r proj/c4proj/bm-xp/requirements.txt
+        python -c 'import munch ; print("ok!") ; exit(0)'
+        echo $?
+    - name: configure-------------------------------------------------
+      run: |
+        cmake -S . -B build \
+            ${{matrix.cmkflags}} \
+            -DPython_EXECUTABLE="$(which python)" \
+            -DCMAKE_CXX_STANDARD=${{matrix.std}} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DRYML_BUILD_BENCHMARKS=ON
+    - name: build
+      run: cmake --build build --config Release --parallel --verbose --target ryml-bm-build
+    - name: run
+      run: cmake --build build --config Release --verbose --target ryml-bm-run
+    - name: plot
+      run: cmake --build build --config Release --verbose --target ryml-bm-plot
+    - name: gather benchmark results-------------------------------------------
+      run: |
+        set -xe
+        desc=`cd proj/ ; make describe`
+        dst=ryml-benchmark-results/$desc/x86_64/
+        name=${{matrix.comp}}-Release-cxx${{matrix.std}}
+        mkdir -p $dst
+        mv -vf build/bm/bm-results/ $dst/$name
+    - name: upload benchmark result artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: ryml-benchmark-results-${{matrix.comp}}
+        path: ryml-benchmark-results/

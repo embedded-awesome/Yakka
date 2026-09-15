@@ -1,0 +1,87 @@
+# DO NOT EDIT - GENERATED FROM emscripten.ys
+
+name: emscripten
+defaults:
+  run:
+    shell: bash -e -x {0}
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - '**'
+env:
+  PROJ_PKG_NAME: rapidyaml-
+  PROJ_PFX_TARGET: ryml-
+  PROJ_PFX_CMAKE: RYML_
+  CMAKE_FLAGS: -DRYML_TEST_SUITE=ON
+  NUM_JOBS_BUILD: null
+jobs:
+  emscripten:
+    name: emscripten/${{matrix.emver}}/c++${{matrix.std}}/${{matrix.bt}}
+    if: ${{ false }}
+    continue-on-error: false
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - std: 11
+          cxx: em++
+          emver: 2.0.34
+          bt: Release
+          os: ubuntu-latest
+          bitlinks: static32
+        - std: 20
+          cxx: em++
+          emver: 2.0.34
+          bt: Release
+          os: ubuntu-latest
+          bitlinks: static32
+        - std: 11
+          cxx: em++
+          emver: 3.0.0
+          bt: Release
+          os: ubuntu-latest
+          bitlinks: static32
+        - std: 20
+          cxx: em++
+          emver: 3.0.0
+          bt: Release
+          os: ubuntu-latest
+          bitlinks: static32
+    env:
+      STD: ${{matrix.std}}
+      CXX_: ${{matrix.cxx}}
+      BT: ${{matrix.bt}}
+      BITLINKS: ${{matrix.bitlinks}}
+      VG: ${{matrix.vg}}
+      SAN: ${{matrix.san}}
+      LINT: ${{matrix.lint}}
+      OS: ${{matrix.os}}
+      EMSCRIPTEN_CACHE_FOLDER: emsdk-cache
+      CMAKE_FLAGS: -DRYML_TEST_SUITE=OFF
+    steps:
+    - name: checkout
+      uses: actions/checkout@v6
+    - name: setup emscripten cache
+      id: cache-system-libraries
+      uses: actions/cache@v5
+      with:
+        path: ${{env.EMSCRIPTEN_CACHE_FOLDER}}
+        key: ${{matrix.emver}}-${{runner.os}}
+    - name: setup emscripten
+      uses: mymindstorm/setup-emsdk@v11
+      with:
+        version: ${{matrix.emver}}
+        actions-cache-folder: ${{env.EMSCRIPTEN_CACHE_FOLDER}}
+    - name: show info
+      run: source .github/setenv.sh && c4_show_info
+    - name: static32-configure-------------------------------------------------
+      run: source .github/setenv.sh && c4_cfg_test static32
+    - name: static32-build
+      run: source .github/setenv.sh && c4_build_test static32
+    - name: static32-run
+      run: source .github/setenv.sh && c4_run_test static32

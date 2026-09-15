@@ -1,0 +1,75 @@
+!yamlscript/v0:
+
+:use common: :all
+:: workflow-setup()
+
+jobs:
+  samples:
+    :: setup-job('samples' 'samples')
+    name: ${{matrix.name}}/${{matrix.bt}}
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - {name: linux/static      , os: ubuntu-24.04, bt: Debug  , args: -DBUILD_SHARED_LIBS=OFF}
+        - {name: linux/shared      , os: ubuntu-24.04, bt: Release, args: -DBUILD_SHARED_LIBS=ON}
+        #
+        - {name: macos/static      , os: macos-latest, bt: Debug  , args: -DBUILD_SHARED_LIBS=OFF}
+        - {name: macos/shared      , os: macos-latest, bt: Release, args: -DBUILD_SHARED_LIBS=ON}
+        #
+        - {name: win/static        , os: windows-latest, bt: Debug  , args: -DBUILD_SHARED_LIBS=OFF}
+        - {name: win/shared        , os: windows-latest, bt: Release, args: -DBUILD_SHARED_LIBS=ON}
+        #
+        - {name: win/clangcl/static, os: windows-latest, bt: Debug  , args: -DBUILD_SHARED_LIBS=OFF -T ClangCL}
+        - {name: win/clangcl/shared, os: windows-latest, bt: Release, args: -DBUILD_SHARED_LIBS=ON  -T ClangCL}
+        #
+        - {name: win/clang++/static, os: windows-latest, bt: Debug  , args: -DBUILD_SHARED_LIBS=OFF -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang}
+        - {name: win/clang++/shared, os: windows-latest, bt: Release, args: -DBUILD_SHARED_LIBS=ON  -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang}
+        #
+        - {name: win/gcc/static    , os: windows-latest, bt: Debug  , args: -DBUILD_SHARED_LIBS=OFF -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc}
+        - {name: win/gcc/shared    , os: windows-latest, bt: Release, args: -DBUILD_SHARED_LIBS=ON  -G "Unix Makefiles" -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc}
+    env: !:merge*
+    - ! load('share/env.yaml')
+    - CMANY: ON
+    steps:
+    - :: checkout-action
+    - :: install-python-action
+    - name: install requirements
+      run: source .github/reqs.sh && c4_install_test_requirements $OS
+    - name: checkout c4core
+      run: |
+        cd ext
+        make c4core
+    - name: show info
+      run: source .github/setenv.sh && c4_show_info
+    - name: add_subdirectory
+      run: cd samples/add_subdirectory && ./run.sh $BT ${{matrix.args}}
+    - name: ints_only
+      run: cd samples/ints_only && ./run.sh $BT ${{matrix.args}}
+    - name: singleheader
+      run: cd samples/singleheader && ./run.sh $BT ${{matrix.args}}
+    - name: singlesource
+      run: cd samples/singlesource && ./run.sh $BT ${{matrix.args}}
+    - name: singleheader-ints
+      run: cd samples/singleheader-ints && ./run.sh $BT ${{matrix.args}}
+    - name: singleheaderlib
+      run: cd samples/singleheaderlib && ./run.sh $BT ${{matrix.args}}
+    - name: singleheaderlib-ints
+      run: cd samples/singleheaderlib-ints && ./run.sh $BT ${{matrix.args}}
+    - name: find_package
+      run: cd samples/find_package && ./run.sh $BT ${{matrix.args}}
+    - name: custom_c4core
+      run: cd samples/custom_c4core && ./run.sh $BT . ${{matrix.args}}
+    - name: fetch_content
+      run: |
+        # run this sample only if the branch exists on the repo
+        set -xe
+        cd samples/fetch_content
+        repo=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY
+        # https://stackoverflow.com/questions/58033366
+        branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+        echo branch=$branch
+        if [ ! -z "$(git ls-remote $repo | grep $branch)" ] ; then
+           ./run.sh $BT $branch "$repo" ${{matrix.args}}
+        fi
