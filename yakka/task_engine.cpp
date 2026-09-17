@@ -65,9 +65,12 @@ void task_engine::init(task_complete_type task_complete_handler)
   this->task_complete_handler = task_complete_handler;
 }
 
-void task_engine::process_data_dependency(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, project &project, std::filesystem::file_time_type start_time)
+void task_engine::process_data_dependency(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, task_engine &engine, project &project, std::filesystem::file_time_type start_time)
 {
   spdlog::info("{}: data", target_name);
+  // has_data_dependency_changed() reads the shared project.project_summary tree, which
+  // other taskflow worker threads may be concurrently mutating in run_command().
+  std::lock_guard<std::mutex> tree_lock(engine.project_data_mutex);
   auto result = has_data_dependency_changed(target_name, project.previous_summary, project.project_summary);
   if (result) {
     construct_task->last_modified = *result ? fs::file_time_type::max() : fs::file_time_type::min();
@@ -162,7 +165,7 @@ std::shared_ptr<construction_task> task_engine::create_task_leaf_node(ryml::csub
 
   // Check if target is a data dependency
   if (target_name.front() == data_dependency_identifier) {
-    construct_task->task.work(std::function<void()>(std::bind(&task_engine::process_data_dependency, construct_task, target_name_string, std::ref(project), start_time)));
+    construct_task->task.work(std::function<void()>(std::bind(&task_engine::process_data_dependency, construct_task, target_name_string, std::ref(*this), std::ref(project), start_time)));
   }
   // Check if target name matches an existing file in filesystem
   else if (fs::exists(target_name_string)) {
@@ -290,7 +293,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 
   inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
     ryml::NodeRef aggregate = additional_data["values"].append_child();
-    aggregate |= ryml::MAP;
+    aggregate.set_map();
 
     auto path = ryml::Pointer{ args[0].val() };
     // Loop through components, check if object path exists, if so add it to the aggregate
@@ -383,6 +386,10 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
       int retcode             = 0;
 
       try {
+        // All reads/writes of the shared project.project_summary/project_data tree
+        // must happen while holding project_data_mutex, since multiple taskflow
+        // worker threads call run_command() concurrently on the same tree.
+        std::unique_lock<std::mutex> tree_lock(project_data_mutex);
         if (project.project_summary["tools"].has_child(command_name)) {
           auto tool                = project.project_summary["tools"][command_name];
           std::string command_text = "";
@@ -394,6 +401,9 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
           // Apply template engine
           arg_text = try_render(inja_env, arg_text, project.project_summary);
 
+          // The external tool doesn't touch the tree, so release the lock while it runs
+          // to keep tool executions (e.g. compiling) running in parallel across threads.
+          tree_lock.unlock();
           auto [temp_output, temp_retcode] = exec(command_text, arg_text);
           retcode                          = temp_retcode;
 
@@ -490,15 +500,15 @@ void task_engine::save_todolist(const std::filesystem::path &filename)
 {
   ryml::Tree output;
   auto root = output.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["version"] << 1;
 
   auto serialized_items = root["items"];
-  serialized_items |= ryml::MAP;
+  serialized_items.set_map();
 
   for (const auto &[target_name, construct_task]: todo_list) {
     auto item = serialized_items[target_name];
-    item |= ryml::MAP;
+    item.set_map();
 
     if (construct_task) {
       item["task_name"] << construct_task->task.name();
@@ -516,7 +526,7 @@ void task_engine::save_todolist(const std::filesystem::path &filename)
         item["group_total_count"] << 0;
         item["group_current_count"] << 0;
       }
-      item["successors"] |= ryml::SEQ;
+      item["successors"].set_seq();
       construct_task->task.for_each_successor([&](tf::Task successor) {
         item["successors"].append_child() << successor.name();
       });
@@ -713,11 +723,11 @@ void task_engine::save_taskflow(const std::filesystem::path &filename)
 {
   ryml::Tree output;
   auto root = output.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["version"] << 1;
 
   auto serialized_tasks = root["tasks"];
-  serialized_tasks |= ryml::SEQ;
+  serialized_tasks.set_seq();
 
   std::vector<tf::Task> tasks;
   std::unordered_map<tf::Task, size_t> task_ids;
@@ -728,11 +738,11 @@ void task_engine::save_taskflow(const std::filesystem::path &filename)
 
   for (const auto &task: tasks) {
     auto serialized_task = serialized_tasks.append_child();
-    serialized_task |= ryml::MAP;
+    serialized_task.set_map();
     serialized_task["name"] << task.name();
 
     auto successors = serialized_task["successors"];
-    successors |= ryml::SEQ;
+    successors.set_seq();
     task.for_each_successor([&](tf::Task successor) {
       successors.append_child() << task_ids.at(successor);
     });
@@ -810,6 +820,16 @@ yakka_status task_engine::load_taskflow(const std::filesystem::path &filename)
   todo_task_groups.clear();
 
   return yakka_status::SUCCESS;
+}
+
+void task_engine::mark_target_for_refresh(const ryml::csubstr target_name)
+{
+  spdlog::info("Marking target '{}' for refresh", target_name);
+  const auto range = todo_list.equal_range(target_name);
+  for (auto it = range.first; it != range.second; ++it) {
+    if (it->second)
+      it->second->last_modified = fs::file_time_type::min();
+  }
 }
 
 } // namespace yakka

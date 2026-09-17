@@ -17,10 +17,10 @@ blueprint_database::blueprint_database()
 {
   database.reserve_arena(8 * 1024 * 1024);                // Reserve 8MB to keep csubstr-backed arena storage stable during typical operations.
   database.add_flags(ryml::Tree::TREEF_NO_ARENA_REALLOC); // Forbid arena reallocations to ensure pointer stability of csubstrs.
-  database.rootref() |= ryml::MAP;
-  database["blueprints"] |= ryml::SEQ;
-  database["matches"] |= ryml::SEQ;
-  database["dependencies"] |= ryml::SEQ;
+  database.rootref().set_map();
+  database["blueprints"].set_seq();
+  database["matches"].set_seq();
+  database["dependencies"].set_seq();
 }
 
 /// @brief Executes find_match.
@@ -61,7 +61,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
 
     add_common_template_commands(local_inja_env);
 
-/// @brief Executes add_callback.
+    /// @brief Executes add_callback.
 
     local_inja_env.add_callback("$", 1, [&match](inja::Arguments &args, ryml::NodeRef additional_data) {
       const int32_t index = args[0].val<int32_t>().value();
@@ -71,19 +71,19 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
 
       return ryml::NodeRef{};
     });
-/// @brief Executes add_callback.
+    /// @brief Executes add_callback.
 
     local_inja_env.add_callback("curdir", 0, [&match](inja::Arguments &args, ryml::NodeRef additional_data) {
       return additional_data["values"].append_child() << match->blueprint->parent_path;
     });
 
-/// @brief Executes add_callback.
+    /// @brief Executes add_callback.
 
     local_inja_env.add_callback("render", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
       return additional_data["values"].append_child() << local_inja_env.render(args[0].val<std::string>().value(), project_summary);
     });
 
-/// @brief Executes add_callback.
+    /// @brief Executes add_callback.
 
     local_inja_env.add_callback("select", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
       // TODO
@@ -100,11 +100,11 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
       // }
       // return choice;
     });
-/// @brief Executes add_callback.
+    /// @brief Executes add_callback.
 
     local_inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
       auto aggregate = additional_data["values"].append_child();
-      aggregate |= ryml::MAP;
+      aggregate.set_map();
 
       auto path = ryml::Pointer{ args[0].val() };
 
@@ -205,7 +205,6 @@ void blueprint_database::load(const std::filesystem::path filename)
 {
   database = ryml_load_file(filename).value();
 
-
   // Generate blueprints from database
   blueprints.clear();
   for (const auto &blueprint_group: database.rootref().children()) {
@@ -213,10 +212,19 @@ void blueprint_database::load(const std::filesystem::path filename)
       if (!blueprint_node.is_map())
         return;
 
-      auto target = blueprint_node.has_child("target") ? blueprint_node["target"].val() : blueprint_group.key();
-      auto new_blueprint = std::make_shared<blueprint>(target, blueprint_node, blueprint_node.has_child("parent_path") ? blueprint_node["parent_path"].val() : c4::csubstr{});
+      auto target        = blueprint_node.has_child("target") ? blueprint_node["target"].val() : blueprint_group.key();
+      auto new_blueprint = std::make_shared<blueprint>(target,
+                                                       blueprint_node,
+                                                       blueprint_node.has_child("parent_path") ? blueprint_node["parent_path"].val() : c4::csubstr{},
+                                                       blueprint_node.has_child("parent_component") ? blueprint_node["parent_component"].val() : c4::csubstr{});
       if (new_blueprint->regex.has_value() && new_blueprint->regex->empty())
         new_blueprint->regex.reset();
+
+      if (blueprint_node.has_child("task_group") && blueprint_node["task_group"].has_val() && !blueprint_node["task_group"].val_is_null())
+        new_blueprint->task_group = blueprint_node["task_group"].val();
+      if (blueprint_node.has_child("requirements") && blueprint_node["requirements"].is_seq())
+        for (const auto &requirement_node: blueprint_node["requirements"].children())
+          new_blueprint->requirements.push_back(requirement_node.val());
 
       if (blueprint_node.has_child("dependencies") && blueprint_node["dependencies"].is_seq()) {
         new_blueprint->dependencies.clear();
@@ -249,28 +257,44 @@ void blueprint_database::save(const std::filesystem::path filename)
 
   output.reserve_arena(2 * 1024 * 1024); // Reserve 2MB for the arena to avoid reallocations during saving, which would invalidate all node references
   auto output_root = output.rootref();
-  output_root |= ryml::MAP;
+  output_root.set_map();
 
   for (const auto &bp: blueprints) {
     ryml::NodeRef blueprint_list;
     if (output_root.has_child(bp.first)) {
       blueprint_list = output_root[bp.first];
     } else {
-      blueprint_list = output_root.append_child() << ryml::Key(bp.first);
-      blueprint_list |= ryml::SEQ;
+      blueprint_list = output_root.append_child();
+      blueprint_list.save_key(bp.first);
+      blueprint_list.set_seq();
     }
 
     auto blueprint = blueprint_list.append_child();
-    blueprint |= ryml::MAP;
+    blueprint.set_map();
     blueprint["target"] << bp.second->target;
     blueprint["regex"] << bp.second->regex.value_or("");
     blueprint["parent_path"] << bp.second->parent_path;
+    blueprint["parent_component"] << bp.second->parent_component;
+    blueprint["task_group"] << (bp.second->task_group.empty() ? c4::csubstr{ "" } : bp.second->task_group);
 
-    auto dependencies = blueprint.append_child() << ryml::Key("dependencies");
-    dependencies |= ryml::SEQ;
+    if (bp.second->process.valid()) {
+      auto process = blueprint.append_child();
+      process.save_key("process");
+      merge_nodes(process, bp.second->process);
+    }
+
+    auto requirements = blueprint.append_child();
+    requirements.save_key("requirements");
+    requirements.set_seq();
+    for (const auto &requirement: bp.second->requirements)
+      requirements.append_child() << requirement;
+
+    auto dependencies = blueprint.append_child();
+    dependencies.save_key("dependencies");
+    dependencies.set_seq();
     for (const auto &dep: bp.second->dependencies) {
       auto dependency = dependencies.append_child();
-      dependency |= ryml::MAP;
+      dependency.set_map();
       dependency["type"] << dep.type;
       dependency["name"] << dep.name;
     }
@@ -325,11 +349,29 @@ std::vector<ryml::csubstr> blueprint_database::parse_gcc_dependency_file(const s
 
 /// @brief Executes create_blueprint.
 
-void blueprint_database::create_blueprint(const std::string &target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path)
+void blueprint_database::create_blueprint(const std::string &target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path, c4::csubstr parent_component)
 {
-  auto blueprint_target     = database["blueprints"].append_child() << target;
+  auto blueprint_target = database["blueprints"].append_child() << target;
 
-  auto new_blueprint = std::make_shared<blueprint>(blueprint_target.val(), blueprint_data, parent_path);
+  auto new_blueprint = std::make_shared<blueprint>(blueprint_target.val(), blueprint_data, parent_path, parent_component);
   blueprints.insert({ blueprint_target.val(), new_blueprint });
+}
+
+void blueprint_database::update_blueprint(const std::string &target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path, c4::csubstr parent_component)
+{
+  const auto target_key   = c4::to_csubstr(target);
+  const auto [begin, end] = blueprints.equal_range(target_key);
+  for (auto it = begin; it != end; ++it) {
+    if (it->second->parent_component != parent_component) {
+      continue;
+    }
+
+    // Replace content in-place so existing references to this blueprint stay valid
+    *it->second = blueprint{ it->second->target, blueprint_data, parent_path, parent_component };
+    spdlog::info("update_blueprint: Updated blueprint for target '{}' with parent component '{}'", target, ryml_string(parent_component));
+    return;
+  }
+
+  spdlog::warn("update_blueprint: No blueprint found for target '{}' with parent component '{}'", target, ryml_string(parent_component));
 }
 } // namespace yakka

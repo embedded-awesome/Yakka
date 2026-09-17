@@ -171,7 +171,7 @@ inline bool is_null_like(std::string_view view) {
 }
 
 inline bool node_is_null(const ConstNodeRef& node) {
-  if (!node.valid()) {
+  if (node.invalid()) {
     return true;
   }
   if (node.is_val() || node.is_keyval()) {
@@ -184,7 +184,7 @@ inline bool node_is_null(const ConstNodeRef& node) {
 }
 
 inline std::optional<std::string_view> node_scalar_view(const ConstNodeRef& node) {
-  if (!node.valid()) {
+  if (node.invalid()) {
     return std::nullopt;
   }
   if (node.is_val() || node.is_keyval()) {
@@ -277,7 +277,7 @@ inline std::string node_to_string(const ConstNodeRef& node) {
 }
 
 inline bool node_truthy(const ConstNodeRef& node) {
-  if (!node.valid()) {
+  if (node.invalid()) {
     return false;
   }
   if (node.has_children()) {
@@ -319,7 +319,7 @@ struct NativeValue {
 
 inline NativeValue to_native_value(const ConstNodeRef& node) {
   NativeValue out;
-  if (!node.valid() || node.has_children() || node_is_null(node)) {
+  if (node.invalid() || node.has_children() || node_is_null(node)) {
     return out;
   }
 
@@ -367,7 +367,10 @@ struct NativeNodeRef {
   explicit NativeNodeRef(ConstNodeRef ref): node(ref) {}
 
   bool valid() const {
-    return node.valid();
+    return !node.invalid();
+  }
+  bool invalid() const {
+    return node.invalid();
   }
 
   const NativeValue& value() const {
@@ -511,23 +514,23 @@ inline bool native_truthy(const NativeNodeRef& native_ref) {
 inline void write_native_value(NodeRef node, const NativeValue& value) {
   switch (value.kind) {
   case NativeKind::Bool:
-    node << (value.b ? "true" : "false");
+    node.save( (value.b ? "true" : "false"));
     break;
   case NativeKind::Int64:
-    node << value.i64;
+    node.save(value.i64);
     break;
   case NativeKind::UInt64:
-    node << value.u64;
+    node.save(value.u64);
     break;
   case NativeKind::Float64:
-    node << value.f64;
+    node.save(value.f64);
     break;
   case NativeKind::String:
-    node << to_csubstr(value.s);
+    node.save(to_csubstr(value.s));
     break;
   case NativeKind::Invalid:
   default:
-    node = nullptr;
+    node.set_val(nullptr);
     break;
   }
 }
@@ -539,7 +542,7 @@ inline NodeRef append_native_tmp(NodeRef tmp_root, const NativeValue& value) {
 }
 
 inline ConstNodeRef find_child_by_key(ConstNodeRef node, ::ryml::csubstr key) {
-  if (!node.valid()) {
+  if (node.invalid()) {
     return ConstNodeRef();
   }
   for (auto child : node.children()) {
@@ -551,7 +554,7 @@ inline ConstNodeRef find_child_by_key(ConstNodeRef node, ::ryml::csubstr key) {
 }
 
 inline NodeRef find_child_by_key(NodeRef node, ::ryml::csubstr key) {
-  if (!node.valid()) {
+  if (node.invalid()) {
     return NodeRef();
   }
   for (auto child : node.children()) {
@@ -595,38 +598,38 @@ inline ConstNodeRef resolve_pointer(ConstNodeRef root, const Pointer& ptr) {
 inline NodeRef ensure_child_map(NodeRef parent, std::string_view key) {
   const ::ryml::csubstr key_sub = to_csubstr(key);
   auto child = find_child_by_key(parent, key_sub);
-  if (!child.valid()) {
+  if (child.invalid()) {
     child = parent.append_child();
-    child << ::ryml::key(key_sub);
+    child.save_key(key_sub);
   }
-  child |= ::ryml::MAP;
+  child.set_map();
   return child;
 }
 
 inline NodeRef ensure_child_seq(NodeRef parent, std::string_view key) {
   const ::ryml::csubstr key_sub = to_csubstr(key);
   auto child = find_child_by_key(parent, key_sub);
-  if (!child.valid()) {
+  if (child.invalid()) {
     child = parent.append_child();
-    child << ::ryml::key(key_sub);
+    child.save_key(key_sub);
   }
-  child |= ::ryml::SEQ;
+  child.set_seq();
   return child;
 }
 
 inline NodeRef ensure_path(NodeRef root, const Pointer& ptr) {
   NodeRef current = root;
   for (const auto& token : ptr.tokens()) {
-    if (!current.valid()) {
+    if (current.invalid()) {
       return NodeRef();
     }
     if (!current.is_map()) {
-      current |= ::ryml::MAP;
+      current.set_map();
     }
     auto child = find_child_by_key(current, token);
-    if (!child.valid()) {
+    if (child.invalid()) {
       child = current.append_child();
-      child << ::ryml::key(token);
+      child.save_key(token);
     }
     current = child;
   }
@@ -634,7 +637,7 @@ inline NodeRef ensure_path(NodeRef root, const Pointer& ptr) {
 }
 
 inline void set_child_from_node(NodeRef parent, std::string_view key, ConstNodeRef src) {
-  if (!parent.valid()) {
+  if (parent.invalid()) {
     return;
   }
   const ::ryml::csubstr key_sub = to_csubstr(key);
@@ -644,7 +647,7 @@ inline void set_child_from_node(NodeRef parent, std::string_view key, ConstNodeR
 
   const size_t new_index = parent.tree()->duplicate(src.tree(), src.id(), parent.id(), /*parent.last_child().id());*/ c4::yml::NONE);
   auto node = NodeRef(parent.tree(), new_index);
-  node << ryml::key(key_sub);
+  node.save_key(key_sub);
 }
 
 } // namespace inja

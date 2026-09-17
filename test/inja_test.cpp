@@ -79,7 +79,9 @@ std::filesystem::path find_suite_root() {
 
 void register_callbacks(inja::Environment& env) {
   env.add_callback("render_marker", 0, [](inja::Arguments&, inja::NodeRef additional_data) {
-    return inja::ensure_child_seq(additional_data, "values").append_child() << "CALLBACK";
+    inja::NodeRef child = inja::ensure_child_seq(additional_data, "values").append_child();
+    child.save("CALLBACK");
+    return child;
   });
 }
 
@@ -88,7 +90,6 @@ inja::Environment make_environment(const std::filesystem::path& suite_root, test
   register_callbacks(env);
 
   if (mode == test_mode::custom_syntax) {
-    env.set_expression("<<", ">>");
     env.set_line_statement("$$");
     env.set_comment("/*", "*/");
   }

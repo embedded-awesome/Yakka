@@ -29,7 +29,8 @@ public:
   // void process_blueprint_target( const std::string target );
   std::vector<ryml::csubstr> parse_gcc_dependency_file(const std::string &filename);
 
-  void create_blueprint(const std::string &target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path);
+  void create_blueprint(const std::string &target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path, c4::csubstr parent_component);
+  void update_blueprint(const std::string &target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path, c4::csubstr parent_component);
 
   ryml::Tree database;
   std::multimap<c4::csubstr, std::shared_ptr<blueprint>> blueprints;

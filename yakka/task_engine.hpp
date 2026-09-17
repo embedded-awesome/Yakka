@@ -1,21 +1,22 @@
 #pragma once
 
 #include "yakka.hpp"
-#include "yakka_project.hpp"
 #include "blueprint_database.hpp"
 #include "taskflow.hpp"
-#include <ryml.hpp>
-#include <ryml_std.hpp>
+#include "ryml.hpp"
+#include "ryml_std.hpp"
 #include <string>
 #include <atomic>
 #include <filesystem>
 #include <memory>
 #include <functional>
 #include <map>
+#include <mutex>
 
 namespace yakka {
 
 class task_engine;
+class project;
 
 struct task_group {
   ryml::csubstr name;
@@ -52,7 +53,7 @@ struct task_engine_ui {
 
 class task_engine {
 private:
-  static void process_data_dependency(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, project &project, std::filesystem::file_time_type start_time);
+  static void process_data_dependency(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, task_engine &engine, project &project, std::filesystem::file_time_type start_time);
   static void update_file_timestamp(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name);
   static void process_task(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, task_engine &engine, project &project);
 
@@ -68,6 +69,7 @@ public:
   std::pair<std::string, int> run_command(const std::string target, std::shared_ptr<blueprint_match> blueprint, const project &project, ryml::NodeRef project_data);
   void run_taskflow(yakka::project &project, task_engine_ui *ui);
   bool is_valid();
+  void mark_target_for_refresh(const ryml::csubstr target_name);
 
   void save_taskflow(const std::filesystem::path &filename);
   yakka_status load_taskflow(const std::filesystem::path &filename);
@@ -80,6 +82,13 @@ public:
   std::atomic<bool> abort_build;
   ryml::Tree project_data;
   tf::Taskflow taskflow;
+
+  // Blueprint commands run in parallel (via taskflow worker threads) but they all read
+  // and mutate the single shared project.project_summary/project_data ryml::Tree.
+  // ryml::Tree is not thread-safe for concurrent mutation (even of disjoint subtrees,
+  // since appends can trigger shared node-pool/arena reallocation), so any access to
+  // that tree from run_command() must be serialized with this mutex.
+  std::mutex project_data_mutex;
 
   task_complete_type task_complete_handler;
   std::multimap<ryml::csubstr, std::shared_ptr<construction_task>> todo_list;

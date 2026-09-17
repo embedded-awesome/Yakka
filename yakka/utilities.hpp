@@ -55,6 +55,7 @@ static inline std::string ryml_string(c4::csubstr str)
 {
   return std::string(str.data(), str.size());
 }
+void ryml_diff(const ryml::ConstNodeRef left, const ryml::ConstNodeRef right, ryml::NodeRef diff);
 
 // std::tuple<component_list_t, feature_list_t, command_list_t> parse_arguments(const std::vector<std::string> &argument_string);
 std::string generate_project_name(const component_list_t &components, const feature_list_t &features);
@@ -112,5 +113,6 @@ static std::expected<CharContainer, std::error_code> get_file_contents(std::file
   }
   return std::unexpected(result.error());
 }
+
 
 } // namespace yakka

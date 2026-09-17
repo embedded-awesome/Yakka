@@ -42,7 +42,7 @@ TEST_CASE("copy environment") {
   std::string test_tpl = "{% include \"tpl\" %}";
 
   inja::Tree empty_data;
-  empty_data.rootref() |= ryml::MAP;
+  empty_data.rootref().set_map();
 
   REQUIRE(env.render(test_tpl, empty_data.rootref()) == "4");
 
@@ -61,8 +61,8 @@ TEST_CASE("copy environment") {
 TEST_CASE("loop frame sketch") {
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
-  root["outer"] |= ryml::SEQ;
+  root.set_map();
+  root["outer"].set_seq();
   root["outer"].append_child() << 10;
   root["outer"].append_child() << 20;
 
@@ -97,16 +97,16 @@ TEST_CASE("loop parent integration") {
   inja::Environment env;
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
-  root["outer"] |= ryml::SEQ;
+  root.set_map();
+  root["outer"].set_seq();
 
   auto first_row = root["outer"].append_child();
-  first_row |= ryml::SEQ;
+  first_row.set_seq();
   first_row.append_child() << "a";
   first_row.append_child() << "b";
 
   auto second_row = root["outer"].append_child();
-  second_row |= ryml::SEQ;
+  second_row.set_seq();
   second_row.append_child() << "c";
 
   const auto result = env.render(
@@ -120,7 +120,7 @@ TEST_CASE("macro global scope access") {
   inja::Environment env;
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["neighbour"] << "Peter";
 
   const auto result = env.render(

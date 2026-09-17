@@ -8,29 +8,29 @@ TEST_CASE("types") {
   inja::Environment env;
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["name"] << "Peter";
   root["city"] << "Brunswick";
   root["age"] << "29";
-  root["names"] |= ryml::SEQ;
+  root["names"].set_seq();
   root["names"].append_child() << "Jeff";
   root["names"].append_child() << "Seb";
-  root["brother"] |= ryml::MAP;
+  root["brother"].set_map();
   root["brother"]["name"] << "Chris";
-  root["brother"]["daughters"] |= ryml::SEQ;
+  root["brother"]["daughters"].set_seq();
   root["brother"]["daughters"].append_child() << "Maria";
   root["brother"]["daughters"].append_child() << "Helen";
-  root["brother"]["daughter0"] |= ryml::MAP;
+  root["brother"]["daughter0"].set_map();
   root["brother"]["daughter0"]["name"] << "Maria";
   root["is_happy"] << "true";
   root["is_sad"] << "false";
   root["@name"] << "@name";
   root["$name"] << "$name";
-  root["relatives"] |= ryml::MAP;
+  root["relatives"].set_map();
   root["relatives"]["mother"] << "Maria";
   root["relatives"]["brother"] << "Chris";
   root["relatives"]["sister"] << "Jenny";
-  root["vars"] |= ryml::SEQ;
+  root["vars"].set_seq();
   root["vars"].append_child() << "2";
   root["vars"].append_child() << "3";
   root["vars"].append_child() << "4";
@@ -181,7 +181,7 @@ Yeah!
 TEST_CASE("templates") {
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["name"] << "Peter";
   root["city"] << "Brunswick";
   root["is_happy"] << "true";
@@ -230,13 +230,13 @@ TEST_CASE("templates") {
   SUBCASE("include-in-loop") {
     inja::Tree loop_data;
     auto lroot = loop_data.rootref();
-    lroot |= ryml::MAP;
-    lroot["cities"] |= ryml::SEQ;
+    lroot.set_map();
+    lroot["cities"].set_seq();
     auto city0 = lroot["cities"].append_child();
-    city0 |= ryml::MAP;
+    city0.set_map();
     city0["name"] << "Munich";
     auto city1 = lroot["cities"].append_child();
-    city1 |= ryml::MAP;
+    city1.set_map();
     city1["name"] << "New York";
 
     inja::Environment env;
@@ -297,19 +297,19 @@ TEST_CASE("templates") {
 TEST_CASE("other syntax") {
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["name"] << "Peter";
   root["city"] << "Brunswick";
   root["age"] << "29";
-  root["names"] |= ryml::SEQ;
+  root["names"].set_seq();
   root["names"].append_child() << "Jeff";
   root["names"].append_child() << "Seb";
-  root["brother"] |= ryml::MAP;
+  root["brother"].set_map();
   root["brother"]["name"] << "Chris";
-  root["brother"]["daughters"] |= ryml::SEQ;
+  root["brother"]["daughters"].set_seq();
   root["brother"]["daughters"].append_child() << "Maria";
   root["brother"]["daughters"].append_child() << "Helen";
-  root["brother"]["daughter0"] |= ryml::MAP;
+  root["brother"]["daughter0"].set_map();
   root["brother"]["daughter0"]["name"] << "Maria";
   root["is_happy"] << "true";
 
@@ -351,7 +351,7 @@ TEST_CASE("macros") {
   inja::Environment env;
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["name"] << "Peter";
 
   SUBCASE("basic invocation") {

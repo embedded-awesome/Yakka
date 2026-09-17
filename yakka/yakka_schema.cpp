@@ -58,10 +58,13 @@ void schema::add_schema_data(ryml::ConstNodeRef schema_data)
 
   auto root = this->schema_data.rootref();
   if (!root.has_children()) {
-    root |= ryml::MAP;
-    root.append_child() << ryml::key("type") << "object";
-    auto properties = root.append_child() << ryml::key("properties");
-    properties |= ryml::MAP;
+    root.set_map();
+    auto type_node = root.append_child();
+    type_node.save_key("type");
+    type_node.save("object");
+    auto properties = root.append_child();
+    properties.save_key("properties");
+    properties.set_map();
   }
   merge_nodes(root["properties"], schema_data);
   validator_updated = false;

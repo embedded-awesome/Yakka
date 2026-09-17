@@ -9,12 +9,13 @@
 
 
 namespace yakka {
-blueprint::blueprint(c4::csubstr target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path)
+blueprint::blueprint(c4::csubstr target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path, c4::csubstr parent_component)
 {
-  this->target      = target;
-  this->parent_path = parent_path;
-  this->data        = blueprint_data;
-  this->process     = ryml::ConstNodeRef();
+  this->target           = target;
+  this->parent_path      = parent_path;
+  this->parent_component = parent_component;
+  this->data             = blueprint_data;
+  this->process          = ryml::ConstNodeRef();
 
   auto root = data;
 

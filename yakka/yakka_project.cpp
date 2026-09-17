@@ -6,6 +6,7 @@
 #include "yakka.hpp"
 #include "yakka_project.hpp"
 #include "yakka_schema.hpp"
+#include "task_engine.hpp"
 #include "utilities.hpp"
 
 #include "spdlog/spdlog.h"
@@ -37,47 +38,48 @@ project::project(yakka::workspace &workspace, const std::string project_name) : 
   // Setup the project data
   project_data.reserve_arena(16 * 1024 * 1024);               // Pre-allocate 16MB for the project data to avoid ANY reallocations
   project_data.add_flags(ryml::Tree::TREEF_NO_ARENA_REALLOC); // Forbid arena reallocations to ensure pointer stability
-  project_data.rootref() |= ryml::MAP;
+  project_data.rootref().set_map();
 
   if (!project_name.empty()) {
     output_path          = yakka::default_output_directory + project_name;
     project_summary_file = output_path / yakka::project_summary_filename;
     project_file         = project_name + ".yakka";
   }
-  project_summary = project_data.rootref().append_child() << ryml::key("current");
-  project_summary |= ryml::MAP;
-  previous_summary = project_data.rootref().append_child() << ryml::key("previous");
-  previous_summary |= ryml::MAP;
+  // init_project_summary();
+  template_contributions = project_data.rootref().append_child();
+  template_contributions.save_key("template_contributions");
+  template_contributions.set_map();
 
-  template_contributions = project_data.rootref().append_child() << ryml::key("template_contributions");
-  template_contributions |= ryml::MAP;
-
-  project_data["initial_features"] |= ryml::SEQ;
-  project_data["initial_components"] |= ryml::SEQ;
-  project_data["commands"] |= ryml::SEQ;
-
-  project_summary["choices"] |= ryml::MAP;
-  project_summary["components"] |= ryml::MAP;
-  project_summary["features"] |= ryml::SEQ;
-  project_summary["tools"] |= ryml::MAP;
-  project_summary["data"] |= ryml::MAP;
+  project_data["initial_features"].set_seq();
+  project_data["initial_components"].set_seq();
+  project_data["commands"].set_seq();
 
   add_common_template_commands(inja_environment);
 }
-
-/// @brief Executes ~project.
 
 project::~project()
 {
 }
 
+void project::init_project_summary()
+{
+  project_summary = project_data.rootref().append_child();
+  project_summary.save_key("current");
+  project_summary.set_map();
+  project_summary["choices"].set_map();
+  project_summary["components"].set_map();
+  project_summary["features"].set_seq();
+  project_summary["tools"].set_map();
+  project_summary["data"].set_map();
 
-/// @brief Executes set_project_directory.
+  previous_summary = project_data.rootref().append_child();
+  previous_summary.save_key("previous");
+  previous_summary.set_map();
+}
 
 void project::set_project_directory(const std::string path)
 {
   project_directory = path;
-
 }
 
 void project::parse_project_string(const std::vector<std::string> &project_string)
@@ -111,8 +113,8 @@ void project::process_build_string(const std::string word)
 void project::init_project(const std::vector<std::string> build_string_list)
 {
   for (const auto &build_string: build_string_list)
-
     process_build_string(build_string);
+  
   init_project();
 }
 
@@ -149,7 +151,6 @@ void project::init_project(std::vector<ryml::csubstr> components, std::vector<ry
 }
 
 /// @brief Executes init_project.
-
 void project::init_project()
 {
   if (project_name.empty()) {
@@ -171,8 +172,43 @@ void project::init_project()
     project_summary_last_modified = fs::last_write_time(project_summary_file);
     auto file_content             = yakka::get_file_contents<std::string>(project_summary_file);
     if (file_content) {
-      ryml::parse_in_arena(ryml::to_csubstr(*file_content), project_data.rootref());
-      project_summary = project_data["current"];
+      try {
+        // Rename the existing current entry
+        if (project_data.rootref().has_child("current")) {
+          project_summary.save_key("startup");
+        }
+        
+        ryml::parse_in_arena(ryml::to_csubstr(*file_content), project_data);
+
+        // spdlog::info("Loaded project summary: '{}'", ryml::emitrs_json<std::string>(project_data));
+        if (!project_data.rootref().has_child("current") || !project_data["current"].valid() || !project_data["current"].is_map()) {
+          spdlog::warn("Project summary file '{}' has no valid current summary", project_summary_file.generic_string());
+          init_project_summary();
+        } else {
+          project_summary  = project_data["current"];
+          previous_summary = project_data.rootref()["previous"];
+          previous_summary.set_map();
+          previous_summary.tree()->duplicate_children(project_summary.tree(), project_summary.id(), previous_summary.id(), c4::yml::NONE);
+          // spdlog::info("Duplicated to previous summary: '{}'", ryml::emitrs_json<std::string>(previous_summary));
+          current_summary_diff.valid                     = true;
+          current_summary_diff.components_changed        = false;
+          current_summary_diff.component_content_changed = false;
+
+          // Fill required_features with features from project summary
+          for (const auto &f: project_summary["features"]) {
+            if (!f.has_val()) {
+              spdlog::error("Invalid feature entry in project summary: '{}'", f.key());
+              continue;
+            }
+            required_features.insert(f.val());
+          }
+
+          update_summary();
+        }
+
+      } catch (const std::exception &e) {
+        spdlog::warn("Failed to load project summary file '{}': {}", project_summary_file.generic_string(), e.what());
+      }
     }
     // auto result                   = ryml_load_file(project_summary_file);
     // if (!result) {
@@ -181,18 +217,10 @@ void project::init_project()
     // }
     // project_summary = result.value().rootref();
 
-    // Fill required_features with features from project summary
-    for (const auto &f: project_summary["features"]) {
-      if (!f.has_val()) {
-        spdlog::error("Invalid feature entry in project summary: '{}'", f.key());
-        continue;
-      }
-      required_features.insert(f.val());
-    }
-
-    update_summary();
-  } else
+  } else {
     fs::create_directories(output_path);
+    init_project_summary();
+  }
 
   // Check if there is a project file
   if (fs::exists(project_file)) {
@@ -291,7 +319,9 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
       const auto choice_name = choice.key();
       if (!project_summary["choices"].has_child(choice_name)) {
         unprocessed_choices.insert(choice_name);
-        project_summary["choices"].append_child() << ryml::key(choice_name) << choice.val();
+        auto choice_node = project_summary["choices"].append_child();
+        choice_node.save_key(choice_name);
+        choice_node.save(choice.val());
         project_summary["choices"][choice_name]["parent"] = component->root["name"].val();
       }
     }
@@ -316,11 +346,9 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
 }
 
 /// @brief Executes update_summary.
-
 void project::update_summary()
 {
   // Check if any component files have been modified
-
   for (auto node: project_summary["components"].children()) {
     if (!node.valid())
       continue;
@@ -336,14 +364,97 @@ void project::update_summary()
     auto yakka_file = ryml_path(node["yakka_file"].val());
     if (!std::filesystem::exists(yakka_file) || std::filesystem::last_write_time(yakka_file) > project_summary_last_modified) {
       // If so, move existing node to previous summary
+      spdlog::info("Component '{}' has been modified. Moving to previous summary", name);
       node.move(previous_summary["components"], previous_summary["components"].last_child());
       unprocessed_components.insert(name);
     } else {
       // Previous summary should point to the same object
       previous_summary["components"][name] = node;
+      required_components.insert(name);
+
+      // Reconstruct the component from the loaded summary instead of re-parsing its file
+      auto new_component       = std::make_shared<yakka::component>();
+      new_component->id        = name;
+      new_component->root      = node;
+      new_component->file_path = yakka_file;
+      if (node.has_child("directory"))
+        new_component->component_path = node["directory"].val<std::string>().value();
+      if (node.has_child("blueprints"))
+        new_component->blueprints = node["blueprints"];
+      if (node.has_child("version")) {
+        try {
+          new_component->version = semver::version::parse(node["version"].val<std::string>().value());
+        } catch (std::exception &e) {
+          spdlog::error("Failed to parse version for component '{}': {}", name, e.what());
+          new_component->version = semver::version::parse("0.0.0");
+        }
+      } else {
+        new_component->version = semver::version::parse("0.0.0");
+      }
+
+      if (yakka_file.filename().extension() == slce_component_extension)
+        new_component->type = component::SLCE_FILE;
+      else if (yakka_file.filename().extension() == slcc_component_extension)
+        new_component->type = component::SLCC_FILE;
+      else if (yakka_file.filename().extension() == slcp_component_extension)
+        new_component->type = component::SLCP_FILE;
+      else
+        new_component->type = component::YAKKA_FILE;
+
+      components.insert({ new_component->id, new_component });
     }
   }
   previous_summary["data"] = project_summary["data"];
+}
+
+bool project::process_missing_blueprints()
+{
+  spdlog::info("Checking for missing blueprints");
+  auto t1 = std::chrono::high_resolution_clock::now();
+  for (const auto &c: commands) {
+    if (blueprint_database.blueprints.contains(c))
+      continue;
+
+    // Find a component that has that blueprint
+    auto result = workspace.find_blueprint(c);
+    if (result) {
+      const auto blueprint_options = result.value();
+      if (blueprint_options.num_children() == 1) {
+        auto component_name  = blueprint_options[0].val();
+        auto component_paths = workspace.find_component(component_name);
+        if (component_paths) {
+          auto [component_path, db_path] = component_paths.value();
+          spdlog::info("Found a blueprint for {}: {}", c, component_path.string());
+          add_additional_tool(component_path);
+        } else {
+          spdlog::error("Could not find component for blueprint: {}", c);
+        }
+      } else {
+        spdlog::error("Multiple options for missing blueprint {}", c);
+        for (const auto &o: blueprint_options)
+          spdlog::error("- {}", o.val<std::string>().value());
+        return false;
+      }
+    } else {
+      spdlog::info("Did not find a blueprint for {}", c);
+      return false;
+    }
+  }
+  auto t2       = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  spdlog::info("{}ms to validate blueprints", duration);
+  return true;
+}
+
+/// @brief Classifies component membership changes after refreshing the project summary.
+void project::update_summary_diff()
+{
+  current_summary_diff.data = ryml::Tree{};
+  auto diff_root            = current_summary_diff.data.rootref();
+  diff_root.set_map();
+  ryml_diff(project_summary, previous_summary, diff_root);
+
+  // spdlog::info("Project summary diff: {}", ryml::emitrs_json<std::string>(diff_root));
 }
 
 /// @brief Executes add_component.
@@ -351,7 +462,6 @@ void project::update_summary()
 bool project::add_component(std::string &component_name, component_database::flag flags)
 {
   return add_component(c4::to_csubstr(component_name), flags);
-
 }
 
 /// @brief Executes add_component.
@@ -359,7 +469,6 @@ bool project::add_component(std::string &component_name, component_database::fla
 bool project::add_component(c4::csubstr component_name, component_database::flag flags)
 {
   // Convert string to id
-
   const auto component_id = component_dotname_to_id(component_name);
 
   // Check if component has been replaced
@@ -384,10 +493,11 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
 
   auto [component_path, package_path]             = component_location.value();
   std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
-  auto new_component_node                         = project_summary["components"].append_child() << ryml::key(component_id);
-  new_component_node |= ryml::MAP;
+  auto new_component_node                         = project_summary["components"].append_child();
+  new_component_node.save_key(component_id);
+  new_component_node.set_map();
   if (new_component->parse_file(component_path, package_path, new_component_node) == yakka::yakka_status::SUCCESS) {
-    components.push_back(new_component);
+    components.insert({ new_component->id, new_component });
   } else {
     project_summary["components"].remove_child(component_id);
     current_state = project::state::PROJECT_HAS_INVALID_COMPONENT;
@@ -481,8 +591,8 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
         unprocessed_choices.insert(choice_name);
         choice.duplicate(project_summary["choices"], project_summary["choices"].last_child());
         // auto new_choice = project_summary["choices"].append_child();
-        // new_choice |= ryml::MAP;
-        // new_choice.set_key_serialized(choice_name);
+        // new_choice.set_map();
+        // new_choice.save_key(choice_name);
         // new_choice.set_val_serialized(choice.val());
         project_summary["choices"][choice_name]["parent"] << new_component->id;
       }
@@ -529,7 +639,7 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
   }
 
   // Process all the existing components support for the new component
-  for (auto &c: components)
+  for (auto &[name, c]: components)
     if (c->root.contains(_supports_components_pointer / component_id)) {
       spdlog::info("Processing component '{}' in {}", component_id, c->root["name"].val<std::string>().value());
       process_requirements(c, c->root["supports"]["components"][component_id]);
@@ -552,7 +662,7 @@ bool project::add_feature(c4::csubstr &feature_name)
   }
 
   // Process the feature "supports" for each existing component
-  for (auto &c: components)
+  for (auto &[name, c]: components)
     if (c->root.contains(_supports_features_pointer / feature_name)) {
       spdlog::info("Processing feature '{}' in {}", feature_name, c->root["name"].val<std::string>().value());
       process_requirements(c, c->root["supports"]["features"][feature_name]);
@@ -567,8 +677,8 @@ project::state project::process_choice(c4::csubstr &choice_name)
 {
   const auto &choice = project_summary["choices"][choice_name];
 
-  int matches        = 0;
-  int option_count   = 0;
+  int matches      = 0;
+  int option_count = 0;
 
   // Go through each option
   for (const auto &o: choice["options"]) {
@@ -836,7 +946,7 @@ void project::evaluate_choices()
 {
   // For each component, check each choice has exactly one match in required features unless it's a multi
 
-  for (const auto &c: components) {
+  for (const auto &[name, c]: components) {
     if (c->root.contains("choices") && c->root["choices"].has_children()) {
       for (auto choice: c->root["choices"].children()) {
         int matches      = 0;
@@ -895,26 +1005,27 @@ void project::generate_project_summary()
   project_summary["project_file"] << project_file.string();
   project_summary["project_output"] << default_output_directory + project_name;
   // project_summary["configuration"]  << workspace.summary["configuration"];
+  if (project_summary.contains("configuration"))
+    project_summary.remove_child("configuration");
   workspace.summary["configuration"].duplicate(project_summary, project_summary.last_child());
 
   // TODO: Implement ryml version - needs json::object()
   if (!project_summary.contains("tools"))
-    project_summary["tools"] |= ryml::MAP;
+    project_summary["tools"].set_map();
 
   // Put all YAML nodes into the summary
-  for (const auto &c: components) {
+  for (const auto &[name, c]: components) {
     // c->root.move(project_summary["components"], project_summary["components"].last_child());
     // c->root.duplicate(project_summary["components"], project_summary["components"].last_child());
     // project_summary["components"][c->id] << c->root;
     if (c->root.contains("tools")) {
       for (auto child: c->root["tools"].children()) {
         inja::Environment inja_env;
-/// @brief Executes add_callback.
+        /// @brief Executes add_callback.
 
         inja_env.add_callback("curdir", 0, [&c](inja::Arguments &args, ryml::NodeRef additional_data) {
           return additional_data["values"].append_child() << std::filesystem::absolute(c->component_path).string();
         });
-
 
         if (child.has_key())
           if (child.has_val())
@@ -927,13 +1038,18 @@ void project::generate_project_summary()
     }
   }
 
-  // project_summary["features"] |= ryml::SEQ;
-  for (auto &i: this->required_features)
-    project_summary["features"].append_child() << i;
+  // project_summary["features"].set_seq();
+  if (project_summary["features"].num_children() == 0)
+    for (auto &i: this->required_features)
+      project_summary["features"].append_child() << i;
 
-  project_summary["initial"] |= ryml::MAP;
-  project_summary["initial"]["components"] |= ryml::SEQ;
-  project_summary["initial"]["features"] |= ryml::SEQ;
+  // Delete existing initial components and features if they exist
+  if (project_summary.contains("initial"))
+    project_summary.remove_child("initial");
+
+  project_summary["initial"].set_map();
+  project_summary["initial"]["components"].set_seq();
+  project_summary["initial"]["features"].set_seq();
 
   for (auto &i: this->initial_components)
     project_summary["initial"]["components"].append_child() << i;
@@ -941,8 +1057,8 @@ void project::generate_project_summary()
     project_summary["initial"]["features"].append_child() << i;
 
   // TODO: Implement ryml version - needs json::object()
-  project_summary["data"] |= ryml::MAP;
-  project_summary["host"] |= ryml::MAP;
+  project_summary["data"].set_map();
+  project_summary["host"].set_map();
   project_summary["host"]["name"] << host_os_string;
 }
 
@@ -960,7 +1076,7 @@ void project::generate_project_summary()
  */
 void project::process_blueprints()
 {
-  for (const auto &c: components)
+  for (const auto &[name, c]: components)
     process_blueprints(c);
 }
 
@@ -1052,7 +1168,7 @@ void project::validate_schema()
 {
   // Verify schema for each component
 
-  for (const auto &c: components) {
+  for (const auto &[name, c]: components) {
     if (project_schema.validate(c->root, c->id) == false)
       current_state = state::PROJECT_HAS_FAILED_SCHEMA_CHECK;
   }
@@ -1071,14 +1187,14 @@ void project::update_project_data()
   std::unordered_set<ryml::csubstr> required_data;
 
   // Gather all the required data
-  for (const auto &c: components)
+  for (const auto &[name, c]: components)
     if (c->root.contains(ryml::Pointer("/requires/data")))
       for (const auto &d: c->root.at(ryml::Pointer("/requires/data"))) {
         required_data.insert(d.val());
       }
 
   // Merge all the component data into the project summary
-  for (const auto &c: components) {
+  for (const auto &[name, c]: components) {
     for (const auto &r: required_data) {
       const auto pointer = ryml::Pointer(r);
       if (!c->root.contains(pointer)) {
@@ -1088,9 +1204,9 @@ void project::update_project_data()
 
       if (!project_summary["data"].contains(pointer)) {
         if (component_node.is_seq())
-          project_summary["data"][pointer] |= ryml::SEQ;
+          project_summary["data"][pointer].set_seq();
         else if (component_node.is_map())
-          project_summary["data"][pointer] |= ryml::MAP;
+          project_summary["data"][pointer].set_map();
         else
           project_summary["data"][pointer] |= ryml::VAL;
       }
@@ -1138,7 +1254,7 @@ bool project::condition_is_fulfilled(ryml::ConstNodeRef node)
 
 void project::create_config_file(const std::shared_ptr<yakka::component> component, ryml::ConstNodeRef config, const std::string &prefix, std::string instance_name)
 {
-  std::string config_filename            = config["path"].val<std::string>().value();
+  std::string config_filename = config["path"].val<std::string>().value();
 
   std::filesystem::path config_file_path = component->component_path / config_filename;
 
@@ -1182,17 +1298,17 @@ void project::create_config_file(const std::shared_ptr<yakka::component> compone
 
   // Create blueprints
   ryml::NodeRef blueprint = component->blueprints.append_child();
-  blueprint.set_key_serialized(destination_path.string());
-  blueprint |= ryml::MAP;
-  blueprint["depends"] |= ryml::SEQ;
-  blueprint["process"] |= ryml::SEQ;
+  blueprint.save_key(destination_path.string());
+  blueprint.set_map();
+  blueprint["depends"].set_seq();
+  blueprint["process"].set_seq();
   blueprint["depends"].append_child() << config_file_path.string();
   blueprint["depends"].append_child() << "{{project_output}}/template_contributions.json";
   auto process_node = blueprint["process"].append_child();
-  process_node |= ryml::MAP;
+  process_node.set_map();
   process_node["inja"] << "{% set input = read_file(\"" + config_file_path.string() + "\" )%}{{replace(input, \"\\bINSTANCE\\b\", \"" + instance_name + "\")}}";
   process_node = blueprint["process"].append_child();
-  process_node |= ryml::MAP;
+  process_node.set_map();
   process_node["save"] << nullptr;
 
   component->root["generated"]["includes"].append_child() << destination_path.string();
@@ -1202,11 +1318,15 @@ void project::create_config_file(const std::shared_ptr<yakka::component> compone
 
 void project::process_slc_rules()
 {
-  // Go through each SLC based component
+  // Go through each SLC based component. Newly discovered components (e.g. from SLCE files) are
+  // appended to the pending queue so they get processed in this same pass.
+  std::vector<std::shared_ptr<yakka::component>> pending;
+  pending.reserve(components.size());
+  for (const auto &[name, c]: components)
+    pending.push_back(c);
 
-  // std::vector<std::shared_ptr<yakka::component>>::size_type size = components.size();
-  for (std::vector<std::shared_ptr<yakka::component>>::size_type i = 0; i < components.size(); ++i) {
-    const auto &c = components[i];
+  for (std::vector<std::shared_ptr<yakka::component>>::size_type i = 0; i < pending.size(); ++i) {
+    const auto &c = pending[i];
     if (c->type == component::YAKKA_FILE)
       continue;
 
@@ -1222,13 +1342,15 @@ void project::process_slc_rules()
         for (const auto &component_path: glob::rglob(p["path"].val<std::string>().value() + "/**/*.slcc")) {
           // Only add component if it hasn't been seen before
           if (added_components.insert(component_path).second == true) {
-            std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
-            auto new_component_node                         = project_summary["components"].append_child() << ryml::Key("__temp__");
-            new_component_node |= ryml::MAP;
+            auto new_component      = std::make_shared<yakka::component>();
+            auto new_component_node = project_summary["components"].append_child();
+            new_component_node.save_key("__temp__");
+            new_component_node.set_map();
             if (new_component->parse_file(component_path, "", new_component_node) == yakka::yakka_status::SUCCESS) {
-              components.push_back(new_component);
+              components.insert({ new_component->id, new_component });
+              pending.push_back(new_component);
               // Set the key to the ID
-              new_component_node << ryml::key(new_component->id);
+              new_component_node.save_key(new_component->id);
 
               // ++size;
               // Process all the required components
@@ -1382,14 +1504,20 @@ void project::process_slc_rules()
           c->root["generated"]["files"].append_child() << target;
 
         // Create blueprints
-        auto blueprint = c->root["blueprints"].append_child() << ryml::key(target);
-        blueprint |= ryml::MAP;
-        blueprint["depends"] |= ryml::SEQ;
-        blueprint["process"] |= ryml::SEQ;
-        blueprint["depends"].append_child() << c->root["directory"].val<std::string>().value() + "/" + template_file.string();
-        blueprint["depends"].append_child() << "{{project_output}}/template_contributions.json";
-        blueprint["process"].append_child() << ryml::key("jinja") << "-t " + c->root["directory"].val<std::string>().value() + "/" + template_file.string() + " -d {{project_output}}/template_contributions.json";
-        blueprint["process"].append_child() << ryml::key("save");
+        auto blueprint = c->root["blueprints"].append_child();
+        blueprint.save_key(target);
+        blueprint.set_map();
+        blueprint["depends"].set_seq();
+        blueprint["process"].set_seq();
+        blueprint["depends"].append_child().save(c->root["directory"].val<std::string>().value() + "/" + template_file.string());
+        blueprint["depends"].append_child().save("{{project_output}}/template_contributions.json");
+
+        auto process_node = blueprint["process"].append_child();
+        process_node.save_key("jinja");
+        process_node.save("-t " + c->root["directory"].val<std::string>().value() + "/" + template_file.string() + " -d {{project_output}}/template_contributions.json");
+
+        auto save_node = blueprint["process"].append_child();
+        save_node.save_key("save");
 
         // c->root["blueprints"][target] = blueprint;
       }
@@ -1409,8 +1537,8 @@ void project::process_slc_rules()
   }
 
   // Process toolchain settings
-  project_summary["toolchain_settings"] |= ryml::MAP;
-  for (const auto &c: components) {
+  project_summary["toolchain_settings"].set_map();
+  for (const auto &[name, c]: components) {
     if (c->root.contains("toolchain_settings") == false)
       continue;
 
@@ -1424,7 +1552,7 @@ void project::process_slc_rules()
           project_summary["toolchain_settings"][key].append_child() << s["value"].val();
         else {
           auto current_value = project_summary["toolchain_settings"][key].val();
-          project_summary["toolchain_settings"][key].set_type(ryml::SEQ);
+          project_summary["toolchain_settings"][key].set_seq();
           project_summary["toolchain_settings"][key].append_child() << current_value;
           project_summary["toolchain_settings"][key].append_child() << s["value"].val();
         }
@@ -1435,8 +1563,9 @@ void project::process_slc_rules()
 
   // Go through the template_contributions and sort via priorities
   // TODO: Implement ryml version - local json variables for sorting
-  ryml::NodeRef new_contributions = template_contributions.append_child() << ryml::key("sorted");
-  new_contributions |= ryml::MAP;
+  ryml::NodeRef new_contributions = template_contributions.append_child();
+  new_contributions.save_key("sorted");
+  new_contributions.set_map();
   for (auto item: template_contributions.children()) {
     while (item.valid() && item.num_children() > 0) {
       // Remove the item with the lowest priority
@@ -1479,7 +1608,7 @@ void project::process_blueprints(const std::shared_ptr<component> c)
       spdlog::info("Additional blueprint: {}", blueprint_string);
       try {
         // ryml::Tree blueprint_tree = ryml::parse_in_arena(b.val());
-        blueprint_database.create_blueprint(blueprint_string, b, c->root["directory"].val());
+        blueprint_database.create_blueprint(blueprint_string, b, c->root["directory"].val(), c->id);
         // auto new_blueprint        = std::make_shared<blueprint>(c4::to_csubstr(blueprint_string), b, c->root["directory"].val());
         // blueprint_database.blueprints.insert({ c4::to_csubstr(blueprint_string), new_blueprint });
       } catch (const std::exception &e) {
@@ -1497,12 +1626,11 @@ void project::process_tools(const std::shared_ptr<component> c)
 
     for (auto i: c->root["tools"].children()) {
       inja::Environment inja_env;
-/// @brief Executes add_callback.
+      /// @brief Executes add_callback.
 
       inja_env.add_callback("curdir", 0, [&c](inja::Arguments &args, ryml::NodeRef additional_data) {
         return additional_data["values"].append_child() << std::filesystem::absolute(c->component_path).string();
       });
-
 
       project_summary["tools"][i.key()] << try_render(inja_env, i.val(), project_summary);
     }
@@ -1520,7 +1648,6 @@ void project::load_projects()
 void project::save_blueprints()
 {
   blueprint_database.save(this->output_path / "blueprints.json");
-
 }
 
 void project::process_construction(indicators::ProgressBar &bar)
@@ -1542,8 +1669,43 @@ void project::add_additional_tool(const std::filesystem::path component_path)
   process_tools(tool_component);
 
   // Add component to project
-  components.push_back(tool_component);
+  components.insert({ tool_component->id, tool_component });
   additional_tools.insert(tool_component->id);
+}
+
+void project::process_summary_diff()
+{
+  if (!current_summary_diff.data.rootref().has_children())
+    return;
+
+  auto root = current_summary_diff.data.rootref();
+  if (!root.has_child("components"))
+    return;
+
+  for (const auto c: root["components"].children()) {
+    if (!c.has_child("blueprints"))
+      continue;
+
+    // Flag every target that was produced by a changed blueprint so it gets re-evaluated
+    for (const auto node: c["blueprints"].children()) {
+      if (!node.valid())
+
+        spdlog::info("Processing blueprint '{}' for component '{}'", node.key(), c.key());
+      const auto blueprint_name = node.key();
+      const auto &component     = components[c.key()];
+      const auto blueprint_node = component->blueprints[blueprint_name];
+
+      // Update the blueprint
+      blueprint_database.update_blueprint(ryml_string(blueprint_name), blueprint_node, component->root["directory"].val(), component->id);
+
+      for (const auto &[key, match_list]: target_database.targets) {
+        for (const auto &match: match_list) {
+          if (match && match->blueprint && match->blueprint->target == blueprint_name)
+            task_engine.mark_target_for_refresh(key);
+        }
+      }
+    }
+  }
 }
 
 } /* namespace yakka */

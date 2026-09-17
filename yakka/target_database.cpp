@@ -11,6 +11,7 @@
 
 #include <regex>
 #include <fstream>
+#include <algorithm>
 
 namespace yakka {
 
@@ -27,7 +28,7 @@ const std::vector<std::shared_ptr<blueprint_match>>& target_database::add_target
   return targets[target];
 }
 
-yakka_status target_database::load(const std::filesystem::path file_path)
+yakka_status target_database::load(const std::filesystem::path file_path, const blueprint_database &blueprint_database)
 {
   targets.clear();
 
@@ -68,28 +69,14 @@ yakka_status target_database::load(const std::filesystem::path file_path)
         const auto blueprint_entry = match_entry["blueprint"];
         const auto blueprint_target = blueprint_entry.has_child("target") ? blueprint_entry["target"].val() : c4::csubstr{};
         const auto parent_path      = blueprint_entry.has_child("parent_path") ? blueprint_entry["parent_path"].val() : c4::csubstr{};
-        match->blueprint            = std::make_shared<blueprint>(blueprint_target, blueprint_entry, parent_path);
+        const auto blueprint_range = blueprint_database.blueprints.equal_range(blueprint_target);
+        const auto blueprint_it    = std::find_if(blueprint_range.first, blueprint_range.second, [parent_path](const auto &entry) {
+          return entry.second->parent_path == parent_path;
+        });
+        if (blueprint_it == blueprint_range.second)
+          return yakka_status::LOAD_FAILED;
 
-        if (blueprint_entry.has_child("task_group"))
-          match->blueprint->task_group = blueprint_entry["task_group"].val();
-        if (blueprint_entry.has_child("process"))
-          match->blueprint->process = blueprint_entry["process"];
-        if (blueprint_entry.has_child("requirements") && blueprint_entry["requirements"].is_seq()) {
-          for (const auto &requirement_entry: blueprint_entry["requirements"].children())
-            match->blueprint->requirements.push_back(requirement_entry.val());
-        }
-        if (blueprint_entry.has_child("dependencies") && blueprint_entry["dependencies"].is_seq()) {
-          for (const auto &blueprint_dependency_entry: blueprint_entry["dependencies"].children()) {
-            if (!blueprint_dependency_entry.is_map())
-              continue;
-
-            blueprint::dependency dependency;
-            const auto dependency_type = blueprint_dependency_entry.has_child("type") ? blueprint_dependency_entry["type"].val<int>().value_or(blueprint::dependency::DEFAULT_DEPENDENCY) : blueprint::dependency::DEFAULT_DEPENDENCY;
-            dependency.type = static_cast<blueprint::dependency::dependency_type>(dependency_type);
-            dependency.name = blueprint_dependency_entry.has_child("name") ? blueprint_dependency_entry["name"].val() : c4::csubstr{};
-            match->blueprint->dependencies.push_back(dependency);
-          }
-        }
+        match->blueprint = blueprint_it->second;
       }
 
       matches.push_back(match);
@@ -107,59 +94,43 @@ yakka_status target_database::save(const std::filesystem::path file_path)
   ryml::Tree output;
   output.reserve_arena(512 * 1024);
   auto root = output.rootref();
-  root |= ryml::MAP;
+  root.set_map();
 
-  auto targets_node = root.append_child() << ryml::Key("targets");
-  targets_node |= ryml::SEQ;
+  auto targets_node = root.append_child();
+  targets_node.save_key("targets");
+  targets_node.set_seq();
 
   for (const auto &entry: targets) {
     auto target_entry = targets_node.append_child();
-    target_entry |= ryml::MAP;
+    target_entry.set_map();
     target_entry["target"] << entry.first;
 
-    auto matches_node = target_entry.append_child() << ryml::Key("matches");
-    matches_node |= ryml::SEQ;
+    auto matches_node = target_entry.append_child();
+    matches_node.save_key("matches");
+    matches_node.set_seq();
 
     for (const auto &match: entry.second) {
       auto match_node = matches_node.append_child();
-      match_node |= ryml::MAP;
+      match_node.set_map();
 
-      auto dependencies_node = match_node.append_child() << ryml::Key("dependencies");
-      dependencies_node |= ryml::SEQ;
+      auto dependencies_node = match_node.append_child();
+      dependencies_node.save_key("dependencies");
+      dependencies_node.set_seq();
       for (const auto &dependency: match->dependencies)
         dependencies_node.append_child() << dependency;
 
-      auto regex_matches_node = match_node.append_child() << ryml::Key("regex_matches");
-      regex_matches_node |= ryml::SEQ;
+      auto regex_matches_node = match_node.append_child();
+      regex_matches_node.save_key("regex_matches");
+      regex_matches_node.set_seq();
       for (const auto &regex_match: match->regex_matches)
         regex_matches_node.append_child() << regex_match;
 
       if (match->blueprint) {
-        auto blueprint_node = match_node.append_child() << ryml::Key("blueprint");
-        blueprint_node |= ryml::MAP;
+        auto blueprint_node = match_node.append_child();
+        blueprint_node.save_key("blueprint");
+        blueprint_node.set_map();
         blueprint_node["target"] << match->blueprint->target;
-        blueprint_node["regex"] << match->blueprint->regex.value_or(c4::csubstr{});
         blueprint_node["parent_path"] << match->blueprint->parent_path;
-        blueprint_node["task_group"] << match->blueprint->task_group;
-
-        if (match->blueprint->process.valid()) {
-          auto process_node = blueprint_node.append_child() << ryml::Key("process");
-          merge_nodes(process_node, match->blueprint->process);
-        }
-
-        auto requirements_node = blueprint_node.append_child() << ryml::Key("requirements");
-        requirements_node |= ryml::SEQ;
-        for (const auto &requirement: match->blueprint->requirements)
-          requirements_node.append_child() << requirement;
-
-        auto blueprint_dependencies_node = blueprint_node.append_child() << ryml::Key("dependencies");
-        blueprint_dependencies_node |= ryml::SEQ;
-        for (const auto &dependency: match->blueprint->dependencies) {
-          auto dependency_node = blueprint_dependencies_node.append_child();
-          dependency_node |= ryml::MAP;
-          dependency_node["type"] << dependency.type;
-          dependency_node["name"] << dependency.name;
-        }
       }
     }
   }

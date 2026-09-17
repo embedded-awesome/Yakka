@@ -11,6 +11,7 @@
 #include "spdlog/spdlog.h"
 #include "semver/semver.hpp"
 #include <fstream>
+#include <string>
 
 using namespace semver::literals;
 
@@ -91,7 +92,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
     auto new_root = root.append_sibling();
     // ryml::Tree new_tree;
     // auto new_root = new_tree.rootref();
-    new_root |= ryml::MAP;
+    new_root.set_map();
 
     for (const auto &item: root.children()) {
       if (item.is_map() && item.num_children() == 1) {
@@ -99,7 +100,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
           auto child = new_root.append_child();
           child.set_key(kv.key());
           if (kv.has_val()) {
-            child.set_val(kv.val());
+            child.set_val(kv.val(), ryml::VAL_SQUO);
           } else if (kv.is_map() || kv.is_seq()) {
             // TODO: Need to properly copy the subtree
           }
@@ -141,7 +142,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
 
     // Add directory to tree
     auto dir_node = root.append_child();
-    dir_node << ryml::key("directory");
+    dir_node.save_key("directory");
     dir_node << path_string;
 
     // Set version
@@ -166,7 +167,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
         // If it's a scalar, convert to sequence
         if (components_node.is_val()) {
           std::string value = components_node.val<std::string>().value();
-          components_node |= ryml::SEQ;
+          components_node.set_seq();
           auto child = components_node.append_child();
           child << value;
         }
@@ -177,7 +178,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
         // If it's a scalar, convert to sequence
         if (features_node.is_val()) {
           std::string value = features_node.val<std::string>().value();
-          features_node |= ryml::SEQ;
+          features_node.set_seq();
           auto child = features_node.append_child();
           child << value;
         }
@@ -252,8 +253,12 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
 
   // Add known information
   auto yakka_file_node = root.append_child();
-  yakka_file_node << ryml::key("yakka_file");
+  yakka_file_node.save_key("yakka_file");
   yakka_file_node << file_path.string();
+
+  // Ensure blueprints reference is valid, even if the component defines none
+  blueprints = root["blueprints"];
+  blueprints.set_map();
 
   // Populate json cache for backward compatibility
   // json = ryml_to_json(tree.rootref());
@@ -266,8 +271,7 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
 
 void component::convert_to_yakka()
 {
-  auto root = tree.rootref();
-
+  auto &root = this->root;
 
   // Set basic data such as directory and name
   if (root.has_child("id")) {
@@ -277,7 +281,7 @@ void component::convert_to_yakka()
     // Set name
     if (!root.has_child("name")) {
       auto name_node = root.append_child();
-      name_node << ryml::key("name");
+      name_node.save_key("name");
       name_node << id_val;
     }
     this->id = id_node.val();
@@ -286,7 +290,7 @@ void component::convert_to_yakka()
     this->id = root["id"].val();
 
     auto name_node = root.append_child();
-    name_node << ryml::key("name");
+    name_node.save_key("name");
     root["name"] << this->id;
   }
 
@@ -322,7 +326,7 @@ void component::convert_to_yakka()
     dir_node << component_path.string();
   } else {
     auto dir_node = root.append_child();
-    dir_node << ryml::key("directory");
+    dir_node.save_key("directory");
     dir_node << component_path.string();
   }
 
@@ -333,10 +337,10 @@ void component::convert_to_yakka()
       // Create new provides structure
       ryml::Tree temp_tree;
       auto temp_root = temp_tree.rootref();
-      temp_root |= ryml::MAP;
+      temp_root.set_map();
       auto features_node = temp_root.append_child();
-      features_node << ryml::key("features");
-      features_node |= ryml::SEQ;
+      features_node.save_key("features");
+      features_node.set_seq();
 
       for (const auto &p: provides_node.children()) {
         if (p.is_map() && p.has_child("name")) {
@@ -366,10 +370,10 @@ void component::convert_to_yakka()
       // Create new requires structure
       ryml::Tree temp_tree;
       auto temp_root = temp_tree.rootref();
-      temp_root |= ryml::MAP;
+      temp_root.set_map();
       auto features_node = temp_root.append_child();
-      features_node << ryml::key("features");
-      features_node |= ryml::SEQ;
+      features_node.save_key("features");
+      features_node.set_seq();
 
       for (const auto &p: requires_node.children()) {
         if (p.is_map() && p.has_child("name")) {
@@ -398,15 +402,15 @@ void component::convert_to_yakka()
       // Ensure requires/components exists
       if (!root.has_child("requires")) {
         auto req_node = root.append_child();
-        req_node << ryml::key("requires");
-        req_node |= ryml::MAP;
+        req_node.save_key("requires");
+        req_node.set_map();
       }
       auto requires_node = root.find_child("requires");
 
       if (!requires_node.has_child("components")) {
         auto comp_node = requires_node.append_child();
-        comp_node << ryml::key("components");
-        comp_node |= ryml::SEQ;
+        comp_node.save_key("components");
+        comp_node.set_seq();
       }
       auto req_components_node = requires_node.find_child("components");
 

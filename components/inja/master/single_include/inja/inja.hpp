@@ -775,7 +775,7 @@ inline void set_child_from_node(NodeRef parent, std::string_view key, ConstNodeR
 
   const size_t new_index = parent.tree()->duplicate(src.tree(), src.id(), parent.id(), /*parent.last_child().id());*/ c4::yml::NONE);
   auto node = NodeRef(parent.tree(), new_index);
-  node << ryml::key(key_sub);
+  node.save_key(key_sub);
 }
 
 } // namespace inja
@@ -890,6 +890,7 @@ public:
     Macro,
     Callback,
     Hex,
+    ToYaml,
     SetAt,
     Fetch,
     PushBack,
@@ -946,6 +947,7 @@ private:
       {std::make_pair("super", 1), FunctionData {Operation::Super}},
       {std::make_pair("join", 2), FunctionData {Operation::Join}},
       {std::make_pair("hex", 1), FunctionData {Operation::Hex}},
+      {std::make_pair("to_yaml", 1), FunctionData {Operation::ToYaml}},
       {std::make_pair("setAt", 2), FunctionData {Operation::SetAt}},
       {std::make_pair("setAt", 3), FunctionData {Operation::SetAt}},
       {std::make_pair("fetch", 1), FunctionData {Operation::Fetch}},
@@ -3119,7 +3121,7 @@ class Renderer : public NodeVisitor {
     if (!field.valid()) {
       const auto key_sub = to_csubstr(key);
       field = node.append_child();
-      field << ryml::Key(key_sub);
+      field.set_key(key_sub);
     }
     field << (value ? "true" : "false");
   }
@@ -3129,7 +3131,7 @@ class Renderer : public NodeVisitor {
     if (!field.valid()) {
       const auto key_sub = to_csubstr(key);
       field = node.append_child();
-      field << ryml::Key(key_sub);
+      field.save_key(key_sub);
     }
     field << value;
   }
@@ -3138,7 +3140,7 @@ class Renderer : public NodeVisitor {
     auto field = find_child_by_key(node, to_csubstr("key"));
     if (!field.valid()) {
       field = node.append_child();
-      field << ryml::Key("key");
+      field.save_key("key");
     }
     field << value;
   }
@@ -3423,15 +3425,17 @@ class Renderer : public NodeVisitor {
     additional_data = macro_scope;
     current_loop_data = find_child_by_key(additional_data, to_csubstr("loop"));
     if (!current_loop_data.valid()) {
-      current_loop_data = additional_data.append_child() << ryml::key("loop");
+      current_loop_data = additional_data.append_child();
+      current_loop_data.save_key("loop");
     }
-    current_loop_data |= ryml::MAP;
+    current_loop_data.set_map();
     current_loop_data.clear_children();
     tmp_sequence = find_child_by_key(additional_data, to_csubstr("_tmp"));
     if (!tmp_sequence.valid()) {
-      tmp_sequence = additional_data.append_child() << ryml::key("_tmp");
+      tmp_sequence = additional_data.append_child();
+      tmp_sequence.save_key("_tmp");
     }
-    tmp_sequence |= ryml::SEQ;
+    tmp_sequence.set_seq();
     tmp_sequence.clear_children();
     output_stream = &macro_output;
     break_rendering = false;
@@ -3785,7 +3789,7 @@ class Renderer : public NodeVisitor {
     case Op::Range: {
       const auto limit = native_to_int(get_arguments<1>(node)[0]);
       auto result = tmp_sequence.append_child();
-      result |= ryml::SEQ;
+      result.set_seq();
       if (limit && *limit > 0) {
         for (int64_t i = 0; i < *limit; ++i) {
           auto child = result.append_child();
@@ -3806,7 +3810,7 @@ class Renderer : public NodeVisitor {
       const auto input = native_to_string(args[0]);
       const auto delimiter = native_to_string(args[1]);
       auto result = tmp_sequence.append_child();
-      result |= ryml::SEQ;
+      result.set_seq();
 
       if (delimiter.empty()) {
         for (char c : input) {
@@ -3856,7 +3860,7 @@ class Renderer : public NodeVisitor {
       const auto args = get_arguments<2>(node);
       const auto regex_match = std::regex(native_to_string(args[1]));
       auto filtered = tmp_sequence.append_child();
-      filtered |= ryml::SEQ;
+      filtered.set_seq();
       for (const auto& item : args[0].node.children()) {
         if ((item.is_val() || item.is_keyval()) && std::regex_match(node_to_string(item), regex_match)) {
           filtered.append_child() << item.val();
@@ -3878,7 +3882,7 @@ class Renderer : public NodeVisitor {
     case Op::Sort: {
       const auto value = get_arguments<1>(node)[0];
       auto result = tmp_sequence.append_child();
-      result |= ryml::SEQ;
+      result.set_seq();
       if (value.valid()) {
         std::vector<ConstNodeRef> children;
         for (const auto& child : value.node.children()) {
@@ -3979,6 +3983,10 @@ class Renderer : public NodeVisitor {
     case Op::Hex: {
       make_result(std::format("{:x}", native_to_int(get_arguments<1>(node)[0]).value_or(0)));
     } break;
+    case Op::ToYaml: {
+      const auto value = get_arguments<1>(node)[0];
+      make_result(value.valid() ? ryml::emitrs_yaml<std::string>(value.node) : std::string {});
+    } break;
     case Op::SetAt: {
       const auto args = get_argument_vector(node);
       const auto num_args = args.size();
@@ -4003,10 +4011,10 @@ class Renderer : public NodeVisitor {
       if (num_args == 2) {
         // setAt(path, value)
         if (args[1].is_map()) {
-          arg0_ref |= ryml::MAP;
+          arg0_ref.set_map();
           additional_data.tree()->duplicate(args[1].tree(), args[1].id(), arg0_ref.id(), NONE);
         } else if (args[1].is_seq()) {
-          arg0_ref |= ryml::SEQ;
+          arg0_ref.set_seq();
           additional_data.tree()->duplicate_children(args[1].tree(), args[1].id(), arg0_ref.id(), NONE);
         } else {
           arg0_ref << args[1].val();
@@ -4065,7 +4073,7 @@ class Renderer : public NodeVisitor {
           additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), arg0_ref.last_child().id());
         } else {
           if (!arg0_ref.is_seq()) {
-            arg0_ref |= ryml::SEQ;
+            arg0_ref.set_seq();
           }
           arg0_ref.append_child() << args[1].node.val();
         }
@@ -4074,7 +4082,7 @@ class Renderer : public NodeVisitor {
         const auto args = get_arguments<3>(node);
         ryml::Pointer ptr{ native_to_string(args[1]) };
         if (!arg0_ref.contains(ptr)) {
-          arg0_ref[ptr] |= ryml::SEQ;
+          arg0_ref[ptr].set_seq();
           arg0_ref[ptr].set_key_serialized(ptr.back());
         }
         if (args[2].node.is_map()) {
@@ -4083,7 +4091,7 @@ class Renderer : public NodeVisitor {
           additional_data.tree()->duplicate_children(args[2].node.tree(), args[2].node.id(), arg0_ref[ptr].id(), NONE);
         } else {
           if (!arg0_ref[ptr].is_seq()) {
-            arg0_ref[ptr] |= ryml::SEQ;
+            arg0_ref[ptr].set_seq();
           }
           arg0_ref[ptr].append_child() << args[2].node.val();
         }
@@ -4100,7 +4108,7 @@ class Renderer : public NodeVisitor {
     case Op::Unique: {
       const auto args = get_arguments<1>(node);
       auto filtered = tmp_sequence.append_child();
-      filtered |= ryml::SEQ;
+      filtered.set_seq();
       std::unordered_set<std::string> seen;
       for (const auto& i : args[0].node.children()) {
         auto val_str = native_to_string(NativeNodeRef(i));
@@ -4316,7 +4324,7 @@ class Renderer : public NodeVisitor {
     }
     auto new_index = parent.tree()->duplicate(result.node.tree(), result.node.id(), parent.id(), NONE);
     auto new_node = NodeRef(parent.tree(), new_index);
-    new_node << ryml::key(last_key);
+    new_node.save_key(last_key);
   }
 
   void visit(const MacroStatementNode&) override {
@@ -4342,10 +4350,12 @@ public:
 
     template_scope_data = shared_additional_data;
     additional_data = shared_additional_data;
-    current_loop_data = additional_data.append_child() << ryml::key("loop");
-    current_loop_data |= ryml::MAP;
-    tmp_sequence = additional_data.append_child() << ryml::key("_tmp");
-    tmp_sequence |= ryml::SEQ;
+    current_loop_data = additional_data.append_child();
+    current_loop_data.save_key("loop");
+    current_loop_data.set_map();
+    tmp_sequence = additional_data.append_child();
+    tmp_sequence.save_key("_tmp");
+    tmp_sequence.set_seq();
 
     template_stack.emplace_back(current_template);
     current_template->root.accept(*this);
@@ -4509,9 +4519,9 @@ public:
 
   std::ostream& render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data) {
     NodeRef additional_data = temp_data_tree.rootref().append_child();
-    additional_data |= ryml::MAP;
-    // additional_data["store"] |= ryml::MAP;
-    additional_data["values"] |= ryml::SEQ;
+    additional_data.set_map();
+    // additional_data["store"].set_map();
+    additional_data["values"].set_seq();
     Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data, additional_data);
     temp_data_tree.remove(additional_data.id());
     return os;
@@ -4571,7 +4581,7 @@ public:
     function_storage.add_callback(name, num_args, [callback](Arguments& args, NodeRef additional_data) {
       callback(args, additional_data);
       auto root = additional_data;
-      root |= ryml::MAP;
+      root.set_map();
       auto tmp = ensure_child_seq(root, "_tmp");
       auto node = tmp.append_child();
       node = nullptr;

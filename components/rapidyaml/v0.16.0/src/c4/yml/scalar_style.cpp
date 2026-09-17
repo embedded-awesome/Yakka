@@ -149,9 +149,13 @@ NodeType scalar_style_choose_block(csubstr scalar) noexcept
     {
         if(scalar_style_query_plain_block(scalar))
             return SCALAR_PLAIN;
-        RYML_ASSERT_BASIC_(scalar_style_query_squo(scalar)
-                           && "if this assertion fires, please submit an issue!");
-        return SCALAR_SQUO;
+        // single-quoted scalars cannot represent leading whitespace right
+        // after a newline; fall back to double-quoted in that case instead
+        // of asserting (eg. multi-line strings with indented continuation
+        // lines, such as Kconfig/devicetree help text).
+        if(scalar_style_query_squo(scalar))
+            return SCALAR_SQUO;
+        return SCALAR_DQUO;
     }
     return scalar.str ? SCALAR_SQUO : SCALAR_PLAIN;
 }

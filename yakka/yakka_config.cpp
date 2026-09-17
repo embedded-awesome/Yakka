@@ -156,11 +156,11 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
 
     ryml::Tree registries_tree;
     auto root = registries_tree.rootref();
-    root |= ryml::MAP;
+    root.set_map();
     for (const auto &entry : workspace.registries) {
       ryml::NodeRef child = root.append_child();
-      child << ryml::key(entry.first);
-      child |= ryml::MAP;
+      child.save_key(entry.first);
+      child.set_map();
       child.tree()->merge_with(&entry.second, entry.second.root_id(), child.id());
     }
     res.set_content(ryml::emitrs_json<std::string>(registries_tree), "application/json");
@@ -200,7 +200,7 @@ void start_config_server(yakka::workspace &workspace, bool &server_running)
         // Merge data from the project file
         // const auto project_json = ryml_to_json(node.crootref());
         auto node = project_summary["temp"].append_child();
-        node |= ryml::MAP;
+        node.set_map();
         ryml::parse_in_arena(ryml::to_csubstr(*file_content), node);
         json_node_merge(ryml::Pointer{"/data"}, project_summary["data"], node);
       }

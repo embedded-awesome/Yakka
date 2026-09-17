@@ -164,9 +164,9 @@ public:
 
   std::ostream& render_to(std::ostream& os, const Template& tmpl, const ConstNodeRef& data) {
     NodeRef additional_data = temp_data_tree.rootref().append_child();
-    additional_data |= ryml::MAP;
-    // additional_data["store"] |= ryml::MAP;
-    additional_data["values"] |= ryml::SEQ;
+    additional_data.set_map();
+    // additional_data["store"].set_map();
+    additional_data["values"].set_seq();
     Renderer(render_config, template_storage, function_storage).render_to(os, tmpl, data, additional_data);
     temp_data_tree.remove(additional_data.id());
     return os;
@@ -226,10 +226,10 @@ public:
     function_storage.add_callback(name, num_args, [callback](Arguments& args, NodeRef additional_data) {
       callback(args, additional_data);
       auto root = additional_data;
-      root |= ryml::MAP;
+      root.set_map();
       auto tmp = ensure_child_seq(root, "_tmp");
       auto node = tmp.append_child();
-      node = nullptr;
+      node.set_val(nullptr);
       return ConstNodeRef(node);
     });
   }

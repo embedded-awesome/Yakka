@@ -6,10 +6,11 @@
 #include "component_database.hpp"
 #include "target_database.hpp"
 #include "blueprint_database.hpp"
+#include "task_engine.hpp"
 #include "yakka_schema.hpp"
 //#include "yaml-cpp/yaml.h"
-#include <ryml.hpp>
-#include <ryml_std.hpp>
+#include "ryml.hpp"
+#include "ryml_std.hpp"
 #include "inja.hpp"
 #include "spdlog/spdlog.h"
 #include "indicators/progress_bar.hpp"
@@ -20,6 +21,7 @@
 #include <map>
 #include <unordered_set>
 #include <optional>
+#include <string>
 #include <functional>
 
 namespace fs = std::filesystem;
@@ -28,6 +30,13 @@ namespace yakka {
 
 class project {
 public:
+  struct summary_diff {
+    bool valid = false;
+    bool components_changed = true;
+    bool component_content_changed = true;
+    ryml::Tree data;
+  };
+
   enum class state {
     PROJECT_HAS_UNKNOWN_COMPONENTS,
     PROJECT_HAS_REMOTE_COMPONENTS,
@@ -50,6 +59,7 @@ public:
   void init_project(const std::string build_string);
   void init_project(const std::vector<std::string> build_string_list);
   void init_project();
+  void init_project_summary();
   void process_build_string(const std::string build_string);
   void parse_project_string(const std::vector<std::string> &project_string);
   void process_requirements(std::shared_ptr<yakka::component> component, ryml::ConstNodeRef child_node);
@@ -68,8 +78,11 @@ public:
   void process_blueprints(const std::shared_ptr<component> c);
 
   void process_blueprints();
+  void process_summary_diff();
   void update_summary();
+  void update_summary_diff();
   void generate_project_summary();
+  bool process_missing_blueprints();
 
   // Target database management
   void generate_target_database();
@@ -118,14 +131,16 @@ public:
   std::filesystem::path project_summary_file;
   std::filesystem::path project_file;
   fs::file_time_type project_summary_last_modified;
-  std::vector<std::shared_ptr<yakka::component>> components;
+  std::map<c4::csubstr, std::shared_ptr<yakka::component>> components;
   //yakka::component_database component_database;
   yakka::blueprint_database blueprint_database;
   yakka::target_database target_database;
+  yakka::task_engine task_engine;
 
   ryml::Tree project_data;
   ryml::NodeRef previous_summary;
   ryml::NodeRef project_summary;
+  summary_diff current_summary_diff;
 
   yakka::schema project_schema;
   yakka::schema data_schema;

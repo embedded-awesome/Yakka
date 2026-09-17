@@ -8,9 +8,9 @@ TEST_CASE("loading") {
   inja::Environment env;
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   auto name = root.append_child();
-  name << ryml::key("name") << "Jeff";
+  name.save_key("name") << "Jeff";
 
   SUBCASE("Files should be loaded") {
     CHECK(env.load_file((test_file_directory / "simple.txt").string()) == "Hello {{ name }}.");
@@ -67,9 +67,9 @@ TEST_CASE("global-path") {
   inja::Environment env_result {"./"};
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   auto name = root.append_child();
-  name << ryml::key("name") << "Jeff";
+  name.save_key("name") << "Jeff";
 
   SUBCASE("Files should be written") {
     env.write("simple.txt", data.rootref(), "global-path-result.txt");
@@ -83,9 +83,9 @@ TEST_CASE("include-files") {
   inja::Environment env {test_file_directory};
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   auto name = root.append_child();
-  name << ryml::key("name") << "Jeff";
+  name.save_key("name") << "Jeff";
 
   SUBCASE("from text") {
     CHECK(env.render_file("include.txt", data.rootref()) == "Answer: Hello Jeff.");
@@ -106,9 +106,9 @@ TEST_CASE("include-in-memory-and-file-template") {
 
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   auto name = root.append_child();
-  name << ryml::key("name") << "Jeff";
+  name.save_key("name") << "Jeff";
 
   std::string error_message = "[inja.exception.file_error] failed accessing file at '" + (test_file_directory / "body").string() + "'";
   CHECK_THROWS_WITH(env.render_file("include-both.txt", data.rootref()), error_message.c_str());

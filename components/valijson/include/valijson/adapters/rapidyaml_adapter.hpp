@@ -762,12 +762,12 @@ class RymlArrayValueIterator
 
     bool operator==(const RymlArrayValueIterator &other) const
     {
-        return m_itr == other.m_itr;
+        return !(m_itr != other.m_itr);
     }
 
     bool operator!=(const RymlArrayValueIterator &other) const
     {
-        return !(m_itr == other.m_itr);
+        return m_itr != other.m_itr;
     }
 
     const RymlArrayValueIterator &operator++()
@@ -841,12 +841,12 @@ class RymlObjectMemberIterator
 
     bool operator==(const RymlObjectMemberIterator &other) const
     {
-        return m_itr == other.m_itr;
+        return !(m_itr != other.m_itr);
     }
 
     bool operator!=(const RymlObjectMemberIterator &other) const
     {
-        return !(m_itr == other.m_itr);
+        return m_itr != other.m_itr;
     }
 
     const RymlObjectMemberIterator &operator++()

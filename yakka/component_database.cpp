@@ -63,12 +63,12 @@ static void initialize_database(ryml::Tree &database)
   // database.clear();
 
   auto root = database.rootref();
-  root |= ryml::MAP;
+  root.set_map();
 
   auto ensure_map = [&](const char *key) {
     ryml::NodeRef child = root.append_child();
-    child << ryml::Key(key);
-    child |= ryml::MAP;
+    child.save_key(key);
+    child.set_map();
   };
 
   ensure_map("blueprints");
@@ -109,7 +109,7 @@ void component_database::insert(ryml::csubstr id, const path &config_file)
 
   auto components_node = database.rootref()[pointer]; //ryml_navigate_path(database.rootref(), std::vector<std::string>{ "components", std::string{ id } }, true);
   if (components_node.is_seed() || !components_node.is_seq()) {
-    components_node |= ryml::SEQ;
+    components_node.set_seq();
   }
   auto entry = components_node.append_child();
   entry << config_file.generic_string();
@@ -216,8 +216,9 @@ std::expected<bool, error> component_database::add_component(ryml::csubstr compo
   }
 
   auto components = database["components"];
-  auto entry_node = components.append_child() << ryml::key(component_id);
-  entry_node |= ryml::SEQ;
+  auto entry_node = components.append_child();
+  entry_node.save_key(component_id);
+  entry_node.set_seq();
   entry_node.append_child() << path_string;
   database_is_dirty = true;
   return true;
@@ -369,9 +370,11 @@ std::optional<ryml::ConstNodeRef> component_database::get_blueprint_provider(rym
 {
   // const auto blueprint_str = std::string{ blueprint };
 
-  auto blueprints_node = database["blueprints"];
-  if (blueprints_node.has_child(blueprint)) {
-    return blueprints_node[blueprint];
+  if (database.rootref().has_child("blueprints")) {
+    auto blueprints_node = database["blueprints"];
+    if (blueprints_node.has_child(blueprint)) {
+      return blueprints_node[blueprint];
+    }
   }
 
   return std::nullopt;
@@ -417,8 +420,8 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
   if (root.has_child("yakka") && root["yakka"].has_child("serve")) {
     for (const auto &f: root["yakka"]["serve"].children()) {
       auto serve_node = database["serve"].append_child();
-      serve_node |= ryml::SEQ;
-      serve_node.set_key_serialized(f.val()); // This is done as f.val() is from another tree
+      serve_node.set_seq();
+      serve_node.save_key(f.val()); // This is done as f.val() is from another tree
       serve_node.append_child() << id;
     }
   }
@@ -427,14 +430,14 @@ std::expected<void, std::error_code> component_database::parse_yakka_file(const 
     if (root["type"].is_seq()) {
       for (const auto &t: root["type"].children()) {
         auto type_node = database["types"].append_child();
-        type_node |= ryml::SEQ;
-        type_node.set_key_serialized(t.val());
+        type_node.set_seq();
+        type_node.save_key(t.val());
         type_node.append_child() << id;
       }
     } else {
       auto type_node = database["types"].append_child();
-      type_node |= ryml::SEQ;
-      type_node.set_key_serialized(root["type"].val());
+      type_node.set_seq();
+      type_node.save_key(root["type"].val());
       type_node.append_child() << id;
     }
   }
@@ -505,24 +508,26 @@ std::expected<void, std::error_code> component_database::parse_slcc_file(const p
             continue;
           // Create new feature node
           auto feature_node_ref = database["features"].append_child();
-          feature_node_ref |= ryml::SEQ;
-          feature_node_ref.set_key_serialized(f["name"].val());
+          feature_node_ref.set_seq();
+          feature_node_ref.save_key(f["name"].val());
 
           if (f.has_child("condition")) {
             auto new_entry = feature_node_ref.append_child();
-            new_entry |= ryml::MAP;
+            new_entry.set_map();
 
-            auto name_child = new_entry.append_child() << ryml::key("name");
-            name_child.set_val_serialized(id_node.val());
-            auto condition_child = new_entry.append_child() << ryml::key("condition");
-            condition_child |= ryml::SEQ;
+            auto name_child = new_entry.append_child();
+            name_child.save_key("name");
+            name_child.save(id_node.val());
+            auto condition_child = new_entry.append_child();
+            condition_child.save_key("condition");
+            condition_child.set_seq();
             for (const auto &c: f["condition"].children()) {
               auto node = condition_child.append_child();
-              node.set_val_serialized(c.val());
+              node.save(c.val());
             }
           } else {
             auto new_entry = feature_node_ref.append_child();
-            new_entry.set_val_serialized(id_node.val());
+            new_entry.save(id_node.val());
           }
         }
       }
@@ -558,10 +563,10 @@ static void process_blueprint(ryml::Tree &database, ryml::csubstr id_string, con
   // Store blueprint entry
   spdlog::info("Found blueprint: {}", blueprint_node.key());
   auto blueprint_node_ref = database["blueprints"].append_child();
-  blueprint_node_ref |= ryml::SEQ;
-  blueprint_node_ref.set_key_serialized(blueprint_node.key()); // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "blueprints", blueprint_name }, true);
+  blueprint_node_ref.set_seq();
+  blueprint_node_ref.save_key(blueprint_node.key()); // ryml_navigate_path(database.rootref(), std::vector<std::string>{ "blueprints", blueprint_name }, true);
   auto entry = blueprint_node_ref.append_child();
-  entry.set_val_serialized(id_string);
+  entry.save(id_string);
 }
 
 } // namespace yakka

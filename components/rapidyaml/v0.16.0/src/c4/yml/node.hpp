@@ -396,7 +396,8 @@ public:
                     // Intermediate segment: create a map node
                     Impl ch = curr.append_child();
                     ch.set_key_serialized(seg);
-                    ch |= NodeType_e::MAP;
+                    ch.set_map();
+                    // ch |= NodeTypeBits::MAP;
                     curr = ch;
                 }
                 else
@@ -1094,7 +1095,7 @@ public:
             {
                 curr = curr.find_child(seg);
             }
-            RYML_ASSERT_BASIC_(curr.valid());
+            RYML_ASSERT_BASIC_(!curr.invalid());
         }
         return curr;
     }
@@ -1416,7 +1417,12 @@ public:
         if(m_seed.str) // we have a seed key: use it to create the new map child
         {
             m_id = m_tree->append_child(m_id);
-            m_tree->set_key(m_id, m_seed);
+            // NOTE: use set_key_serialized (not set_key) so the key is copied
+            // into the tree's arena. The seed key may reference a caller-owned
+            // buffer (e.g. a temporary std::string) whose lifetime does not
+            // extend past this call; storing it by reference would leave a
+            // dangling/aliased csubstr once that buffer is reused or destroyed.
+            m_tree->set_key_serialized(m_id, m_seed);
             m_seed.str = nullptr;
             m_seed.len = (size_t)NONE;
         }

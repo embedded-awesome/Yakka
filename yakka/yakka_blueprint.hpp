@@ -21,8 +21,9 @@ struct blueprint {
   ryml::ConstNodeRef data;
   ryml::ConstNodeRef process;
   c4::csubstr parent_path;
+  c4::csubstr parent_component; // Name of the component that defined this blueprint
   c4::csubstr task_group;
 
-  blueprint(c4::csubstr target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path);
+  blueprint(c4::csubstr target, ryml::ConstNodeRef blueprint_data, c4::csubstr parent_path, c4::csubstr parent_component);
 };
 } // namespace yakka

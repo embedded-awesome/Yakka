@@ -7,7 +7,6 @@
 #include "yakka_workspace.hpp"
 #include "task_engine.hpp"
 #include "yakka_project.hpp"
-
 #include "target_database.hpp"
 #include "utilities.hpp"
 #include "yakka_config.hpp"
@@ -27,6 +26,7 @@
 #include <fstream>
 #include <chrono>
 #include <future>
+#include <string>
 #include <algorithm>
 
 using namespace indicators;
@@ -39,7 +39,7 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
   DynamicProgress<ProgressBar> task_progress_ui;
   std::vector<std::shared_ptr<ProgressBar>> task_progress_bars;
 
-/// @brief Executes init.
+  /// @brief Executes init.
 
   void init(yakka::task_engine &task_engine)
   {
@@ -52,7 +52,7 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
     }
 
     for (auto &i: task_engine.todo_task_groups) {
-      std::string spaced_name = yakka::ryml_string(i.second->name) + std::string(largest_name_length - i.second->name.size(), ' ');
+      std::string spaced_name                   = yakka::ryml_string(i.second->name) + std::string(largest_name_length - i.second->name.size(), ' ');
       std::shared_ptr<ProgressBar> new_task_bar = std::make_shared<ProgressBar>(option::BarWidth{ 50 }, option::ShowPercentage{ true }, option::PrefixText{ spaced_name }, option::MaxProgress{ i.second->total_count });
       task_progress_bars.push_back(new_task_bar);
       i.second->ui_id = task_progress_ui.push_back(*new_task_bar);
@@ -65,7 +65,7 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
     //    };
   };
 
-/// @brief Executes update.
+  /// @brief Executes update.
 
   void update(yakka::task_engine &task_engine)
   {
@@ -83,7 +83,7 @@ struct progress_bar_task_ui : yakka::task_engine_ui {
     }
   };
 
-/// @brief Executes finish.
+  /// @brief Executes finish.
 
   void finish(yakka::task_engine &task_engine)
   {
@@ -105,7 +105,6 @@ static const semver::version yakka_version{
 int main(int argc, char **argv)
 {
   auto yakka_start_time = fs::file_time_type::clock::now();
-
 
   // Setup logging
   std::error_code error_code;
@@ -208,34 +207,6 @@ int main(int argc, char **argv)
     action.pop_back();
   }
 
-  // Process the command line options
-  // std::string project_name;
-  // std::string feature_suffix;
-  // for (auto s: result.unmatched()) {
-  //   // Identify features, commands, and components
-  //   if (s.front() == '+') {
-  //     feature_suffix += s;
-  //     features.push_back(c4::to_csubstr(s.substr(1)));
-  //   } else if (s.back() == '!')
-  //     commands.insert(c4::to_csubstr(s.substr(0, s.size() - 1)));
-  //   else {
-  //     components.push_back(c4::to_csubstr(s));
-
-  //     // Compose the project name by concatenation all the components in CLI order.
-  //     // The features will be added at the end
-  //     project_name += s + "-";
-  //   }
-  // }
-
-  // if (components.size() == 0) {
-  //   spdlog::error("No components identified");
-  //   return -1;
-  // }
-
-  // Remove the extra "-" and add the feature suffix
-  // project_name.pop_back();
-  // project_name += feature_suffix;
-
   // cli_set_project_name can override the generated project name but will be empty if not set (default value of project name arg in project constructor)
   auto cli_set_project_name = result["project-name"].as<std::string>();
 
@@ -244,7 +215,7 @@ int main(int argc, char **argv)
 
   // Init the project
   project.init_project(result.unmatched());
-  
+
   project.add_command(action);
 
   // Check if we don't want Yakka files
@@ -284,39 +255,14 @@ int main(int argc, char **argv)
       print_project_choice_errors(project);
   } else {
     spdlog::info("Skipping project evalutaion");
-
-    // for (const auto &i: components) {
-    //   // Convert string to id
-    //   const auto component_id = yakka::component_dotname_to_id(i);
-    //   // Find the component in the project component database
-    //   auto component_location = workspace.find_component(component_id, project.component_flags);
-    //   if (!component_location) {
-    //     continue;
-    //   }
-
-    //   // Add component to the required list and continue if this is not a new component
-    //   // Insert component and continue if this is not new
-    //   if (project.required_components.insert(component_id).second == false)
-    //     continue;
-
-    //   auto [component_path, package_path]             = component_location.value();
-    //   std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
-    //   if (new_component->parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
-    //     project.components.push_back(new_component);
-    //   } else {
-    //     if (!result["ignore-eval"].as<bool>()) {
-    //       spdlog::error("Failed to parse {}", component_path.generic_string());
-    //       exit(-1);
-    //     }
-    //   }
-    // }
   }
 
   if (result["no-slcc"].count() == 0)
     project.process_slc_rules();
 
-  // Project evaluation is complete
+  // Project evaluation is complete. Generate project summary
   project.generate_project_summary();
+  project.update_summary_diff();
 
   // Merge project data
   project.update_project_data();
@@ -347,7 +293,7 @@ int main(int argc, char **argv)
     const auto additional_data = "{" + result["data"].as<std::string>() + "}";
     // ryml::Tree data       = ryml::parse_in_arena(ryml::to_csubstr(additional_data));
     auto node = project.project_summary["temp"].append_child();
-    node |= ryml::MAP;
+    node.set_map();
     ryml::parse_in_arena(ryml::to_csubstr(additional_data), node);
     yakka::merge_nodes(project.project_summary["data"], node);
   }
@@ -365,45 +311,16 @@ int main(int argc, char **argv)
   duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to process blueprints", duration);
 
-  t1 = t2;
-
   // Ensure all the commands have a blueprint
-  spdlog::info("Checking for missing blueprints");
-  for (const auto &c: project.commands) {
-    if (project.blueprint_database.blueprints.contains(c))
-      continue;
-
-    // Find a component that has that blueprint
-    auto result = workspace.find_blueprint(c);
-    if (result) {
-      const auto blueprint_options = result.value();
-      if (blueprint_options.num_children() == 1) {
-        auto component_name = blueprint_options[0].val();
-        auto component_paths       = workspace.find_component(component_name);
-        if (component_paths) {
-          auto [component_path, db_path] = component_paths.value();
-          spdlog::info("Found a blueprint for {}: {}", c, component_path.string());
-          project.add_additional_tool(component_path);
-        } else {
-          spdlog::error("Could not find component for blueprint: {}", c);
-        }
-      } else {
-        spdlog::error("Multiple options for missing blueprint {}", c);
-        for (const auto &o: blueprint_options)
-          spdlog::error("- {}", o.val<std::string>().value());
-        return -1;
-      }
-    } else {
-      spdlog::info("Did not find a blueprint for {}", c);
-    }
+  if (!project.process_missing_blueprints()) {
+    spdlog::error("Failed to process missing blueprints");
+    return -1;
   }
-  t2       = std::chrono::high_resolution_clock::now();
-  duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-  spdlog::info("{}ms to validate blueprints", duration);
-  
-  t1 =t2;
+
+  // Process the target database
+  t1 = std::chrono::high_resolution_clock::now();
   try {
-    if (project.target_database.load(project.output_path / "target_database.json") == yakka::yakka_status::SUCCESS) {
+    if (project.target_database.load(project.output_path / "target_database.json", project.blueprint_database) == yakka::yakka_status::SUCCESS) {
       // TODO: Sort out additional tools
       spdlog::info("Loaded target database from {}", (project.output_path / "target_database.json").string());
     } else {
@@ -419,21 +336,23 @@ int main(int argc, char **argv)
   duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   spdlog::info("{}ms to process target database", duration);
 
-  yakka::task_engine task_engine;
   progress_bar_task_ui progress_bar_ui;
   bool taskflow_loaded = false;
   try {
-    if (task_engine.load_taskflow(project.output_path / "taskflow.json") == yakka::yakka_status::SUCCESS && 
-        task_engine.load_todolist(project.output_path / "todolist.json", project) == yakka::yakka_status::SUCCESS) {
+    if (project.task_engine.load_taskflow(project.output_path / "taskflow.json") == yakka::yakka_status::SUCCESS && project.task_engine.load_todolist(project.output_path / "todolist.json", project) == yakka::yakka_status::SUCCESS) {
       spdlog::info("Loaded taskflow from {}", (project.output_path / "taskflow.json").string());
       spdlog::info("Loaded todolist from {}", (project.output_path / "todolist.json").string());
       taskflow_loaded = true;
+
+      // Check the project diff and determine if we need to reprocess blueprints
+      project.process_summary_diff();
+      project.save_blueprints();
     } else {
       spdlog::info("No taskflow found. Generating a new one");
-      task_engine.create_taskflow(project);
-      task_engine.save_taskflow(project.output_path / "taskflow.json");
+      project.task_engine.create_taskflow(project);
+      project.task_engine.save_taskflow(project.output_path / "taskflow.json");
     }
-    task_engine.run_taskflow(project, &progress_bar_ui);
+    project.task_engine.run_taskflow(project, &progress_bar_ui);
   } catch (const std::exception &e) {
     spdlog::error("Running task engine failed: {}", e.what());
     return -1;
@@ -444,12 +363,12 @@ int main(int argc, char **argv)
 
   // Save the todo list with the current state of the tasks. This allows resuming the build later if needed.
   if (!taskflow_loaded)
-    task_engine.save_todolist(project.output_path / "todolist.json");
+    project.task_engine.save_todolist(project.output_path / "todolist.json");
 
   spdlog::shutdown();
   show_console_cursor(true);
 
-  if (task_engine.abort_build)
+  if (project.task_engine.abort_build)
     return -1;
   else
     return 0;
@@ -460,7 +379,6 @@ int main(int argc, char **argv)
 static void evaluate_project_dependencies(yakka::workspace &workspace, yakka::project &project)
 {
   auto t1 = std::chrono::high_resolution_clock::now();
-
 
   if (project.evaluate_dependencies() == yakka::project::state::PROJECT_HAS_INVALID_COMPONENT)
     exit(1);

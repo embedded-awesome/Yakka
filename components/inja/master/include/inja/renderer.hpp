@@ -190,31 +190,30 @@ class Renderer : public NodeVisitor {
 
   void set_loop_meta_bool(NodeRef node, std::string_view key, bool value) {
     auto field = find_child_by_key(node, to_csubstr(key));
-    if (!field.valid()) {
-      const auto key_sub = to_csubstr(key);
+    if (field.invalid()) {
       field = node.append_child();
-      field << ryml::Key(key_sub);
+      field.save_key(to_csubstr(key));
     }
-    field << (value ? "true" : "false");
+    field.save(value ? "true" : "false");
   }
 
   void set_loop_meta_int(NodeRef node, std::string_view key, int64_t value) {
     auto field = find_child_by_key(node, to_csubstr(key));
-    if (!field.valid()) {
+    if (field.invalid()) {
       const auto key_sub = to_csubstr(key);
       field = node.append_child();
-      field << ryml::Key(key_sub);
+      field.save_key(key_sub);
     }
-    field << value;
+    field.save(value);
   }
 
   void set_loop_meta_key(NodeRef node, ::ryml::csubstr value) {
     auto field = find_child_by_key(node, to_csubstr("key"));
-    if (!field.valid()) {
+    if (field.invalid()) {
       field = node.append_child();
-      field << ryml::Key("key");
+      field.save_key("key");
     }
-    field << value;
+    field.save(value);
   }
 
   void write_loop_frame(NodeRef node, const detail::LoopFrameSketch& frame) {
@@ -260,7 +259,7 @@ class Renderer : public NodeVisitor {
     frame.last = node_to_bool(find_child_by_key(node, to_csubstr("is_last"))).value_or(true);
 
     const auto key_node = find_child_by_key(node, to_csubstr("key"));
-    if (key_node.valid() && !node_is_null(key_node)) {
+    if (!key_node.invalid() && !node_is_null(key_node)) {
       frame.has_key = true;
       frame.key = key_node.val();
     }
@@ -276,7 +275,7 @@ class Renderer : public NodeVisitor {
 
     std::vector<detail::LoopFrameSketch> chain;
     auto cursor = ConstNodeRef(current_loop_data.tree(), current_loop_data.id());
-    while (cursor.valid()) {
+    while (!cursor.invalid()) {
       chain.push_back(parse_loop_frame(cursor));
       cursor = find_child_by_key(cursor, to_csubstr("parent"));
     }
@@ -301,14 +300,14 @@ class Renderer : public NodeVisitor {
 
     const auto suffix = name.substr(global_scope_prefix.size());
     const auto ptr = Pointer(DataNode::convert_dot_to_ptr(suffix));
-    if (const auto from_template_scope = resolve_pointer(template_scope_data, ptr); from_template_scope.valid()) {
+    if (const auto from_template_scope = resolve_pointer(template_scope_data, ptr); !from_template_scope.invalid()) {
       return from_template_scope;
     }
     return resolve_pointer(data_input, ptr);
   }
 
   void print_data(const NativeNodeRef& value) {
-    if (!value.valid() || node_is_null(value.node)) {
+    if (value.invalid() || node_is_null(value.node)) {
       return;
     }
     if (value.node.has_children() && !value.node.is_val()) {
@@ -340,7 +339,7 @@ class Renderer : public NodeVisitor {
     const auto result = data_eval_stack.back();
     data_eval_stack.pop_back();
 
-    if (!result.valid()) {
+    if (result.invalid()) {
       if (!not_found_stack.empty()) {
         not_found_stack.pop();
       }
@@ -359,16 +358,16 @@ class Renderer : public NodeVisitor {
   void make_result(const T& result) {
     auto node = tmp_sequence.append_child();
     if constexpr (std::is_same_v<T, bool>) {
-      node << (result ? "true" : "false");
+      node.save (result ? "true" : "false");
     } else {
-      node << result;
+      node.save(result);
     }
     data_eval_stack.emplace_back(node);
   }
 
   void make_null_result() {
     auto node = tmp_sequence.append_child();
-    node = nullptr;
+    node.set_val(nullptr);
     data_eval_stack.emplace_back(node);
   }
 
@@ -447,7 +446,7 @@ class Renderer : public NodeVisitor {
       data_eval_stack.pop_back();
       result[N - i - 1] = value.node;
 
-      if (!value.valid()) {
+      if (value.invalid()) {
         if (!not_found_stack.empty()) {
           const auto data_node = not_found_stack.top();
           not_found_stack.pop();
@@ -479,9 +478,9 @@ class Renderer : public NodeVisitor {
     auto macro_scope = NodeRef(additional_data.tree(), macro_scope_id);
 
     for (size_t i = 0; i < macro_node.parameters.size(); ++i) {
-      if (i >= args.size() || !args[i].valid()) {
+      if (i >= args.size() || args[i].invalid()) {
         auto target = macro_scope[Pointer(DataNode::convert_dot_to_ptr(macro_node.parameters[i]))];
-        target = nullptr;
+        target.set_val(nullptr);
         continue;
       }
       set_child_from_node(macro_scope, macro_node.parameters[i], args[i]);
@@ -496,16 +495,18 @@ class Renderer : public NodeVisitor {
     std::ostringstream macro_output;
     additional_data = macro_scope;
     current_loop_data = find_child_by_key(additional_data, to_csubstr("loop"));
-    if (!current_loop_data.valid()) {
-      current_loop_data = additional_data.append_child() << ryml::key("loop");
+    if (current_loop_data.invalid()) {
+      current_loop_data = additional_data.append_child();
+      current_loop_data.save_key("loop");
     }
-    current_loop_data |= ryml::MAP;
+    current_loop_data.set_map();
     current_loop_data.clear_children();
     tmp_sequence = find_child_by_key(additional_data, to_csubstr("_tmp"));
-    if (!tmp_sequence.valid()) {
-      tmp_sequence = additional_data.append_child() << ryml::key("_tmp");
+    if (tmp_sequence.invalid()) {
+      tmp_sequence = additional_data.append_child();
+      tmp_sequence.save_key("_tmp");
     }
-    tmp_sequence |= ryml::SEQ;
+    tmp_sequence.set_seq();
     tmp_sequence.clear_children();
     output_stream = &macro_output;
     break_rendering = false;
@@ -540,10 +541,38 @@ class Renderer : public NodeVisitor {
 
   void visit(const ExpressionNode&) override {}
 
+  // Recursively copies key/val scalars into their own tree's arena. Used after
+  // duplicate()-ing nodes from a short-lived source Tree: duplicate() only
+  // copies the csubstr (pointer+length) of keys/vals, so once the source Tree
+  // is destroyed those pointers would dangle unless re-owned here.
+  static void reown_into_arena(NodeRef node) {
+    ryml::Tree* tree = node.tree();
+    if (node.has_key())
+      tree->set_key_serialized(node.id(), node.key());
+    if (node.has_val())
+      tree->set_serialized(node.id(), node.val());
+    for (NodeRef child : node.children())
+      reown_into_arena(child);
+  }
+
   void visit(const LiteralNode& node) override {
-    auto dest = tmp_sequence.append_child();
     const ryml::csubstr name = to_csubstr("literal");
-    ryml::parse_in_arena(name, to_csubstr(node.text), dest);
+    // Parse into a throwaway, isolated tree instead of directly into the shared
+    // additional_data tree. rapidyaml's flow-style parser tracks the node it just
+    // appended as tree->size()-1; that assumption breaks once ids get recycled
+    // from earlier removals in a long-lived, heavily mutated shared tree (e.g.
+    // additional_data accumulates and removes many macro-scope/temp nodes during
+    // deep template recursion), causing spurious "has_parent" assertion failures.
+    ryml::Tree parsed_tree;
+    parsed_tree.rootref().set_seq();
+    auto parsed_dest = parsed_tree.rootref().append_child();
+    ryml::parse_in_arena(name, to_csubstr(node.text), parsed_dest);
+
+    ryml::Tree* dest_tree = tmp_sequence.tree();
+    const ryml::id_type after = dest_tree->has_children(tmp_sequence.id()) ? dest_tree->last_child(tmp_sequence.id()) : ryml::NONE;
+    const ryml::id_type dest_id = dest_tree->duplicate(&parsed_tree, parsed_dest.id(), tmp_sequence.id(), after);
+    NodeRef dest{dest_tree, dest_id};
+    reown_into_arena(dest);
     data_eval_stack.emplace_back(dest);
   }
 
@@ -551,7 +580,7 @@ class Renderer : public NodeVisitor {
     if (node.ptr.empty()) {
       // root document
       data_eval_stack.emplace_back(data_input);
-    } else if (const auto from_global_scope = resolve_global_scope_reference(node); from_global_scope.valid()) {
+    } else if (const auto from_global_scope = resolve_global_scope_reference(node); !from_global_scope.invalid()) {
       data_eval_stack.emplace_back(from_global_scope);
       return;
     } else if (additional_data.contains(node.ptr)) {
@@ -562,7 +591,7 @@ class Renderer : public NodeVisitor {
     }
 
     const auto from_input = resolve_pointer(data_input, node.ptr);
-    if (from_input.valid()) {
+    if (!from_input.invalid()) {
       data_eval_stack.emplace_back(from_input);
       return;
     }
@@ -697,7 +726,7 @@ class Renderer : public NodeVisitor {
         const auto args = get_arguments<2>(node);
         ConstNodeRef container;
 
-        if (args[0].valid() && (args[0].node.is_map() || args[0].node.is_seq())) {
+        if (!args[0].invalid() && (args[0].node.is_map() || args[0].node.is_seq())) {
           container = args[0].node;
         } else {
           const auto ptr_text = native_to_string(args[0]);
@@ -706,7 +735,7 @@ class Renderer : public NodeVisitor {
           }
         }
 
-        if (!container.valid()) {
+        if (container.invalid()) {
           data_eval_stack.emplace_back(ConstNodeRef());
         } else if (container.is_map()) {
           const auto key = native_to_string(args[1]);
@@ -733,7 +762,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Default: {
       const auto test_arg = get_arguments<1, 0, false>(node)[0];
-      if (test_arg.valid()) {
+      if (!test_arg.invalid()) {
         data_eval_stack.push_back(test_arg);
       } else {
         data_eval_stack.push_back(get_arguments<1, 1>(node)[0]);
@@ -751,18 +780,18 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Exists: {
       auto name = native_to_string(get_arguments<1>(node)[0]);
-      make_result(resolve_pointer(data_input, Pointer(DataNode::convert_dot_to_ptr(name))).valid());
+      make_result(!resolve_pointer(data_input, Pointer(DataNode::convert_dot_to_ptr(name))).invalid());
     } break;
     case Op::ExistsInObject: {
       const auto args = get_arguments<2>(node);
       auto name = native_to_string(args[1]);
-      make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
+      make_result(!find_child_by_key(args[0].node, to_csubstr(name)).invalid());
     } break;
     case Op::Contains: {
       const auto args = get_arguments<2>(node);
       if (args[0].node.is_map()) {
         const auto name = native_to_string(args[1]);
-        make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
+        make_result(!find_child_by_key(args[0].node, to_csubstr(name)).invalid());
         break;
       }
 
@@ -787,7 +816,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::First: {
       const auto value = get_arguments<1>(node)[0];
-      if (!value.valid() || value.node.num_children() == 0) {
+      if (value.invalid() || value.node.num_children() == 0) {
         data_eval_stack.emplace_back(ConstNodeRef());
       } else {
         data_eval_stack.emplace_back(value.node.child(0));
@@ -803,7 +832,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Last: {
       const auto value = get_arguments<1>(node)[0];
-      if (!value.valid() || value.node.num_children() == 0) {
+      if (value.invalid() || value.node.num_children() == 0) {
         data_eval_stack.emplace_back(ConstNodeRef());
       } else {
         data_eval_stack.emplace_back(value.node.child(value.node.num_children() - 1));
@@ -811,7 +840,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Length: {
       const auto val = get_arguments<1>(node)[0];
-      if (!val.node.valid()){
+      if (val.node.invalid()){
         make_result(0);
       } else if (val.node.is_val() || val.node.is_keyval()) {
         make_result(native_to_string(val).length());
@@ -826,7 +855,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Max: {
       const auto args = get_arguments<1>(node);
-      if (!args[0].valid() || args[0].node.num_children() == 0) {
+      if (args[0].invalid() || args[0].node.num_children() == 0) {
         data_eval_stack.emplace_back(ConstNodeRef());
         break;
       }
@@ -840,7 +869,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Min: {
       const auto args = get_arguments<1>(node);
-      if (!args[0].valid() || args[0].node.num_children() == 0) {
+      if (args[0].invalid() || args[0].node.num_children() == 0) {
         data_eval_stack.emplace_back(ConstNodeRef());
         break;
       }
@@ -859,11 +888,11 @@ class Renderer : public NodeVisitor {
     case Op::Range: {
       const auto limit = native_to_int(get_arguments<1>(node)[0]);
       auto result = tmp_sequence.append_child();
-      result |= ryml::SEQ;
+      result.set_seq();
       if (limit && *limit > 0) {
         for (int64_t i = 0; i < *limit; ++i) {
           auto child = result.append_child();
-          child << i;
+          child.save(i);
         }
       }
       data_eval_stack.emplace_back(result);
@@ -880,12 +909,12 @@ class Renderer : public NodeVisitor {
       const auto input = native_to_string(args[0]);
       const auto delimiter = native_to_string(args[1]);
       auto result = tmp_sequence.append_child();
-      result |= ryml::SEQ;
+      result.set_seq();
 
       if (delimiter.empty()) {
         for (char c : input) {
           auto child = result.append_child();
-          child << std::string(1, c);
+          child.save(std::string(1, c));
         }
       } else {
         std::string::size_type start = 0;
@@ -893,10 +922,10 @@ class Renderer : public NodeVisitor {
           const auto pos = input.find(delimiter, start);
           auto child = result.append_child();
           if (pos == std::string::npos) {
-            child << input.substr(start);
+            child.save(input.substr(start));
             break;
           }
-          child << input.substr(start, pos - start);
+          child.save(input.substr(start, pos - start));
           start = pos + delimiter.size();
         }
       }
@@ -930,10 +959,10 @@ class Renderer : public NodeVisitor {
       const auto args = get_arguments<2>(node);
       const auto regex_match = std::regex(native_to_string(args[1]));
       auto filtered = tmp_sequence.append_child();
-      filtered |= ryml::SEQ;
+      filtered.set_seq();
       for (const auto& item : args[0].node.children()) {
         if ((item.is_val() || item.is_keyval()) && std::regex_match(node_to_string(item), regex_match)) {
-          filtered.append_child() << item.val();
+          filtered.append_child().save(item.val());
         }
       }
       data_eval_stack.emplace_back(filtered);
@@ -952,8 +981,8 @@ class Renderer : public NodeVisitor {
     case Op::Sort: {
       const auto value = get_arguments<1>(node)[0];
       auto result = tmp_sequence.append_child();
-      result |= ryml::SEQ;
-      if (value.valid()) {
+      result.set_seq();
+      if (!value.invalid()) {
         std::vector<ConstNodeRef> children;
         for (const auto& child : value.node.children()) {
           children.push_back(child);
@@ -996,7 +1025,7 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::IsString: {
       const auto value = get_arguments<1>(node)[0];
-      make_result(value.valid() && (value.node.is_val() || value.node.is_keyval()) && value.kind() == NativeKind::String);
+      make_result(!value.invalid() && (value.node.is_val() || value.node.is_keyval()) && value.kind() == NativeKind::String);
     } break;
     case Op::Callback: {
       auto args = get_argument_vector(node);
@@ -1053,18 +1082,22 @@ class Renderer : public NodeVisitor {
     case Op::Hex: {
       make_result(std::format("{:x}", native_to_int(get_arguments<1>(node)[0]).value_or(0)));
     } break;
+    case Op::ToYaml: {
+      const auto value = get_arguments<1>(node)[0];
+      make_result(!value.invalid() ? ryml::emitrs_yaml<std::string>(value.node) : std::string {});
+    } break;
     case Op::SetAt: {
       const auto args = get_argument_vector(node);
       const auto num_args = args.size();
       // Check the type of arg 0
       const auto arg0 = args[0];
       NodeRef arg0_ref;
-      if (!arg0.valid()) {
+      if (arg0.invalid()) {
         spdlog::error("setAt: invalid first path argument");
         throw_renderer_error("invalid first path argument", node);
         make_null_result();
         break;
-      } else if (arg0.is_val()) {
+      } else if (!arg0.invalid() && arg0.is_val()) {
         arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
       } else if (arg0.tree() == additional_data.tree()) {
         // If the referenced node is already in the additional_data tree, we can use it directly
@@ -1077,21 +1110,24 @@ class Renderer : public NodeVisitor {
       if (num_args == 2) {
         // setAt(path, value)
         if (args[1].is_map()) {
-          arg0_ref |= ryml::MAP;
+          arg0_ref.set_map();
           additional_data.tree()->duplicate(args[1].tree(), args[1].id(), arg0_ref.id(), NONE);
         } else if (args[1].is_seq()) {
-          arg0_ref |= ryml::SEQ;
+          arg0_ref.set_seq();
           additional_data.tree()->duplicate_children(args[1].tree(), args[1].id(), arg0_ref.id(), NONE);
         } else {
-          arg0_ref << args[1].val();
+          arg0_ref.save(args[1].val());
           arg0_ref.set_key_serialized(arg0.val());
         }
       } else if (num_args == 3) {
+        if (args[2].invalid()) {
+          break;
+        }
         // store(path, key, value)
         ryml::Pointer ptr{ args[1].val() };
-        arg0_ref[ptr] << args[2].val();
+        arg0_ref[ptr].save( args[2].val() );
         if (arg0_ref[ptr].is_map())
-          arg0_ref[ptr].set_key_serialized(ptr.back());
+          arg0_ref[ptr].save_key(ptr.back());
       }
       make_null_result();
     } break;
@@ -1116,11 +1152,11 @@ class Renderer : public NodeVisitor {
       // Check the type of arg 0
       const auto arg0 = args[0];
       NodeRef arg0_ref;
-      if (!arg0.valid()) {
+      if (arg0.invalid()) {
         spdlog::error("pushBack: invalid first path argument");
         make_null_result();
         break;
-      } else if (arg0.is_val()) {
+      } else if (!arg0.invalid() && arg0.is_val()) {
         arg0_ref = additional_data[ryml::Pointer{ arg0.val() }];
       } else if (arg0.tree() == additional_data.tree()) {
         // If the referenced node is already in the additional_data tree, we can use it directly
@@ -1139,16 +1175,16 @@ class Renderer : public NodeVisitor {
           additional_data.tree()->duplicate_children(args[1].node.tree(), args[1].node.id(), arg0_ref.id(), arg0_ref.last_child().id());
         } else {
           if (!arg0_ref.is_seq()) {
-            arg0_ref |= ryml::SEQ;
+            arg0_ref.set_seq();
           }
-          arg0_ref.append_child() << args[1].node.val();
+          arg0_ref.append_child().save(args[1].node.val());
         }
       } else if (num_args == 3) {
         // push_back(path, key, value)
         const auto args = get_arguments<3>(node);
         ryml::Pointer ptr{ native_to_string(args[1]) };
         if (!arg0_ref.contains(ptr)) {
-          arg0_ref[ptr] |= ryml::SEQ;
+          arg0_ref[ptr].set_seq();
           arg0_ref[ptr].set_key_serialized(ptr.back());
         }
         if (args[2].node.is_map()) {
@@ -1157,9 +1193,9 @@ class Renderer : public NodeVisitor {
           additional_data.tree()->duplicate_children(args[2].node.tree(), args[2].node.id(), arg0_ref[ptr].id(), NONE);
         } else {
           if (!arg0_ref[ptr].is_seq()) {
-            arg0_ref[ptr] |= ryml::SEQ;
+            arg0_ref[ptr].set_seq();
           }
-          arg0_ref[ptr].append_child() << args[2].node.val();
+          arg0_ref[ptr].append_child().save(args[2].node.val());
         }
       }
       make_null_result();
@@ -1174,7 +1210,7 @@ class Renderer : public NodeVisitor {
     case Op::Unique: {
       const auto args = get_arguments<1>(node);
       auto filtered = tmp_sequence.append_child();
-      filtered |= ryml::SEQ;
+      filtered.set_seq();
       std::unordered_set<std::string> seen;
       for (const auto& i : args[0].node.children()) {
         auto val_str = native_to_string(NativeNodeRef(i));
@@ -1203,7 +1239,7 @@ class Renderer : public NodeVisitor {
     restore_loop_frames_from_current_scope_if_needed();
 
     const auto result = eval_expression_list(node.condition);
-    if (!result.valid()) {
+    if (result.invalid()) {
       sync_current_loop_data_from_frames();
       return;
     }
@@ -1226,7 +1262,7 @@ class Renderer : public NodeVisitor {
       ++index;
     }
 
-    if (find_child_by_key(additional_data, to_csubstr(node.value)).valid()) {
+    if (!find_child_by_key(additional_data, to_csubstr(node.value)).invalid()) {
       additional_data.remove_child(to_csubstr(node.value));
     }
 
@@ -1237,7 +1273,7 @@ class Renderer : public NodeVisitor {
     restore_loop_frames_from_current_scope_if_needed();
 
     const auto result = eval_expression_list(node.condition);
-    if (!result.valid()) {
+    if (result.invalid()) {
       sync_current_loop_data_from_frames();
       return;
     }
@@ -1260,7 +1296,7 @@ class Renderer : public NodeVisitor {
     });
 
     for (const auto& child : children) {
-      if (!child.valid() || !child.has_parent()) {
+      if (child.invalid() || !child.has_parent()) {
         throw_renderer_error("child is not valid", node);
         continue;
       }
@@ -1268,7 +1304,7 @@ class Renderer : public NodeVisitor {
       sync_current_loop_data_from_frames();
 
       auto key_node = tmp_sequence.append_child();
-      key_node << child.key();
+      key_node.save(child.key());
       set_child_from_node(additional_data, node.key, key_node);
       set_child_from_node(additional_data, node.value, child);
 
@@ -1278,10 +1314,10 @@ class Renderer : public NodeVisitor {
       ++index;
     }
 
-    if (find_child_by_key(additional_data, to_csubstr(node.key)).valid()) {
+    if (!find_child_by_key(additional_data, to_csubstr(node.key)).invalid()) {
       additional_data.remove_child(to_csubstr(node.key));
     }
-    if (find_child_by_key(additional_data, to_csubstr(node.value)).valid()) {
+    if (!find_child_by_key(additional_data, to_csubstr(node.value)).invalid()) {
       additional_data.remove_child(to_csubstr(node.value));
     }
 
@@ -1351,19 +1387,20 @@ class Renderer : public NodeVisitor {
     const auto last_key = ptr.back();
     auto target = target_scope[ptr];
     
-    if (!result.valid()) {
-      target = nullptr;
+    if (result.invalid() || result.node.invalid()) {
+      throw_renderer_error("invalid target or value node", node);
+      target.set_val(nullptr);
       return;
     }
 
     // Check if target is a value node and result is also a value, if so we can just assign the value without replacing the node
-    if (target.valid() && target.is_val() && result.node.is_val()) {
-      target << result.node.val();
+    if ((target.is_seed() || target.is_val()) && result.node.is_val()) {
+      target.save(result.node.val());
       return;
     }
     
     // Check if target and result are the same node
-    if (target.valid() && target.tree() == result.node.tree() && target.id() == result.node.id()) {
+    if (target.tree() == result.node.tree() && target.id() == result.node.id()) {
       spdlog::error("cannot assign variable to itself");
       return;
     }
@@ -1390,7 +1427,7 @@ class Renderer : public NodeVisitor {
     }
     auto new_index = parent.tree()->duplicate(result.node.tree(), result.node.id(), parent.id(), NONE);
     auto new_node = NodeRef(parent.tree(), new_index);
-    new_node << ryml::key(last_key);
+    new_node.save_key(last_key);
   }
 
   void visit(const MacroStatementNode&) override {
@@ -1416,10 +1453,12 @@ public:
 
     template_scope_data = shared_additional_data;
     additional_data = shared_additional_data;
-    current_loop_data = additional_data.append_child() << ryml::key("loop");
-    current_loop_data |= ryml::MAP;
-    tmp_sequence = additional_data.append_child() << ryml::key("_tmp");
-    tmp_sequence |= ryml::SEQ;
+    current_loop_data = additional_data.append_child();
+    current_loop_data.save_key("loop");
+    current_loop_data.set_map();
+    tmp_sequence = additional_data.append_child();
+    tmp_sequence.save_key("_tmp");
+    tmp_sequence.set_seq();
 
     template_stack.emplace_back(current_template);
     current_template->root.accept(*this);

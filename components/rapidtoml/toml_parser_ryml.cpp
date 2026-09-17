@@ -720,7 +720,7 @@ namespace toml_ryml
         {
           // Inline table in array
           auto child = node.append_child();
-          child |= ryml::MAP;
+          child.set_map();
           parse_inline_table_into_node(child);
         }
         else
@@ -837,7 +837,7 @@ namespace toml_ryml
         
         // Parse value
         auto kv = node.append_child();
-        kv << ryml::key(recording_buffer);
+        kv.save_key(recording_buffer);
         
         if (cp->value == U'[')
         {
@@ -846,7 +846,7 @@ namespace toml_ryml
         }
         else if (cp->value == U'{')
         {
-          kv |= ryml::MAP;
+          kv.set_map();
           parse_inline_table_into_node(kv);
         }
         else
@@ -997,7 +997,7 @@ namespace toml_ryml
         }
         if (seq_node.num_children() == 0) {
           auto created = seq_node.append_child();
-          created |= ryml::MAP;
+          created.set_map();
           return created;
         }
         auto last = seq_node.last_child();
@@ -1043,8 +1043,8 @@ namespace toml_ryml
         auto child = find_child_by_key(table_node, segments[i]);
         if (!child.valid()) {
           child = table_node.append_child();
-          child << ryml::key(segments[i]);
-          child |= ryml::MAP;
+          child.save_key(segments[i]);
+          child.set_map();
         }
 
         table_node = child;
@@ -1070,7 +1070,7 @@ namespace toml_ryml
         // [[a.b]] -> ensure `b` exists as a sequence and append a new table item.
         if (!final_node.valid()) {
           final_node = table_node.append_child();
-          final_node << ryml::key(last_segment);
+          final_node.save_key(last_segment);
           final_node |= ryml::SEQ;
         } else if (!final_node.is_seq()) {
           set_error("invalid TOML structure: array-of-tables redefined as non-array");
@@ -1078,15 +1078,15 @@ namespace toml_ryml
         }
 
         auto new_table = final_node.append_child();
-        new_table |= ryml::MAP;
+        new_table.set_map();
         return new_table;
       }
 
       // [a.b] -> ensure map node exists.
       if (!final_node.valid()) {
         final_node = table_node.append_child();
-        final_node << ryml::key(last_segment);
-        final_node |= ryml::MAP;
+        final_node.save_key(last_segment);
+        final_node.set_map();
       } else if (final_node.is_seq()) {
         // If the segment is an array-of-tables, bind to its latest table.
         final_node = ensure_last_array_table(final_node);
@@ -1152,7 +1152,7 @@ namespace toml_ryml
       if (target_table.valid())
       {
         auto kv = target_table.append_child();
-        kv << ryml::key(recording_buffer);
+        kv.save_key(recording_buffer);
         
         if (cp->value == U'[')
         {
@@ -1163,7 +1163,7 @@ namespace toml_ryml
         else if (cp->value == U'{')
         {
           // Inline table - create map node and parse recursively
-          kv |= ryml::MAP;
+          kv.set_map();
           parse_inline_table_into_node(kv);
         }
         else
@@ -1204,7 +1204,7 @@ namespace toml_ryml
 
       // Initialize root as a MAP node
       root_node = tree.rootref();
-      root_node |= ryml::MAP;
+      root_node.set_map();
       current_table_node = root_node;
 
       do
@@ -1257,7 +1257,7 @@ namespace toml_ryml
     {
       // Initialize tree
       tree.clear();
-      tree.rootref() |= ryml::MAP;
+      tree.rootref().set_map();
 
       // Start reading
       if (!reader.eof())

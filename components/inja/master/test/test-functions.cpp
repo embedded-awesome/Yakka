@@ -9,18 +9,18 @@ TEST_CASE("functions") {
 
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["name"] << "Peter";
   root["city"] << "New York";
-  root["names"] |= ryml::SEQ;
+  root["names"].set_seq();
   root["names"].append_child() << "Jeff";
   root["names"].append_child() << "Seb";
   root["names"].append_child() << "Peter";
   root["names"].append_child() << "Tom";
   root["temperature"] << "25.6789";
-  root["brother"] |= ryml::MAP;
+  root["brother"].set_map();
   root["brother"]["name"] << "Chris";
-  root["brother"]["daughters"] |= ryml::SEQ;
+  root["brother"]["daughters"].set_seq();
   root["brother"]["daughters"].append_child() << "Maria";
   root["brother"]["daughters"].append_child() << "Helen";
   root["property"] << "name";
@@ -29,7 +29,7 @@ TEST_CASE("functions") {
   root["i"] << "1";
   root["is_happy"] << "true";
   root["is_sad"] << "false";
-  root["vars"] |= ryml::SEQ;
+  root["vars"].set_seq();
   root["vars"].append_child() << "2";
   root["vars"].append_child() << "3";
   root["vars"].append_child() << "4";
@@ -257,7 +257,7 @@ TEST_CASE("assignments") {
   inja::Environment env;
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["age"] << "28";
 
   CHECK(env.render("{% set new_hour=23 %}{{ new_hour }}", data.rootref()) == "23");
@@ -271,7 +271,7 @@ TEST_CASE("callbacks") {
   inja::Environment env;
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["age"] << "28";
 
   env.add_callback("double", 1, [](inja::Arguments& args, inja::NodeRef additional_data) {
@@ -345,34 +345,34 @@ TEST_CASE("combinations") {
   inja::Environment env;
   inja::Tree data;
   auto root = data.rootref();
-  root |= ryml::MAP;
+  root.set_map();
   root["name"] << "Peter";
   root["city"] << "Brunswick";
   root["age"] << "29";
-  root["names"] |= ryml::SEQ;
+  root["names"].set_seq();
   root["names"].append_child() << "Jeff";
   root["names"].append_child() << "Seb";
   root["names"].append_child() << "Chris";
-  root["brother"] |= ryml::MAP;
+  root["brother"].set_map();
   root["brother"]["name"] << "Chris";
-  root["brother"]["daughters"] |= ryml::SEQ;
+  root["brother"]["daughters"].set_seq();
   root["brother"]["daughters"].append_child() << "Maria";
   root["brother"]["daughters"].append_child() << "Helen";
-  root["brother"]["daughter0"] |= ryml::MAP;
+  root["brother"]["daughter0"].set_map();
   root["brother"]["daughter0"]["name"] << "Maria";
   root["is_happy"] << "true";
-  root["list_of_objects"] |= ryml::SEQ;
+  root["list_of_objects"].set_seq();
   auto obj0 = root["list_of_objects"].append_child();
-  obj0 |= ryml::MAP;
+  obj0.set_map();
   obj0["a"] << "2";
   auto obj1 = root["list_of_objects"].append_child();
-  obj1 |= ryml::MAP;
+  obj1.set_map();
   obj1["b"] << "3";
   auto obj2 = root["list_of_objects"].append_child();
-  obj2 |= ryml::MAP;
+  obj2.set_map();
   obj2["c"] << "4";
   auto obj3 = root["list_of_objects"].append_child();
-  obj3 |= ryml::MAP;
+  obj3.set_map();
   obj3["d"] << "5";
 
   CHECK(env.render("{% if upper(\"Peter\") == \"PETER\" %}TRUE{% endif %}", data.rootref()) == "TRUE");
