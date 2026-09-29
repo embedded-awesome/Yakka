@@ -1,0 +1,12 @@
+base:
+  name: widget
+  opts:
+    a: 1
+  list:
+    - x
+extra:
+  opts:
+    b: 2
+  list:
+    - y
+  size: 3

@@ -82,6 +82,9 @@ public:
     PushBack,
     Erase,
     Unique,
+    Merge,
+    ToYaml,
+    RemoveChild,
     None,
   };
 
@@ -141,6 +144,9 @@ private:
       {std::make_pair("push_back", 3), FunctionData {Operation::PushBack}},
       {std::make_pair("erase", 1), FunctionData {Operation::Erase}},
       {std::make_pair("unique", 1), FunctionData {Operation::Unique}},
+      {std::make_pair("merge", 2), FunctionData {Operation::Merge}},
+      {std::make_pair("to_yaml", 1), FunctionData {Operation::ToYaml}},
+      {std::make_pair("remove_child", 2), FunctionData {Operation::RemoveChild}},
   };
 
 public:

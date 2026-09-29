@@ -1186,6 +1186,80 @@ class Renderer : public NodeVisitor {
       }
       data_eval_stack.emplace_back(filtered);
     } break;
+    case Op::Merge: {
+      const auto args = get_arguments<2>(node);
+      for (const auto& arg : args) {
+        if (!arg.valid() && !not_found_stack.empty()) {
+          not_found_stack.pop();
+        }
+      }
+
+      const auto& dst_arg = args[0];
+      const auto& src_arg = args[1];
+      if (dst_arg.valid() && dst_arg.node.has_val() && !dst_arg.node.is_map() && !dst_arg.node.is_seq()) {
+        // merge("path.to.data", src): modify the data at the path in place
+        constexpr std::string_view global_scope_pointer_prefix = "/scope/global/";
+        std::string path = native_to_string(dst_arg);
+        NodeRef target_scope = additional_data;
+        const bool is_json_pointer = !path.empty() && path.front() == '/';
+        if (is_json_pointer && inja::string_view::starts_with(path, global_scope_pointer_prefix)) {
+          target_scope = template_scope_data;
+          path = path.substr(global_scope_pointer_prefix.size());
+        }
+        const Pointer ptr(is_json_pointer ? path : DataNode::convert_dot_to_ptr(path));
+        if (ptr.empty()) {
+          throw_renderer_error("merge: invalid path '" + path + "'", node);
+          make_null_result();
+          break;
+        }
+        merge_node_into(ensure_path(target_scope, ptr), src_arg.node);
+        make_null_result();
+      } else {
+        // merge(data, src): return a new node without modifying the inputs
+        auto result = tmp_sequence.append_child();
+        merge_node_into(result, dst_arg.node);
+        merge_node_into(result, src_arg.node);
+        data_eval_stack.emplace_back(result);
+      }
+    } break;
+    case Op::ToYaml: {
+      const auto value = get_arguments<1>(node)[0];
+      if (!value.valid()) {
+        make_result(std::string {});
+        break;
+      }
+      // Copy into a standalone tree so the node's own key is not emitted.
+      ryml::Tree yaml_tree;
+      yaml_tree.reserve(value.node.num_children() + 1);
+      yaml_tree.duplicate_contents(value.node.tree(), value.node.id(), yaml_tree.root_id());
+      auto yaml = ryml::emitrs_yaml<std::string>(yaml_tree);
+      while (!yaml.empty() && yaml.back() == '\n') {
+        yaml.pop_back();
+      }
+      make_result(yaml);
+    } break;
+    case Op::RemoveChild: {
+      const auto args = get_arguments<2>(node);
+      const auto& parent = args[0];
+      if (!parent.valid() || !parent.node.is_map()) {
+        throw_renderer_error("remove_child: first argument must be a map", node);
+        make_null_result();
+        break;
+      }
+      // Only template-owned data may be modified; the input data is read-only.
+      if (parent.node.tree() != additional_data.tree() && parent.node.tree() != template_scope_data.tree()) {
+        throw_renderer_error("remove_child: cannot modify input data", node);
+        make_null_result();
+        break;
+      }
+      auto* tree = parent.node.tree() == additional_data.tree() ? additional_data.tree() : template_scope_data.tree();
+      NodeRef parent_ref(tree, parent.node.id());
+      const auto key = native_to_string(args[1]);
+      if (parent_ref.has_child(to_csubstr(key))) {
+        parent_ref.remove_child(to_csubstr(key));
+      }
+      make_null_result();
+    } break;
     case Op::None:
       break;
     }

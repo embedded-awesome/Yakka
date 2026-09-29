@@ -24,7 +24,44 @@ using namespace std;
 namespace yakka {
 using namespace std::chrono_literals;
 
-/// @brief Executes project.
+namespace {
+/// @brief Adds a single 'tools' entry into the project summary, handling both the plain
+/// 'name: command' form and the 'name: { command:, return_value_success: }' form.
+void add_tool_entry(ryml::ConstNodeRef child, ryml::NodeRef project_summary, inja::Environment &inja_env, const std::filesystem::path &component_path)
+{
+  if (!child.has_key()) {
+    spdlog::error("Found a tool that doesn't have a key: {}", ryml::emitrs_yaml<std::string>(child));
+    return;
+  }
+
+  if (!project_summary.contains("tools"))
+    project_summary["tools"] |= ryml::MAP;
+
+  if (child.has_val()) {
+    project_summary["tools"][child.key()] << try_render(inja_env, child.val(), project_summary);
+    return;
+  }
+
+  if (child.is_map() && child.has_child("command") && child["command"].has_val()) {
+    project_summary["tools"][child.key()] << try_render(inja_env, child["command"].val<std::string>().value(), project_summary);
+
+    if (child.has_child("return_value_success")) {
+      const auto success_node = child["return_value_success"];
+      auto success_seq        = project_summary["tools"][child.key()]["tool_return_success"];
+      success_seq |= ryml::SEQ;
+      if (success_node.is_seq()) {
+        for (const auto &value_node: success_node.children())
+          success_seq.append_child() << value_node.val<int>().value_or(0);
+      } else if (success_node.has_val()) {
+        success_seq.append_child() << success_node.val<int>().value_or(0);
+      }
+    }
+    return;
+  }
+
+  spdlog::error("Tool '{}' in component '{}' is missing a 'command' entry", ryml_string(child.key()), component_path.string());
+}
+} // namespace
 
 project::project(yakka::workspace &workspace, const std::string project_name) : project_name(project_name), yakka_home_directory("/.yakka"), project_directory("."), workspace(workspace)
 {
@@ -44,40 +81,34 @@ project::project(yakka::workspace &workspace, const std::string project_name) : 
     project_summary_file = output_path / yakka::project_summary_filename;
     project_file         = project_name + ".yakka";
   }
-  project_summary = project_data.rootref().append_child() << ryml::key("current");
-  project_summary |= ryml::MAP;
-  previous_summary = project_data.rootref().append_child() << ryml::key("previous");
-  previous_summary |= ryml::MAP;
-
-  template_contributions = project_data.rootref().append_child() << ryml::key("template_contributions");
-  template_contributions |= ryml::MAP;
 
   project_data["initial_features"] |= ryml::SEQ;
   project_data["initial_components"] |= ryml::SEQ;
   project_data["commands"] |= ryml::SEQ;
 
-  project_summary["choices"] |= ryml::MAP;
-  project_summary["components"] |= ryml::MAP;
-  project_summary["features"] |= ryml::SEQ;
-  project_summary["tools"] |= ryml::MAP;
-  project_summary["data"] |= ryml::MAP;
+  previous_summary = project_data.rootref().append_child() << ryml::key("previous");
+  previous_summary |= ryml::MAP;
+  // previous_summary["choices"] |= ryml::MAP;
+  previous_summary["components"] |= ryml::MAP;
+  // previous_summary["features"] |= ryml::SEQ;
+  // previous_summary["tools"] |= ryml::MAP;
+  // previous_summary["data"] |= ryml::MAP;
+  
+  template_contributions = project_data.rootref().append_child() << ryml::key("template_contributions");
+  template_contributions |= ryml::MAP;
 
   add_common_template_commands(inja_environment);
 }
 
-/// @brief Executes ~project.
-
 project::~project()
 {
 }
-
 
 /// @brief Executes set_project_directory.
 
 void project::set_project_directory(const std::string path)
 {
   project_directory = path;
-
 }
 
 void project::parse_project_string(const std::vector<std::string> &project_string)
@@ -191,8 +222,18 @@ void project::init_project()
     }
 
     update_summary();
-  } else
+  } else {
     fs::create_directories(output_path);
+
+    project_summary = project_data.rootref().append_child() << ryml::key("current");
+    project_summary |= ryml::MAP;
+
+    project_summary["choices"] |= ryml::MAP;
+    project_summary["components"] |= ryml::MAP;
+    project_summary["features"] |= ryml::SEQ;
+    project_summary["tools"] |= ryml::MAP;
+    project_summary["data"] |= ryml::MAP;
+  }
 
   // Check if there is a project file
   if (fs::exists(project_file)) {
@@ -351,7 +392,6 @@ void project::update_summary()
 bool project::add_component(std::string &component_name, component_database::flag flags)
 {
   return add_component(c4::to_csubstr(component_name), flags);
-
 }
 
 /// @brief Executes add_component.
@@ -567,8 +607,8 @@ project::state project::process_choice(c4::csubstr &choice_name)
 {
   const auto &choice = project_summary["choices"][choice_name];
 
-  int matches        = 0;
-  int option_count   = 0;
+  int matches      = 0;
+  int option_count = 0;
 
   // Go through each option
   for (const auto &o: choice["options"]) {
@@ -909,20 +949,13 @@ void project::generate_project_summary()
     if (c->root.contains("tools")) {
       for (auto child: c->root["tools"].children()) {
         inja::Environment inja_env;
-/// @brief Executes add_callback.
+        /// @brief Executes add_callback.
 
         inja_env.add_callback("curdir", 0, [&c](inja::Arguments &args, ryml::NodeRef additional_data) {
           return additional_data["values"].append_child() << std::filesystem::absolute(c->component_path).string();
         });
 
-
-        if (child.has_key())
-          if (child.has_val())
-            project_summary["tools"][child.key()] << try_render(inja_env, child.val(), project_summary);
-          else
-            project_summary["tools"][child.key()] << "ERROR: This node was meant to have a val";
-        else
-          spdlog::error("Found a tool that doesn't have a key: {}", ryml::emitrs_yaml<std::string>(child));
+        add_tool_entry(child, project_summary, inja_env, c->component_path);
       }
     }
   }
@@ -1095,8 +1128,7 @@ void project::update_project_data()
           project_summary["data"][pointer] |= ryml::VAL;
       }
 
-      // json_node_merge(pointer, project_summary["data"][pointer], c->root[pointer], &data_schema);
-      merge_nodes(project_summary["data"].at(pointer), component_node);
+      json_node_merge(pointer, project_summary["data"].at(pointer), component_node, &data_schema);
 
       auto test_node = project_summary["data"].at(pointer);
       if (!test_node.is_seq() && !test_node.is_map() && !test_node.has_val()) {
@@ -1138,7 +1170,7 @@ bool project::condition_is_fulfilled(ryml::ConstNodeRef node)
 
 void project::create_config_file(const std::shared_ptr<yakka::component> component, ryml::ConstNodeRef config, const std::string &prefix, std::string instance_name)
 {
-  std::string config_filename            = config["path"].val<std::string>().value();
+  std::string config_filename = config["path"].val<std::string>().value();
 
   std::filesystem::path config_file_path = component->component_path / config_filename;
 
@@ -1497,14 +1529,13 @@ void project::process_tools(const std::shared_ptr<component> c)
 
     for (auto i: c->root["tools"].children()) {
       inja::Environment inja_env;
-/// @brief Executes add_callback.
+      /// @brief Executes add_callback.
 
       inja_env.add_callback("curdir", 0, [&c](inja::Arguments &args, ryml::NodeRef additional_data) {
         return additional_data["values"].append_child() << std::filesystem::absolute(c->component_path).string();
       });
 
-
-      project_summary["tools"][i.key()] << try_render(inja_env, i.val(), project_summary);
+      add_tool_entry(i, project_summary, inja_env, c->component_path);
     }
   }
 }
@@ -1520,7 +1551,6 @@ void project::load_projects()
 void project::save_blueprints()
 {
   blueprint_database.save(this->output_path / "blueprints.json");
-
 }
 
 void project::process_construction(indicators::ProgressBar &bar)

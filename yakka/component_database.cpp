@@ -66,9 +66,11 @@ static void initialize_database(ryml::Tree &database)
   root |= ryml::MAP;
 
   auto ensure_map = [&](const char *key) {
-    ryml::NodeRef child = root.append_child();
-    child << ryml::Key(key);
-    child |= ryml::MAP;
+    ryml::NodeRef child = root.has_child(ryml::to_csubstr(key)) ? root.find_child(ryml::to_csubstr(key)) : root.append_child();
+    if (!child.is_map()) {
+      child << ryml::Key(key);
+      child.change_type(ryml::MAP);
+    }
   };
 
   ensure_map("blueprints");
@@ -137,6 +139,7 @@ std::expected<void, error> component_database::load(const path &workspace_path)
         return save();
       }
       database = std::move(*loaded);
+      initialize_database(database);
     }
     return {};
   } catch (const std::exception &e) {
@@ -202,7 +205,7 @@ std::expected<bool, error> component_database::add_component(ryml::csubstr compo
   const auto path_string = abs_path.generic_string();
 
   auto components_node = database["components"];
-  if (components_node.has_child(component_id)) {
+  if (components_node.is_map() && components_node.has_child(component_id)) {
     auto entries = components_node[component_id];
     if (entries.is_seq()) {
       for (auto entry: entries.children()) {
@@ -370,7 +373,7 @@ std::optional<ryml::ConstNodeRef> component_database::get_blueprint_provider(rym
   // const auto blueprint_str = std::string{ blueprint };
 
   auto blueprints_node = database["blueprints"];
-  if (blueprints_node.has_child(blueprint)) {
+  if (blueprints_node.is_map() && blueprints_node.has_child(blueprint)) {
     return blueprints_node[blueprint];
   }
 
@@ -383,8 +386,9 @@ std::optional<ryml::ConstNodeRef> component_database::get_serve_endpoint_provide
 {
   // const auto endpoint_str = std::string{ endpoint };
 
-  if (database["serve"].has_child(endpoint)) {
-    return database["serve"][endpoint];
+  auto serve_node = database["serve"];
+  if (serve_node.is_map() && serve_node.has_child(endpoint)) {
+    return serve_node[endpoint];
   }
   return std::nullopt;
 }

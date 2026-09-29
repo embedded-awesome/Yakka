@@ -271,19 +271,16 @@ std::string generate_project_name(const component_list_t &components, const feat
  */
 static void copy_node_recursive(ryml::ConstNodeRef source, ryml::NodeRef destination)
 {
-  if (source.is_map()) {
-    destination |= ryml::MAP;
-    destination.tree()->duplicate_children(source.tree(), source.id(), destination.id(), c4::yml::NONE);
-    return;
-  }
-
-  if (source.is_seq()) {
-    destination |= ryml::SEQ;
+  if (source.is_map() || source.is_seq()) {
+    // change_type() only removes children when the type actually changes.
+    destination.clear_children();
+    destination.change_type(source.is_map() ? ryml::MAP : ryml::SEQ);
     destination.tree()->duplicate_children(source.tree(), source.id(), destination.id(), c4::yml::NONE);
     return;
   }
 
   if (source.has_val()) {
+    destination.change_type(ryml::VAL);
     destination.set_val(source.val());
   }
 }
@@ -408,20 +405,178 @@ static void merge_node_default(ryml::NodeRef target, ryml::ConstNodeRef source)
 
 /// @brief Executes json_node_merge.
 
+static bool node_as_number(ryml::ConstNodeRef node, double &result)
+{
+  return node.has_val() && c4::from_chars(node.val(), &result);
+}
+
+/// @brief Removes duplicate scalar entries from a sequence, keeping the first occurrence.
+static void deduplicate_seq(ryml::NodeRef seq)
+{
+  std::vector<std::string> seen;
+  for (size_t i = 0; i < seq.num_children();) {
+    auto child = seq.child(i);
+    if (!child.has_val()) {
+      ++i;
+      continue;
+    }
+
+    std::string value = ryml_string(child.val());
+    if (std::find(seen.begin(), seen.end(), value) != seen.end()) {
+      seq.remove_child(child);
+    } else {
+      seen.push_back(std::move(value));
+      ++i;
+    }
+  }
+}
+
+/// @brief Sorts a sequence of scalars by value.
+static void sort_seq(ryml::NodeRef seq)
+{
+  std::vector<std::string> values;
+  values.reserve(seq.num_children());
+  for (const auto &child: seq.children()) {
+    values.push_back(child.has_val() ? ryml_string(child.val()) : std::string{});
+  }
+
+  std::sort(values.begin(), values.end());
+
+  size_t index = 0;
+  for (auto child: seq.children()) {
+    child << values[index++];
+  }
+}
+
+static void merge_node_with_strategy(ryml::Pointer path, ryml::NodeRef target, ryml::ConstNodeRef source, const schema *schema);
+
+/// @brief Merges each child of a source map into the target map, tracking the schema path.
+static void merge_map_with_strategy(ryml::Pointer path, ryml::NodeRef target, ryml::ConstNodeRef source, const schema *schema)
+{
+  if (!target.is_map()) {
+    copy_node_recursive(source, target);
+    return;
+  }
+
+  for (const auto &child: source.children()) {
+    if (!child.has_key()) {
+      continue;
+    }
+
+    const auto key = child.key();
+    if (!target.has_child(key)) {
+      append_duplicate_node(child, target);
+      continue;
+    }
+
+    merge_node_with_strategy(path / key, target.find_child(key), child, schema);
+  }
+}
+
+static void merge_node_with_strategy(ryml::Pointer path, ryml::NodeRef target, ryml::ConstNodeRef source, const schema *schema)
+{
+  const auto strategy = schema == nullptr ? schema::merge_strategy::Default : schema->get_merge_strategy(path);
+
+  switch (strategy) {
+  case schema::merge_strategy::Overwrite:
+    target.clear_children();
+    copy_node_recursive(source, target);
+    return;
+
+  case schema::merge_strategy::Abort:
+    if (ryml::emitrs_yaml<std::string>(target) != ryml::emitrs_yaml<std::string>(source)) {
+      spdlog::error("Conflict detected while merging '{}'", path.to_string());
+    }
+    return;
+
+  case schema::merge_strategy::Max:
+  case schema::merge_strategy::Min: {
+    double target_value = 0.0;
+    double source_value = 0.0;
+    if (!node_as_number(target, target_value) || !node_as_number(source, source_value)) {
+      spdlog::error("Cannot apply numeric merge strategy at '{}': values are not numbers", path.to_string());
+      return;
+    }
+
+    const bool take_source = strategy == schema::merge_strategy::Max ? source_value > target_value : source_value < target_value;
+    if (take_source) {
+      target.set_val(source.val());
+    }
+    return;
+  }
+
+  case schema::merge_strategy::Append:
+  case schema::merge_strategy::Sort:
+  case schema::merge_strategy::Unique: {
+    if (!target.is_seq()) {
+      if (target.has_val()) {
+        const auto existing = target.val();
+        target.clear_val();
+        target |= ryml::SEQ;
+        target.append_child() << existing;
+      } else if (!target.is_map()) {
+        target |= ryml::SEQ;
+      }
+    }
+
+    if (target.is_seq()) {
+      if (source.is_seq()) {
+        append_duplicate_children(source, target);
+      } else {
+        // Sequence entries must not carry the source node's key.
+        auto entry = target.append_child();
+        copy_node_recursive(source, entry);
+      }
+
+      if (strategy == schema::merge_strategy::Unique) {
+        deduplicate_seq(target);
+      } else if (strategy == schema::merge_strategy::Sort) {
+        sort_seq(target);
+      }
+      return;
+    }
+
+    [[fallthrough]];
+  }
+
+  case schema::merge_strategy::Default:
+  default:
+    break;
+  }
+
+  if (source.is_map()) {
+    merge_map_with_strategy(std::move(path), target, source, schema);
+    return;
+  }
+
+  if (source.is_seq()) {
+    if (!target.is_seq()) {
+      copy_node_recursive(source, target);
+    } else {
+      append_duplicate_children(source, target);
+    }
+    return;
+  }
+
+  // if (target.is_map() || target.is_seq()) {
+  //   spdlog::warn("Merging scalar over container at '{}'", path.to_string());
+  // }
+
+  copy_node_recursive(source, target);
+}
+
 void json_node_merge(ryml::Pointer path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema *schema)
 {
-  (void)schema;
-
-
   if (!merge_target.valid() || !node.valid()) {
     return;
   }
 
-  // auto target = path.empty() ? merge_target : merge_target[path];
-  // if (!target.valid()) {
-  //   return;
-  // }
-  merge_node_default(merge_target, node);
+  if (schema == nullptr) {
+    merge_node_default(merge_target, node);
+    return;
+  }
+
+  merge_node_with_strategy(std::move(path), merge_target, node, schema);
 }
 
 /// @brief Executes component_dotname_to_id.
@@ -1337,150 +1492,5 @@ void ryml_save_file(const std::filesystem::path &path, ryml::ConstNodeRef node)
     spdlog::error("Error saving ryml tree to file {}: {}", path.generic_string(), e.what());
   }
 }
-
-/**
- * Merge ryml nodes at a specific path (overload of json_node_merge for ryml)
- * @param path Vector of path segments relative to merge_target (e.g., {"data", "settings"})
- * @param merge_target The target node to merge into
- * @param node The source node to merge from
- * @param schema Optional schema for merge strategy
- */
-// void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema *schema)
-// {
-//   if (!merge_target.valid() || !node.valid()) {
-//     spdlog::error("Invalid nodes in json_node_merge (ryml version)");
-//     return;
-//   }
-
-//   // Navigate to the target location, creating nodes if necessary
-//   ryml::NodeRef target = merge_target[path]; //ryml_navigate_path(merge_target, path, true);
-
-//   if (!target.valid()) {
-//     spdlog::error("Failed to navigate to path in json_node_merge (ryml version)");
-//     return;
-//   }
-
-//   // Get merge strategy from schema if available
-//   // Note: This requires converting path to ryml::Pointer format for schema lookup
-//   schema::merge_strategy strategy = schema::merge_strategy::Default;
-//   if (schema != nullptr) {
-//     // Build ryml::Pointer from path vector
-//     std::string pointer_str;
-//     for (const auto &segment: path) {
-//       if (!segment.empty()) {
-//         pointer_str += "/" + segment;
-//       }
-//     }
-//     if (pointer_str.empty()) {
-//       pointer_str = "";
-//     }
-//     try {
-//       ryml::Pointer json_ptr(pointer_str);
-//       strategy = schema->get_merge_strategy(json_ptr);
-//     } catch (...) {
-//       // If pointer construction fails, use default strategy
-//       strategy = schema::merge_strategy::Default;
-//     }
-//   }
-
-//   // Perform the merge based on node types
-//   if (node.is_map()) {
-//     if (!target.is_map()) {
-//       spdlog::error("Cannot merge map into non-map node");
-//       return;
-//     }
-
-//     // Merge map nodes
-//     for (const auto &child: node.children()) {
-//       if (!child.has_key())
-//         continue;
-
-//       c4::csubstr key = child.key();
-//       std::string key_str(key.data(), key.size());
-
-//       if (target.has_child(key)) {
-//         ryml::NodeRef target_child = target.find_child(key);
-
-//         // Build new path for recursive merge
-//         std::vector<std::string> child_path = path;
-//         child_path.push_back(key_str);
-
-//         // Recursively merge
-//         json_node_merge(child_path, merge_target, child, schema);
-//       } else {
-//         // Add new key-value pair
-//         // TODO: Implement full subtree copy for complex nodes
-//         if (child.has_val()) {
-//           ryml::NodeRef new_child = target.append_child();
-//           new_child << ryml::key(key);
-//           new_child.set_val(child.val());
-//         }
-//       }
-//     }
-//   } else if (node.is_seq()) {
-//     // Handle sequence merging
-//     if (target.is_map()) {
-//       spdlog::error("Cannot merge sequence into map node");
-//       return;
-//     }
-
-//     // Convert target to sequence if it's not already
-//     if (!target.is_seq()) {
-//       if (target.is_seed() || !target.has_val()) {
-//         target |= ryml::SEQ;
-//       } else {
-//         // Target has a scalar value, convert to array with that value
-//         c4::csubstr existing_val = target.val();
-//         target |= ryml::SEQ;
-//         ryml::NodeRef first = target.append_child();
-//         first.set_val(existing_val);
-//       }
-//     }
-
-//     // Append all sequence elements
-//     for (const auto &child: node.children()) {
-//       if (child.has_val()) {
-//         ryml::NodeRef new_child = target.append_child();
-//         new_child.set_val(child.val());
-//       }
-//     }
-//   } else if (node.has_val()) {
-//     // Handle scalar values
-//     if (target.is_map()) {
-//       spdlog::error("Cannot merge scalar into map node");
-//       return;
-//     } else if (target.is_seq()) {
-//       // Append to sequence
-//       ryml::NodeRef new_child = target.append_child();
-//       new_child.set_val(node.val());
-//     } else {
-//       // Merge scalar into scalar based on strategy
-//       if (strategy == schema::merge_strategy::Abort) {
-//         std::string path_str;
-//         for (const auto &seg: path) {
-//           path_str += "/" + seg;
-//         }
-//         spdlog::error("Conflict detected while merging scalar values at path {}", path_str);
-//         return;
-//       } else if (strategy == schema::merge_strategy::Overwrite) {
-//         target.set_val(node.val());
-//       } else if (strategy == schema::merge_strategy::Max || strategy == schema::merge_strategy::Min) {
-//         // For numeric comparisons, convert to numbers
-//         // TODO: Implement numeric comparison logic
-//         target.set_val(node.val()); // Default to overwrite for now
-//       } else {
-//         // Default: convert to array
-//         c4::csubstr existing_val = target.has_val() ? target.val() : c4::csubstr("");
-//         target |= ryml::SEQ;
-//         if (!existing_val.empty()) {
-//           ryml::NodeRef first = target.append_child();
-//           first.set_val(existing_val);
-//         }
-//         ryml::NodeRef second = target.append_child();
-//         second.set_val(node.val());
-//       }
-//     }
-//   }
-// }
 
 } // namespace yakka

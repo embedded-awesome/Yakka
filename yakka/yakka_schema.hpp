@@ -7,7 +7,12 @@
 // #include <ryml/json-schema.hpp>
 #include "spdlog.h"
 #include <filesystem>
+#include <memory>
 #include <ranges>
+
+namespace valijson {
+class Schema;
+}
 
 namespace yakka {
 
@@ -154,9 +159,10 @@ public:
   };
 
 public:
-  schema() : schema_data()
-  {
-  }
+  schema();
+  ~schema();
+  schema(schema &&) noexcept;
+  schema &operator=(schema &&) noexcept;
   explicit schema(const std::string &schema_yaml);
   explicit schema(const std::filesystem::path &schema_path);
   
@@ -170,25 +176,14 @@ public:
 
 private:
   ryml::Tree schema_data;
-  // ryml_schema::json_validator validator;
+  /// Parsed form of schema_data, rebuilt lazily whenever validator_updated is false.
+  std::unique_ptr<valijson::Schema> parsed_schema;
   bool validator_updated = false;
 };
 
 class yakka_schema_validator {
   schema yakka_component_schema;
   schema slcc_component_schema;
-  // ryml_schema::json_validator yakka_validator;
-  // ryml_schema::json_validator slcc_validator;
-
-  // class custom_error_handler : public ryml_schema::basic_error_handler {
-  // public:
-  //   yakka::component *component;
-  //   void error(const ryml::Pointer &ptr, const ryml::Tree &instance, const std::string &message) override
-  //   {
-  //     ryml_schema::basic_error_handler::error(ptr, instance, message);
-  //     spdlog::error("Validation error in '{}': {} - {} : - {}", component->file_path.generic_string(), ptr.to_string(), instance.dump(3), message);
-  //   }
-  // };
 
 public:
   static yakka_schema_validator &get()
@@ -207,5 +202,4 @@ public:
   bool validate(yakka::component *component);
 };
 
-// schema_validator yakka_validator();
 } // namespace yakka

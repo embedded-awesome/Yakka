@@ -130,4 +130,60 @@ namespace {
         ASSERT_TRUE(result.has_value());
         EXPECT_FALSE(*result);
     }
+
+    TEST(RymlDiffTest, GeneratesNestedStructureOnDifference) {
+        auto left_tree = ryml::parse_in_arena(R"({
+            "components": {
+                "comp1": {
+                    "version": "1.0",
+                    "sources": ["a.cpp"]
+                },
+                "comp2": {
+                    "version": "2.0"
+                }
+            }
+        })");
+        auto right_tree = ryml::parse_in_arena(R"({
+            "components": {
+                "comp1": {
+                    "version": "0.9",
+                    "sources": ["a.cpp"]
+                }
+            }
+        })");
+
+        ryml::Tree diff_tree;
+        auto diff_root = diff_tree.rootref();
+        diff_root.set_map();
+
+        yakka::ryml_diff(left_tree.crootref(), right_tree.crootref(), diff_root);
+
+        ASSERT_TRUE(diff_root.is_map());
+        ASSERT_TRUE(diff_root.has_child("components"));
+        auto components = diff_root["components"];
+        ASSERT_TRUE(components.has_child("comp1"));
+        EXPECT_EQ(components["comp1"]["version"].val(), c4::to_csubstr("1.0"));
+        EXPECT_FALSE(components["comp1"].has_child("sources"));
+        ASSERT_TRUE(components.has_child("comp2"));
+        EXPECT_EQ(components["comp2"]["version"].val(), c4::to_csubstr("2.0"));
+    }
+
+    TEST(RymlDiffTest, PreservesSequenceIndexWithPlaceholders) {
+        auto left_tree  = ryml::parse_in_arena(R"({"process": [{"echo": "one"}, {"echo": "two"}, {"echo": "Done yay"}]})");
+        auto right_tree = ryml::parse_in_arena(R"({"process": [{"echo": "one"}, {"echo": "two"}, {"echo": "nope"}]})");
+
+        ryml::Tree diff_tree;
+        auto diff_root = diff_tree.rootref();
+        diff_root.set_map();
+
+        yakka::ryml_diff(left_tree.crootref(), right_tree.crootref(), diff_root);
+
+        ASSERT_TRUE(diff_root.has_child("process"));
+        auto process = diff_root["process"];
+        ASSERT_TRUE(process.is_seq());
+        ASSERT_EQ(process.num_children(), 3u);
+        EXPECT_EQ(process[0].val(), c4::to_csubstr("null"));
+        EXPECT_EQ(process[1].val(), c4::to_csubstr("null"));
+        EXPECT_EQ(process[2]["echo"].val(), c4::to_csubstr("Done yay"));
+    }
 }

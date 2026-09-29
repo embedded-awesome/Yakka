@@ -18,4 +18,5 @@ float={{ float(float_text) }}
 int={{ int(float_text) }}
 round={{ round(float_text, 2) }}
 hex={{ hex(255) }}
+yaml={{ to_yaml(map) }}
 types={{ isArray(words) }}|{{ isObject(map) }}|{{ isString(name) }}|{{ isNumber(float_text) }}

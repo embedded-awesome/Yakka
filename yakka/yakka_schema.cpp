@@ -17,6 +17,14 @@
 
 namespace yakka {
 
+schema::schema() = default;
+
+schema::~schema() = default;
+
+schema::schema(schema &&) noexcept = default;
+
+schema &schema::operator=(schema &&) noexcept = default;
+
 /// @brief Executes schema.
 
 schema::schema(const std::string &schema_yaml) : schema_data()
@@ -64,6 +72,7 @@ void schema::add_schema_data(ryml::ConstNodeRef schema_data)
     properties |= ryml::MAP;
   }
   merge_nodes(root["properties"], schema_data);
+  parsed_schema.reset();
   validator_updated = false;
 }
 
@@ -77,20 +86,27 @@ bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id)
     return false;
   }
 
+  if (schema_data.empty()) {
+    return true;
+  }
+
   const auto schema_root = schema_data.crootref();
   if (!schema_root.valid() || !schema_root.is_map()) {
     return true;
   }
 
   try {
-    valijson::Schema parsed_schema;
-    valijson::SchemaParser parser;
-    parser.populateSchema(valijson::adapters::RymlAdapter(schema_root), parsed_schema);
-    validator_updated = true;
+    if (!validator_updated || !parsed_schema) {
+      auto new_schema = std::make_unique<valijson::Schema>();
+      valijson::SchemaParser parser;
+      parser.populateSchema(valijson::adapters::RymlAdapter(schema_root), *new_schema);
+      parsed_schema    = std::move(new_schema);
+      validator_updated = true;
+    }
 
-    valijson::Validator validator(valijson::Validator::kWeakTypes);
+    valijson::Validator validator;
     valijson::ValidationResults results;
-    const bool is_valid = validator.validate(parsed_schema, valijson::adapters::RymlAdapter(data), &results);
+    const bool is_valid = validator.validate(*parsed_schema, valijson::adapters::RymlAdapter(data), &results);
     if (is_valid) {
       return true;
     }
@@ -106,43 +122,24 @@ bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id)
 
     return false;
   } catch (const std::exception &e) {
+    parsed_schema.reset();
     validator_updated = false;
     spdlog::error("Schema validation failed for '{}': {}", ryml_string(id), e.what());
     return false;
   }
 }
 
-// bool schema::validate(ryml::ConstNodeRef data, std::string id)
-// {
-  // custom_error_handler err;
-  // err.component_name = id;
-
-  // // Update validator if needed
-  // if (validator_updated == false) {
-  //   try {
-  //     validator.set_root_schema(this->schema_data);
-  //     validator_updated = true;
-  //   } catch (const std::exception &e) {
-  //     spdlog::error("Setting root schema failed\n{}", e.what());
-  //     return false;
-  //   }
-  // }
-
-  // // Validate schema
-  // validator.validate(data, err);
-  // return !err.error_triggered;
-//   return true;
-// }
-
 ryml::ConstNodeRef schema::operator[](const ryml::Pointer &path) const
 {
-  // TODO
-  return ryml::ConstNodeRef{};
-  // return (*this)[path.to_string()];
+  return (*this)[path.to_string()];
 }
 
 ryml::ConstNodeRef schema::operator[](const std::string &path) const
 {
+  if (schema_data.empty()) {
+    return ryml::ConstNodeRef{};
+  }
+
   auto current = schema_data.crootref();
   if (!current.valid()) {
     return ryml::ConstNodeRef{};
@@ -194,32 +191,32 @@ ryml::ConstNodeRef schema::operator[](const std::string &path) const
 
 schema::merge_strategy schema::get_merge_strategy(const ryml::Pointer &path) const
 {
-  // ryml::Tree temp_schema = this->schema_data;
+  const auto node = (*this)[path];
+  if (!node.valid() || !node.is_map()) {
+    return schema::merge_strategy::Default;
+  }
 
-  // std::string path_str = path.to_string();
-  // for (const auto &part_range: std::views::split(path_str, '/')) {
-  //   std::string part(part_range.begin(), part_range.end());
-  //   if (part.empty())
-  //     continue;
-  //   if (temp_schema["properties"].contains(part)) {
-  //     temp_schema = temp_schema["properties"][part];
-  //   } else {
-  //     return schema::merge_strategy::Default;
-  //   }
-  // }
-  // if (temp_schema["merge"].is_string()) {
-  //   std::string merge_str = temp_schema["merge"].get<std::string>();
-  //   if (merge_str == "concatenate")
-  //     return schema::merge_strategy::Default;
-  //   else if (merge_str == "max")
-  //     return schema::merge_strategy::Max;
-  //   else if (merge_str == "min")
-  //     return schema::merge_strategy::Min;
-  //   else if (merge_str == "sort")
-  //     return schema::merge_strategy::Sort;
-  //   else if (merge_str == "unique")
-  //     return schema::merge_strategy::Unique;
-  // }
+  const auto merge = node.find_child("merge");
+  if (!merge.valid() || !merge.has_val()) {
+    return schema::merge_strategy::Default;
+  }
+
+  const auto strategy = merge.val();
+  if (strategy == "concatenate" || strategy == "append")
+    return schema::merge_strategy::Append;
+  if (strategy == "max")
+    return schema::merge_strategy::Max;
+  if (strategy == "min")
+    return schema::merge_strategy::Min;
+  if (strategy == "sort")
+    return schema::merge_strategy::Sort;
+  if (strategy == "unique")
+    return schema::merge_strategy::Unique;
+  if (strategy == "overwrite")
+    return schema::merge_strategy::Overwrite;
+  if (strategy == "abort")
+    return schema::merge_strategy::Abort;
+
   return schema::merge_strategy::Default;
 }
 

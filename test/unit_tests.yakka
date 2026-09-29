@@ -3,6 +3,11 @@ name: Yakka unit tests
 sources:
   - data_dependency_unit_tests.cpp
   - workspace_unit_tests.cpp
+  - blueprint_command_tests.cpp
+  - template_callback_tests.cpp
+  - project_lifecycle_tests.cpp
+  - task_engine_tests.cpp
+  - schema_validation_tests.cpp
 
 requires:
   components:

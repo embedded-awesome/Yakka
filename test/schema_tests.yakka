@@ -1,0 +1,9 @@
+name: Yakka schema tests
+
+sources:
+  - schema_validation_tests.cpp
+
+requires:
+  components:
+    - yakka
+    - googletest

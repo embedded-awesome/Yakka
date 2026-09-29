@@ -88,6 +88,8 @@ ryml::NodeRef ensure_child_scalar(ryml::NodeRef parent, c4::csubstr key, c4::csu
 std::expected<void, std::error_code> workspace::init(const std::filesystem::path &workspace_path)
 {
   this->workspace_path = workspace_path;
+  packages.clear();
+  packages.push_back(get_yakka_shared_home());
 
   ensure_map_node(summary.rootref());
 
@@ -136,7 +138,6 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
   // Using ranges for package database loading
   if (!this->packages.empty()) {
     package_databases.reserve(packages.size());
-/// @brief Executes for_each.
 
     std::ranges::for_each(packages, [this](const auto &p) {
       auto result = package_databases.emplace_back().load(p);
@@ -158,13 +159,13 @@ std::expected<void, std::error_code> workspace::init(const std::filesystem::path
   } else {
     // Iterate through project folders in output directory and create a projects entry for each
     const auto output_path = workspace_path / yakka::default_output_directory;
-    auto projects_root = projects.rootref();
+    auto projects_root     = projects.rootref();
     ensure_map_node(projects_root);
     if (fs::exists(output_path)) {
       for (const auto &d: fs::directory_iterator(output_path)) {
         if (fs::is_directory(d.path()) && fs::exists(d.path() / project_summary_filename)) {
-          const auto project_name = d.path().filename().string();
-          const auto key          = c4::to_csubstr(project_name);
+          const auto project_name    = d.path().filename().string();
+          const auto key             = c4::to_csubstr(project_name);
           ryml::NodeRef project_node = projects_root.has_child(key) ? projects_root.find_child(key) : projects_root.append_child();
           if (!project_node.has_key()) {
             project_node << ryml::key(key);
@@ -201,17 +202,16 @@ void workspace::load_component_registries()
     return;
 
   // Using ranges and views for directory traversal
-/// @brief Executes filter.
+  /// @brief Executes filter.
 
   auto yaml_files = std::views::filter(fs::recursive_directory_iterator(registry_path), [](const auto &entry) {
     return entry.path().extension() == ".yaml";
   });
 
-
   for (const auto &entry: yaml_files) {
     try {
-      const auto registry_name  = entry.path().filename().replace_extension().string();
-      auto registry_tree = ryml_load_file(entry.path());
+      const auto registry_name = entry.path().filename().replace_extension().string();
+      auto registry_tree       = ryml_load_file(entry.path());
       if (!registry_tree) {
         spdlog::error("Could not parse component registry '{}': {}\n", entry.path().string(), registry_tree.error().message());
         continue;
@@ -229,7 +229,6 @@ void workspace::load_component_registries()
 std::expected<void, std::error_code> workspace::add_component_registry(ryml::csubstr url)
 {
   return fetch_registry(url);
-
 }
 
 // Using std::optional for registry component lookup
@@ -262,18 +261,17 @@ std::optional<std::pair<std::filesystem::path, std::filesystem::path>> workspace
 {
   const bool try_update_the_database = false;
 
-  const auto component_id            = yakka::component_dotname_to_id(component_dotname);
+  const auto component_id = yakka::component_dotname_to_id(component_dotname);
 
   const auto [local, shared] = std::tuple{ local_database.get_component(component_id, flags), shared_database.get_component(component_id, flags) };
 
   if (!local.has_value() && !shared.has_value()) {
     // Using ranges to search package databases
-/// @brief Executes find_if.
+    /// @brief Executes find_if.
 
     auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
       return db.get_component(component_id, flags).has_value();
     });
-
 
     if (found != package_databases.end()) {
       return std::pair{ found->get_component(component_id, flags).value(), found->get_path() };
@@ -310,12 +308,11 @@ std::optional<ryml::ConstNodeRef> workspace::find_feature(ryml::csubstr feature)
   }
 
   // Using ranges to search package databases
-/// @brief Executes find_if.
+  /// @brief Executes find_if.
 
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
     return db.get_feature_provider(feature).has_value();
   });
-
 
   if (found != package_databases.end()) {
     return found->get_feature_provider(feature);
@@ -337,12 +334,11 @@ std::optional<ryml::ConstNodeRef> workspace::find_blueprint(ryml::csubstr bluepr
     return node;
   }
 
-/// @brief Executes find_if.
+  /// @brief Executes find_if.
 
   auto found = std::ranges::find_if(package_databases, [&](const auto &db) {
     return db.get_blueprint_provider(blueprint).has_value();
   });
-
 
   if (found != package_databases.end()) {
     return found->get_blueprint_provider(blueprint);
@@ -367,7 +363,7 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
     }
 
     const auto configuration = configuration_tree->crootref();
-    auto config_node          = ensure_child_map(summary.rootref(), "configuration");
+    auto config_node         = ensure_child_map(summary.rootref(), "configuration");
 
     if (configuration.has_child("path")) {
       std::string path;
@@ -395,24 +391,24 @@ std::expected<void, std::error_code> workspace::load_config_file(const std::file
       if (packages_node.is_seq()) {
         for (auto p: packages_node.children()) {
           auto path = p.val<std::string>().value();
-        if (path.starts_with('~')) {
+          if (path.starts_with('~')) {
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
-          std::string homepath = std::getenv("HOMEPATH");
-          std::ranges::replace(homepath, '\\', '/');
+            std::string homepath = std::getenv("HOMEPATH");
+            std::ranges::replace(homepath, '\\', '/');
 #else
-          std::string homepath = std::getenv("HOME");
+            std::string homepath = std::getenv("HOME");
 #endif
-          path = homepath + path.substr(1);
+            path = homepath + path.substr(1);
+          }
+          packages.push_back(path);
+          auto packages_summary = ensure_child_seq(config_node, "packages");
+          packages_summary.append_child().set_val(c4::to_csubstr(path));
         }
-        packages.push_back(path);
-        auto packages_summary = ensure_child_seq(config_node, "packages");
-        packages_summary.append_child().set_val(c4::to_csubstr(path));
-      }
       }
     }
 
     if (configuration.has_child("home")) {
-      yakka_shared_home                 = std::filesystem::path(configuration["home"].val<std::string>().value());
+      yakka_shared_home = std::filesystem::path(configuration["home"].val<std::string>().value());
       ensure_child_scalar(config_node, "home", c4::to_csubstr(yakka_shared_home.string()));
     }
 
@@ -430,7 +426,7 @@ std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name
 {
   const auto url_node = node["packages"]["default"]["url"];
 
-  const auto url      = try_render(inja_environment, url_node.val<std::string>().value(), summary.crootref());
+  const auto url = try_render(inja_environment, url_node.val<std::string>().value(), summary.crootref());
 
   const auto branch_node = node["packages"]["default"]["branch"];
   const auto branch      = try_render(inja_environment, branch_node.val<std::string>().value(), summary.crootref());
@@ -444,7 +440,7 @@ std::future<std::filesystem::path> workspace::fetch_component(ryml::csubstr name
 
   const auto checkout_location = (is_tool && shared_components_write_access) ? shared_components_path / "repos" / ryml_string(name) : workspace_path / "components" / ryml_string(name);
 
-/// @brief Executes async.
+  /// @brief Executes async.
 
   return std::async(std::launch::async, [=]() -> std::filesystem::path {
     auto result = do_fetch_component(name, url, branch, git_location, checkout_location, progress_handler);
@@ -464,7 +460,7 @@ std::expected<void, std::error_code> workspace::execute_git_command(ryml::csubst
 {
   constexpr auto GIT_STRING = "git";
 
-  auto [output, result]     = yakka::exec(GIT_STRING, ryml_string(git_directory_string) + ryml_string(command));
+  auto [output, result] = yakka::exec(GIT_STRING, ryml_string(git_directory_string) + ryml_string(command));
 
   if (result != 0) {
     spdlog::error(output);
@@ -481,7 +477,7 @@ std::expected<void, std::error_code> workspace::fetch_registry(ryml::csubstr url
 {
   constexpr auto GIT_STRING = "git";
 
-  const auto fetch_string   = std::format("-C .yakka/registries/ clone {} --progress --single-branch", ryml_string(url));
+  const auto fetch_string = std::format("-C .yakka/registries/ clone {} --progress --single-branch", ryml_string(url));
 
   auto [output, result] = yakka::exec(GIT_STRING, fetch_string);
   spdlog::info("{}\n", output);
@@ -499,7 +495,6 @@ std::expected<void, std::error_code> workspace::update_component(std::string nam
 {
   std::string git_directory_string;
 
-
   // Determine git directory string based on component location
   if (local_database.get_component(name).has_value()) {
     git_directory_string = std::format("--git-dir .yakka/repos/{0}/.git --work-tree components/{0} ", name);
@@ -514,14 +509,14 @@ std::expected<void, std::error_code> workspace::update_component(std::string nam
 
 // Modern implementation using C++23 features
 std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_component(ryml::csubstr name,
-                                                                       std::string url,
-                                                                       std::string branch,
+                                                                                    std::string url,
+                                                                                    std::string branch,
 
-/// @brief Executes void.
+                                                                                    /// @brief Executes void.
 
-                                                                       const std::filesystem::path &git_location,
-                                                                       const std::filesystem::path &checkout_location,
-                                                                       std::function<void(std::string, size_t)> progress_handler)
+                                                                                    const std::filesystem::path &git_location,
+                                                                                    const std::filesystem::path &checkout_location,
+                                                                                    std::function<void(std::string, size_t)> progress_handler)
 {
   // Modern enum class for Git phases
   enum class GitPhase { Counting, Compressing, Receiving, Resolving, Updating, LfsCheckout };
@@ -563,12 +558,11 @@ std::expected<std::filesystem::path, std::error_code> workspace::do_fetch_compon
       auto start_time = std::chrono::steady_clock::now();
       auto logger     = fetch_log;
 
-/// @brief Executes exec.
+      /// @brief Executes exec.
 
       auto result = yakka::exec(cmd, args, [&](std::string data) {
         logger->info(data);
         progress_callback(data);
-
       });
 
       auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
@@ -663,13 +657,12 @@ void workspace::update_versions()
     return entry.path().extension() == ".yaml";
   });
 
-
   for (const auto &file_path: registry_files) {
     std::string registry_name = file_path.path().filename().string();
 
     auto versions_root = versions.rootref();
     ensure_map_node(versions_root);
-    const auto key = c4::to_csubstr(registry_name);
+    const auto key              = c4::to_csubstr(registry_name);
     ryml::NodeRef registry_node = versions_root.has_child(key) ? versions_root.find_child(key) : versions_root.append_child();
     if (!registry_node.has_key()) {
       registry_node << ryml::key(key);

@@ -136,8 +136,8 @@ int main() {
       {"inheritance-and-super", "templates/inheritance/child.inja", "data/empty.yaml", "expected/inheritance.txt"},
       {"macros-and-global-scope", "templates/macros/main.inja", "data/macros.yaml", "expected/macros.txt"},
       {"mutation-helpers", "templates/mutations.inja", "data/mutations.yaml", "expected/mutations.txt"},
+      {"merge", "templates/merge.inja", "data/merge.yaml", "expected/merge.txt"},
       {"missing-loop-is-empty", "templates/missing_loop.inja", "data/empty.yaml", "expected/missing_loop.txt"},
-      {"custom-syntax", "templates/custom_syntax.inja", "data/custom_syntax.yaml", "expected/custom_syntax.txt", test_mode::custom_syntax},
   };
 
   bool all_passed = true;

@@ -1,0 +1,8 @@
+{%- set combined = merge(base, extra) -%}
+{%- set scope.global.acc = base -%}
+{%- merge("/scope/global/acc", extra) -%}
+{%- set local = {} -%}
+{%- merge("local.nested", extra) -%}
+{%- set ptr = {} -%}
+{%- merge("/ptr/deep", base.opts) -%}
+new={{ combined }}|base={{ base }}|global={{ scope.global.acc }}|local={{ local }}|ptr={{ ptr }}{%- remove_child(combined, "size") -%}{%- remove_child(combined, "missing") -%}|removed={{ combined }}

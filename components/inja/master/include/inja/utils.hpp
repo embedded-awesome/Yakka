@@ -15,6 +15,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "exceptions.hpp"
 #include "json.hpp"
@@ -645,6 +646,51 @@ inline void set_child_from_node(NodeRef parent, std::string_view key, ConstNodeR
   const size_t new_index = parent.tree()->duplicate(src.tree(), src.id(), parent.id(), /*parent.last_child().id());*/ c4::yml::NONE);
   auto node = NodeRef(parent.tree(), new_index);
   node << ryml::key(key_sub);
+}
+
+// Deep merge: maps merge recursively by key, sequences append, scalars overwrite.
+inline void merge_node_into(NodeRef dst, ConstNodeRef src) {
+  if (!dst.valid() || !src.valid()) {
+    return;
+  }
+
+  // Snapshot child ids so merging a node into itself (or an ancestor) terminates.
+  std::vector<size_t> src_children;
+  src_children.reserve(src.num_children());
+  for (const auto& child : src.children()) {
+    src_children.push_back(child.id());
+  }
+
+  auto* tree = dst.tree();
+  const auto* src_tree = src.tree();
+  if (src.is_map()) {
+    if (!dst.is_map()) {
+      tree->change_type(dst.id(), ::ryml::MAP);
+    }
+    for (const auto child_id : src_children) {
+      const ConstNodeRef child(src_tree, child_id);
+      auto dst_child = find_child_by_key(dst, child.key());
+      if (dst_child.valid()) {
+        merge_node_into(dst_child, child);
+      } else {
+        const size_t after = dst.has_children() ? dst.last_child().id() : ::ryml::NONE;
+        tree->duplicate(src_tree, child_id, dst.id(), after);
+      }
+    }
+  } else if (src.is_seq()) {
+    if (!dst.is_seq()) {
+      tree->change_type(dst.id(), ::ryml::SEQ);
+    }
+    for (const auto child_id : src_children) {
+      const size_t after = dst.has_children() ? dst.last_child().id() : ::ryml::NONE;
+      tree->duplicate(src_tree, child_id, dst.id(), after);
+    }
+  } else if (src.has_val()) {
+    if (!dst.is_val()) {
+      tree->change_type(dst.id(), ::ryml::VAL);
+    }
+    dst.set_val(src.val());
+  }
 }
 
 } // namespace inja

@@ -421,13 +421,11 @@ int main(int argc, char **argv)
 
   yakka::task_engine task_engine;
   progress_bar_task_ui progress_bar_ui;
-  bool taskflow_loaded = false;
   try {
     if (task_engine.load_taskflow(project.output_path / "taskflow.json") == yakka::yakka_status::SUCCESS && 
         task_engine.load_todolist(project.output_path / "todolist.json", project) == yakka::yakka_status::SUCCESS) {
       spdlog::info("Loaded taskflow from {}", (project.output_path / "taskflow.json").string());
       spdlog::info("Loaded todolist from {}", (project.output_path / "todolist.json").string());
-      taskflow_loaded = true;
     } else {
       spdlog::info("No taskflow found. Generating a new one");
       task_engine.create_taskflow(project);
@@ -443,8 +441,7 @@ int main(int argc, char **argv)
   std::cout << "Complete in " << std::chrono::duration_cast<std::chrono::milliseconds>(yakka_end_time - yakka_start_time).count() << " milliseconds" << std::endl;
 
   // Save the todo list with the current state of the tasks. This allows resuming the build later if needed.
-  if (!taskflow_loaded)
-    task_engine.save_todolist(project.output_path / "todolist.json");
+  task_engine.save_todolist(project.output_path / "todolist.json");
 
   spdlog::shutdown();
   show_console_cursor(true);

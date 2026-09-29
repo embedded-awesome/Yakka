@@ -18,4 +18,6 @@ float=3.14159
 int=3
 round=3.14
 hex=ff
+yaml=x: 10
+y: 20
 types=true|true|true|true

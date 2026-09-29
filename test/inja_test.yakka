@@ -5,7 +5,7 @@ includes:
     - ../components/spdlog/master/include
 
 sources:
-  - test/inja_test.cpp
+  - inja_test.cpp
 
 requires:
   components:

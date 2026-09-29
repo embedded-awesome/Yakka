@@ -10,6 +10,7 @@
 
 #include <future>
 #include <chrono>
+#include <set>
 #include <unordered_map>
 
 using namespace std::chrono_literals;
@@ -67,7 +68,7 @@ void task_engine::init(task_complete_type task_complete_handler)
 
 void task_engine::process_data_dependency(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, project &project, std::filesystem::file_time_type start_time)
 {
-  spdlog::info("{}: data", target_name);
+  // spdlog::info("{}: data", target_name);
   auto result = has_data_dependency_changed(target_name, project.previous_summary, project.project_summary);
   if (result) {
     construct_task->last_modified = *result ? fs::file_time_type::max() : fs::file_time_type::min();
@@ -100,13 +101,13 @@ void task_engine::process_task(const std::shared_ptr<construction_task> &constru
     if (construct_task->match->dependencies.size() == 0) {
       if (!fs::exists(target_name)) {
         try {
-          auto result                   = engine.run_command(target_name, construct_task->match, project, project.project_summary["data"]);
-          construct_task->last_modified = fs::file_time_type::clock::now();
+          auto result = engine.run_command(target_name, construct_task->match, project, project.project_summary["data"]);
           if (result.second != 0) {
             spdlog::info("Aborting: {} returned {}", target_name, result.second);
             engine.abort_build = true;
             return;
           }
+          construct_task->last_modified = fs::file_time_type::clock::now();
         } catch (const std::exception &e) {
           spdlog::error("Error running command for {}: {}", target_name, e.what());
           engine.abort_build = true;
@@ -126,16 +127,21 @@ void task_engine::process_task(const std::shared_ptr<construction_task> &constru
         if (max_element == engine.todo_list.end() || temp_element->second->last_modified > max_element->second->last_modified)
           max_element = temp_element;
       }
-      if (!fs::exists(target_name) || max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch()) {
-        spdlog::info("{}: Updating because of {}", target_name, max_element->first);
+      // No dependency is in the todo list when none of them needed rebuilding, so the target is only out of date if it is missing
+      const bool dependency_is_newer = max_element != engine.todo_list.end() && max_element->second->last_modified.time_since_epoch() > construct_task->last_modified.time_since_epoch();
+      if (!fs::exists(target_name) || dependency_is_newer) {
+        if (dependency_is_newer)
+          spdlog::info("{}: Updating because of {}", target_name, max_element->first);
+        else
+          spdlog::info("{}: Updating because it is missing", target_name);
         try {
-          auto [output, retcode]        = engine.run_command(target_name, construct_task->match, project, project.project_summary["data"]);
-          construct_task->last_modified = fs::file_time_type::clock::now();
-          if (retcode < 0) {
+          auto [output, retcode] = engine.run_command(target_name, construct_task->match, project, project.project_summary["data"]);
+          if (retcode != 0) {
             spdlog::info("Aborting: {} returned {}", target_name, retcode);
             engine.abort_build = true;
             return;
           }
+          construct_task->last_modified = fs::file_time_type::clock::now();
         } catch (const std::exception &e) {
           spdlog::error("Error running command for {}: {}", target_name, e.what());
           engine.abort_build = true;
@@ -399,7 +405,21 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
 
           if (retcode != 0)
             spdlog::error("Returned {}\n{}", retcode, temp_output);
-          if (retcode < 0)
+
+          // If the tool declares a set of acceptable return values, enforce it
+          if (tool.is_map() && tool.has_child("tool_return_success") ) {
+            const auto success_values = tool["tool_return_success"];
+            bool is_success           = false;
+            for (const auto &value_node: success_values.children())
+              if (value_node.val<int>().value_or(0) == retcode) {
+                is_success = true;
+                break;
+              }
+            if (!is_success) {
+              spdlog::error("'{}' returned {} which is not an accepted success value for target '{}'", command_name, retcode, target);
+              return { temp_output, -1 };
+            }
+          } else if (retcode != 0)
             return { temp_output, retcode };
 
           captured_output = temp_output;
@@ -416,7 +436,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
           spdlog::error("{} tool doesn't exist", command_name);
         }
 
-        if (retcode < 0)
+        if (retcode != 0)
           return { captured_output, retcode };
       } catch (std::exception &e) {
         spdlog::error("Failed to run command: '{}' as part of {}", command_name, target);
@@ -531,6 +551,20 @@ void task_engine::save_todolist(const std::filesystem::path &filename)
     }
   }
 
+  // Targets that were up to date are absent from todo_list, so carry their recorded state forward rather than dropping them
+  if (!todo_list_tree.empty()) {
+    const auto previous_root = todo_list_tree.rootref();
+    if (previous_root.is_map() && previous_root.has_child("items")) {
+      for (const auto previous_item: previous_root.find_child("items").children()) {
+        if (!previous_item.has_key() || serialized_items.has_child(previous_item.key()))
+          continue;
+        auto item = serialized_items.append_child();
+        item.set_key_serialized(previous_item.key());
+        merge_nodes(item, previous_item);
+      }
+    }
+  }
+
   std::ofstream file(filename, std::ios::binary | std::ios::trunc);
   if (!file) {
     spdlog::error("Failed to open todo list file '{}' for writing", filename.string());
@@ -546,7 +580,13 @@ std::shared_ptr<yakka::construction_task> task_engine::build_tasks_from_todo_lis
 {
   const auto target_name        = item.key();
   const auto target_name_string = ryml_string(target_name);
-  const auto has_match          = item["has_match"].val<bool>();
+
+  // Reuse an already reconstructed target. This also terminates recursion on shared or circular successors
+  const auto existing_todo = todo_list.equal_range(target_name);
+  if (existing_todo.first != existing_todo.second)
+    return existing_todo.first->second;
+
+  const auto has_match = item["has_match"].val<bool>();
 
   // If it has a match, retrieve the blueprint match from the project target database
   std::shared_ptr<blueprint_match> match = nullptr;
@@ -612,6 +652,8 @@ yakka_status task_engine::load_todolist(const std::filesystem::path &filename, y
     return yakka_status::FAIL;
   }
 
+  // The todo list is the authoritative source of the graph it rebuilds below, so discard any tasks a previous load left behind
+  taskflow.clear();
   todo_list.clear();
   todo_task_groups.clear();
   todo_task_groups["Processing"] = std::make_shared<yakka::task_group>("Processing");
@@ -631,6 +673,13 @@ yakka_status task_engine::load_todolist(const std::filesystem::path &filename, y
     return file_last_modified > last_modified;
   };
 
+  const auto has_uninitialized_timestamp = [&](const ryml::NodeRef &item) -> bool {
+    if (!item.has_child("last_modified"))
+      return true;
+    const auto last_modified = item["last_modified"].val<int64_t>().value_or(0);
+    return last_modified == 0 || last_modified == -1;
+  };
+
   auto start_time = std::filesystem::file_time_type::clock::now();
 
   for (const auto serialized_item: serialized_items.children()) {
@@ -638,7 +687,7 @@ yakka_status task_engine::load_todolist(const std::filesystem::path &filename, y
       spdlog::warn("Skipping invalid todo list item");
       continue;
     }
-    if (!has_item_changed(serialized_item) && !project.commands.contains(serialized_item.key())) {
+    if (!has_item_changed(serialized_item) && !project.commands.contains(serialized_item.key()) && !has_uninitialized_timestamp(serialized_item)) {
       continue;
     }
 
@@ -726,10 +775,26 @@ void task_engine::save_taskflow(const std::filesystem::path &filename)
     tasks.push_back(task);
   });
 
-  for (const auto &task: tasks) {
+  std::vector<std::vector<size_t>> predecessors_by_task(tasks.size());
+  for (size_t source_id = 0; source_id < tasks.size(); ++source_id) {
+    const auto &source_task = tasks[source_id];
+    source_task.for_each_successor([&](tf::Task successor) {
+      const auto successor_id = task_ids.at(successor);
+      predecessors_by_task[successor_id].push_back(source_id);
+    });
+  }
+
+  for (size_t task_id = 0; task_id < tasks.size(); ++task_id) {
+    const auto &task = tasks[task_id];
     auto serialized_task = serialized_tasks.append_child();
     serialized_task |= ryml::MAP;
     serialized_task["name"] << task.name();
+
+    auto predecessors = serialized_task["predecessors"];
+    predecessors |= ryml::SEQ;
+    for (const auto predecessor_id: predecessors_by_task[task_id]) {
+      predecessors.append_child() << predecessor_id;
+    }
 
     auto successors = serialized_task["successors"];
     successors |= ryml::SEQ;
@@ -779,30 +844,71 @@ yakka_status task_engine::load_taskflow(const std::filesystem::path &filename)
   }
 
   tf::Taskflow loaded_taskflow;
+  std::vector<ryml::NodeRef> serialized_task_nodes;
   std::vector<tf::Task> tasks;
   tasks.reserve(serialized_tasks.num_children());
 
   for (const auto serialized_task: serialized_tasks.children()) {
-    if (!serialized_task.is_map() || !serialized_task.has_child("name") || !serialized_task["name"].has_val() || !serialized_task.has_child("successors") || !serialized_task["successors"].is_seq()) {
+    if (!serialized_task.is_map() || !serialized_task.has_child("name") || !serialized_task["name"].has_val()) {
       spdlog::error("Taskflow file '{}' contains an invalid task", filename.string());
       return yakka_status::FAIL;
     }
 
+    if (serialized_task.has_child("successors") && !serialized_task["successors"].is_seq()) {
+      spdlog::error("Taskflow file '{}' contains a non-sequence successor list", filename.string());
+      return yakka_status::FAIL;
+    }
+
+    if (serialized_task.has_child("predecessors") && !serialized_task["predecessors"].is_seq()) {
+      spdlog::error("Taskflow file '{}' contains a non-sequence predecessor list", filename.string());
+      return yakka_status::FAIL;
+    }
+
+    serialized_task_nodes.push_back(serialized_task);
     tasks.push_back(loaded_taskflow.placeholder().name(ryml_string(serialized_task["name"].val())));
   }
 
-  size_t task_id = 0;
-  for (const auto serialized_task: serialized_tasks.children()) {
-    std::unordered_set<size_t> seen_successors;
-    for (const auto serialized_successor: serialized_task["successors"].children()) {
-      const auto successor_id = serialized_successor.val<size_t>();
-      if (!successor_id || *successor_id >= tasks.size() /*|| !seen_successors.insert(*successor_id).second*/) {
-        spdlog::error("Taskflow file '{}' contains an invalid successor", filename.string());
-        return yakka_status::FAIL;
-      }
-      tasks[task_id].precede(tasks[*successor_id]);
+  std::set<std::pair<size_t, size_t>> seen_edges;
+  const auto add_edge = [&](size_t from, size_t to) -> bool {
+    if (from >= tasks.size() || to >= tasks.size()) {
+      return false;
     }
-    ++task_id;
+    if (!seen_edges.insert({from, to}).second) {
+      return true;
+    }
+    tasks[from].precede(tasks[to]);
+    return true;
+  };
+
+  for (size_t task_id = 0; task_id < serialized_task_nodes.size(); ++task_id) {
+    const auto &serialized_task = serialized_task_nodes[task_id];
+    if (serialized_task.has_child("successors") && serialized_task["successors"].is_seq()) {
+      for (const auto serialized_successor: serialized_task["successors"].children()) {
+        const auto successor_id = serialized_successor.val<size_t>();
+        if (!successor_id || *successor_id >= tasks.size()) {
+          spdlog::error("Taskflow file '{}' contains an invalid successor", filename.string());
+          return yakka_status::FAIL;
+        }
+        if (!add_edge(task_id, *successor_id)) {
+          spdlog::error("Taskflow file '{}' contains an invalid edge", filename.string());
+          return yakka_status::FAIL;
+        }
+      }
+    }
+
+    if (serialized_task.has_child("predecessors") && serialized_task["predecessors"].is_seq()) {
+      for (const auto serialized_predecessor: serialized_task["predecessors"].children()) {
+        const auto predecessor_id = serialized_predecessor.val<size_t>();
+        if (!predecessor_id || *predecessor_id >= tasks.size()) {
+          spdlog::error("Taskflow file '{}' contains an invalid predecessor", filename.string());
+          return yakka_status::FAIL;
+        }
+        if (!add_edge(*predecessor_id, task_id)) {
+          spdlog::error("Taskflow file '{}' contains an invalid edge", filename.string());
+          return yakka_status::FAIL;
+        }
+      }
+    }
   }
 
   taskflow = std::move(loaded_taskflow);
