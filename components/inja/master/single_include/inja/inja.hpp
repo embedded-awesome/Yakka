@@ -96,6 +96,7 @@ std::abort();                 \
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 // #include "exceptions.hpp"
 #ifndef INCLUDE_INJA_EXCEPTIONS_HPP_
@@ -778,6 +779,51 @@ inline void set_child_from_node(NodeRef parent, std::string_view key, ConstNodeR
   node << ryml::key(key_sub);
 }
 
+// Deep merge: maps merge recursively by key, sequences append, scalars overwrite.
+inline void merge_node_into(NodeRef dst, ConstNodeRef src) {
+  if (!dst.valid() || !src.valid()) {
+    return;
+  }
+
+  // Snapshot child ids so merging a node into itself (or an ancestor) terminates.
+  std::vector<size_t> src_children;
+  src_children.reserve(src.num_children());
+  for (const auto& child : src.children()) {
+    src_children.push_back(child.id());
+  }
+
+  auto* tree = dst.tree();
+  const auto* src_tree = src.tree();
+  if (src.is_map()) {
+    if (!dst.is_map()) {
+      tree->change_type(dst.id(), ::ryml::MAP);
+    }
+    for (const auto child_id : src_children) {
+      const ConstNodeRef child(src_tree, child_id);
+      auto dst_child = find_child_by_key(dst, child.key());
+      if (dst_child.valid()) {
+        merge_node_into(dst_child, child);
+      } else {
+        const size_t after = dst.has_children() ? dst.last_child().id() : ::ryml::NONE;
+        tree->duplicate(src_tree, child_id, dst.id(), after);
+      }
+    }
+  } else if (src.is_seq()) {
+    if (!dst.is_seq()) {
+      tree->change_type(dst.id(), ::ryml::SEQ);
+    }
+    for (const auto child_id : src_children) {
+      const size_t after = dst.has_children() ? dst.last_child().id() : ::ryml::NONE;
+      tree->duplicate(src_tree, child_id, dst.id(), after);
+    }
+  } else if (src.has_val()) {
+    if (!dst.is_val()) {
+      tree->change_type(dst.id(), ::ryml::VAL);
+    }
+    dst.set_val(src.val());
+  }
+}
+
 } // namespace inja
 
 #endif // INCLUDE_INJA_UTILS_HPP_
@@ -895,6 +941,21 @@ public:
     PushBack,
     Erase,
     Unique,
+    Merge,
+    ToYaml,
+    RemoveChild,
+    Map,
+    Select,
+    Reject,
+    SelectAttr,
+    RejectAttr,
+    GroupBy,
+    DictSort,
+    Items,
+    List,
+    Reverse,
+    Slice,
+    Batch,
     None,
   };
 
@@ -954,6 +1015,36 @@ private:
       {std::make_pair("push_back", 3), FunctionData {Operation::PushBack}},
       {std::make_pair("erase", 1), FunctionData {Operation::Erase}},
       {std::make_pair("unique", 1), FunctionData {Operation::Unique}},
+      {std::make_pair("merge", 2), FunctionData {Operation::Merge}},
+      {std::make_pair("to_yaml", 1), FunctionData {Operation::ToYaml}},
+      {std::make_pair("remove_child", 2), FunctionData {Operation::RemoveChild}},
+        {std::make_pair("map", 2), FunctionData {Operation::Map}},
+        {std::make_pair("select", 1), FunctionData {Operation::Select}},
+        {std::make_pair("select", 2), FunctionData {Operation::Select}},
+        {std::make_pair("select", 3), FunctionData {Operation::Select}},
+        {std::make_pair("select", 4), FunctionData {Operation::Select}},
+        {std::make_pair("reject", 1), FunctionData {Operation::Reject}},
+        {std::make_pair("reject", 2), FunctionData {Operation::Reject}},
+        {std::make_pair("reject", 3), FunctionData {Operation::Reject}},
+        {std::make_pair("reject", 4), FunctionData {Operation::Reject}},
+        {std::make_pair("selectattr", 2), FunctionData {Operation::SelectAttr}},
+        {std::make_pair("selectattr", 3), FunctionData {Operation::SelectAttr}},
+        {std::make_pair("selectattr", 4), FunctionData {Operation::SelectAttr}},
+        {std::make_pair("rejectattr", 2), FunctionData {Operation::RejectAttr}},
+        {std::make_pair("rejectattr", 3), FunctionData {Operation::RejectAttr}},
+        {std::make_pair("rejectattr", 4), FunctionData {Operation::RejectAttr}},
+        {std::make_pair("groupby", 2), FunctionData {Operation::GroupBy}},
+        {std::make_pair("groupby", 3), FunctionData {Operation::GroupBy}},
+        {std::make_pair("dictsort", 1), FunctionData {Operation::DictSort}},
+        {std::make_pair("dictsort", 2), FunctionData {Operation::DictSort}},
+        {std::make_pair("dictsort", 3), FunctionData {Operation::DictSort}},
+        {std::make_pair("items", 1), FunctionData {Operation::Items}},
+        {std::make_pair("list", 1), FunctionData {Operation::List}},
+        {std::make_pair("reverse", 1), FunctionData {Operation::Reverse}},
+        {std::make_pair("slice", 2), FunctionData {Operation::Slice}},
+        {std::make_pair("slice", 3), FunctionData {Operation::Slice}},
+        {std::make_pair("batch", 2), FunctionData {Operation::Batch}},
+        {std::make_pair("batch", 3), FunctionData {Operation::Batch}},
   };
 
 public:
@@ -3114,6 +3205,96 @@ class Renderer : public NodeVisitor {
     return native_to_string(lhs) < native_to_string(rhs);
   }
 
+  static ConstNodeRef resolve_attribute(ConstNodeRef value, std::string_view attribute) {
+    if (!value.valid() || attribute.empty()) {
+      return value;
+    }
+    return resolve_pointer(value, Pointer(DataNode::convert_dot_to_ptr(attribute)));
+  }
+
+  static void append_node(NodeRef sequence, ConstNodeRef value, size_t& last_child) {
+    if (!value.valid()) {
+      auto child = sequence.append_child();
+      child = nullptr;
+      last_child = child.id();
+      return;
+    }
+    last_child = sequence.tree()->duplicate(value.tree(), value.id(), sequence.id(), last_child);
+  }
+
+  static bool is_named_test(std::string_view name) {
+    return name == "defined" || name == "undefined" || name == "none" || name == "boolean" || name == "number" ||
+           name == "integer" || name == "float" || name == "string" || name == "mapping" || name == "sequence" ||
+           name == "iterable" || name == "lower" || name == "upper" || name == "odd" || name == "even" ||
+           name == "divisibleby" || name == "divisibleBy" || name == "eq" || name == "equalto" || name == "ne" ||
+           name == "lt" || name == "lessthan" || name == "le" || name == "gt" || name == "greaterthan" || name == "ge" ||
+           name == "in";
+  }
+
+  static bool matches_test(ConstNodeRef value, std::string_view name, ConstNodeRef expected = ConstNodeRef()) {
+    if (name == "defined") return value.valid();
+    if (name == "undefined") return !value.valid();
+    if (name == "none") return !value.valid() || node_is_null(value);
+    if (name == "boolean") return node_is_bool_like(value);
+    if (name == "number") return node_is_int_like(value) || node_is_uint_like(value) || node_is_float_like(value);
+    if (name == "integer") return node_is_int_like(value) || node_is_uint_like(value);
+    if (name == "float") return node_is_float_like(value) && !node_is_int_like(value);
+    if (name == "string") return value.valid() && (value.is_val() || value.is_keyval()) && !node_is_bool_like(value) &&
+                                      !node_is_int_like(value) && !node_is_float_like(value);
+    if (name == "mapping") return value.valid() && value.is_map();
+    if (name == "sequence") return value.valid() && value.is_seq();
+    if (name == "iterable") return value.valid() && (value.is_map() || value.is_seq());
+    if (name == "lower" || name == "upper") {
+      auto actual = node_to_string(value);
+      auto normalized = actual;
+      std::transform(normalized.begin(), normalized.end(), normalized.begin(), [name](char c) {
+        return static_cast<char>(name == "lower" ? ::tolower(c) : ::toupper(c));
+      });
+      return actual == normalized;
+    }
+    if (name == "odd") return node_to_int(value).value_or(0) % 2 != 0;
+    if (name == "even") return node_to_int(value).value_or(0) % 2 == 0;
+    if (name == "divisibleby" || name == "divisibleBy") {
+      const auto divisor = node_to_int(expected);
+      const auto number = node_to_int(value);
+      return divisor && number && *divisor != 0 && *number % *divisor == 0;
+    }
+    if (name == "eq" || name == "equalto") return nodes_equal(NativeNodeRef(value), NativeNodeRef(expected));
+    if (name == "ne") return !nodes_equal(NativeNodeRef(value), NativeNodeRef(expected));
+    if (name == "lt" || name == "lessthan") return node_less(NativeNodeRef(value), NativeNodeRef(expected));
+    if (name == "le") return !node_less(NativeNodeRef(expected), NativeNodeRef(value));
+    if (name == "gt" || name == "greaterthan") return node_less(NativeNodeRef(expected), NativeNodeRef(value));
+    if (name == "ge") return !node_less(NativeNodeRef(value), NativeNodeRef(expected));
+    if (name == "in") {
+      if (!expected.valid() || (!expected.is_seq() && !expected.is_map())) return false;
+      for (const auto& child : expected.children()) {
+        if (nodes_equal(NativeNodeRef(child), NativeNodeRef(value))) return true;
+      }
+    }
+    return false;
+  }
+
+  static bool matches_selection(ConstNodeRef item, const Arguments& args, bool attribute_mode, bool reject) {
+    std::string attribute;
+    size_t test_index = 1;
+    if (attribute_mode) {
+      attribute = node_to_string(args[1]);
+      test_index = 2;
+    } else if (args.size() > 1 && !is_named_test(node_to_string(args[1]))) {
+      attribute = node_to_string(args[1]);
+      test_index = 2;
+    }
+
+    const auto value = resolve_attribute(item, attribute);
+    bool selected = native_truthy(NativeNodeRef(value));
+    if (args.size() > test_index) {
+      const auto test_name = node_to_string(args[test_index]);
+      const auto expected = args.size() > test_index + 1 ? args[test_index + 1] : ConstNodeRef();
+      selected = matches_test(value, test_name, expected);
+    }
+    return reject ? !selected : selected;
+  }
+
   void set_loop_meta_bool(NodeRef node, std::string_view key, bool value) {
     auto field = find_child_by_key(node, to_csubstr(key));
     if (!field.valid()) {
@@ -4111,6 +4292,268 @@ class Renderer : public NodeVisitor {
         }
       }
       data_eval_stack.emplace_back(filtered);
+    } break;
+    case Op::Merge: {
+      const auto args = get_arguments<2>(node);
+      for (const auto& arg : args) {
+        if (!arg.valid() && !not_found_stack.empty()) {
+          not_found_stack.pop();
+        }
+      }
+
+      const auto& dst_arg = args[0];
+      const auto& src_arg = args[1];
+      if (dst_arg.valid() && dst_arg.node.has_val() && !dst_arg.node.is_map() && !dst_arg.node.is_seq()) {
+        // merge("path.to.data", src): modify the data at the path in place
+        constexpr std::string_view global_scope_pointer_prefix = "/scope/global/";
+        std::string path = native_to_string(dst_arg);
+        NodeRef target_scope = additional_data;
+        const bool is_json_pointer = !path.empty() && path.front() == '/';
+        if (is_json_pointer && inja::string_view::starts_with(path, global_scope_pointer_prefix)) {
+          target_scope = template_scope_data;
+          path = path.substr(global_scope_pointer_prefix.size());
+        }
+        const Pointer ptr(is_json_pointer ? path : DataNode::convert_dot_to_ptr(path));
+        if (ptr.empty()) {
+          throw_renderer_error("merge: invalid path '" + path + "'", node);
+          make_null_result();
+          break;
+        }
+        merge_node_into(ensure_path(target_scope, ptr), src_arg.node);
+        make_null_result();
+      } else {
+        // merge(data, src): return a new node without modifying the inputs
+        auto result = tmp_sequence.append_child();
+        merge_node_into(result, dst_arg.node);
+        merge_node_into(result, src_arg.node);
+        data_eval_stack.emplace_back(result);
+      }
+    } break;
+    case Op::ToYaml: {
+      const auto value = get_arguments<1>(node)[0];
+      if (!value.valid()) {
+        make_result(std::string {});
+        break;
+      }
+      // Copy into a standalone tree so the node's own key is not emitted.
+      ryml::Tree yaml_tree;
+      yaml_tree.reserve(value.node.num_children() + 1);
+      yaml_tree.duplicate_contents(value.node.tree(), value.node.id(), yaml_tree.root_id());
+      auto yaml = ryml::emitrs_yaml<std::string>(yaml_tree);
+      while (!yaml.empty() && yaml.back() == '\n') {
+        yaml.pop_back();
+      }
+      make_result(yaml);
+    } break;
+    case Op::RemoveChild: {
+      const auto args = get_arguments<2>(node);
+      const auto& parent = args[0];
+      if (!parent.valid() || !parent.node.is_map()) {
+        throw_renderer_error("remove_child: first argument must be a map", node);
+        make_null_result();
+        break;
+      }
+      // Only template-owned data may be modified; the input data is read-only.
+      if (parent.node.tree() != additional_data.tree() && parent.node.tree() != template_scope_data.tree()) {
+        throw_renderer_error("remove_child: cannot modify input data", node);
+        make_null_result();
+        break;
+      }
+      auto* tree = parent.node.tree() == additional_data.tree() ? additional_data.tree() : template_scope_data.tree();
+      NodeRef parent_ref(tree, parent.node.id());
+      const auto key = native_to_string(args[1]);
+      if (parent_ref.has_child(to_csubstr(key))) {
+        parent_ref.remove_child(to_csubstr(key));
+      }
+      make_null_result();
+    } break;
+    case Op::Map: {
+      const auto args = get_argument_vector(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      size_t last_child = NONE;
+      if (args[0].valid() && (args[0].is_seq() || args[0].is_map())) {
+        const auto attribute = node_to_string(args[1]);
+        for (const auto& item : args[0].children()) {
+          append_node(result, resolve_attribute(item, attribute), last_child);
+        }
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Select:
+    case Op::Reject:
+    case Op::SelectAttr:
+    case Op::RejectAttr: {
+      const auto args = get_argument_vector(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      size_t last_child = NONE;
+      const bool attribute_mode = node.operation == Op::SelectAttr || node.operation == Op::RejectAttr;
+      const bool reject = node.operation == Op::Reject || node.operation == Op::RejectAttr;
+      if (args[0].valid() && (args[0].is_seq() || args[0].is_map())) {
+        for (const auto& item : args[0].children()) {
+          if (matches_selection(item, args, attribute_mode, reject)) {
+            append_node(result, item, last_child);
+          }
+        }
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::GroupBy: {
+      const auto args = get_argument_vector(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      if (args[0].valid() && args[0].is_seq()) {
+        struct Group {
+          std::string key;
+          ConstNodeRef value;
+          std::vector<ConstNodeRef> items;
+        };
+        std::vector<Group> groups;
+        const auto attribute = node_to_string(args[1]);
+        for (const auto& item : args[0].children()) {
+          auto value = resolve_attribute(item, attribute);
+          if (!value.valid() && args.size() > 2) {
+            value = args[2];
+          }
+          const auto key = node_to_string(value);
+          auto group = std::find_if(groups.begin(), groups.end(), [&](const Group& candidate) { return candidate.key == key; });
+          if (group == groups.end()) {
+            groups.push_back({key, value, {item}});
+          } else {
+            group->items.push_back(item);
+          }
+        }
+        std::sort(groups.begin(), groups.end(), [](const Group& lhs, const Group& rhs) { return lhs.key < rhs.key; });
+        for (const auto& group : groups) {
+          auto group_node = result.append_child();
+          group_node |= ryml::MAP;
+          group_node["grouper"] << to_csubstr(group.key);
+          auto items = group_node.append_child();
+          items << ryml::key("list");
+          items |= ryml::SEQ;
+          size_t last_item = NONE;
+          for (const auto& item : group.items) {
+            last_item = items.tree()->duplicate(item.tree(), item.id(), items.id(), last_item);
+          }
+        }
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::DictSort: {
+      const auto args = get_argument_vector(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      if (args[0].valid() && args[0].is_map()) {
+        std::vector<ConstNodeRef> entries;
+        for (const auto& entry : args[0].children()) {
+          entries.push_back(entry);
+        }
+        const auto by_value = args.size() > 1 && node_to_string(args[1]) == "value";
+        const auto reverse = args.size() > 2 && native_truthy(NativeNodeRef(args[2]));
+        std::sort(entries.begin(), entries.end(), [&](const ConstNodeRef& lhs, const ConstNodeRef& rhs) {
+          const bool less = by_value ? node_less(NativeNodeRef(lhs), NativeNodeRef(rhs)) : lhs.key() < rhs.key();
+          const bool greater = by_value ? node_less(NativeNodeRef(rhs), NativeNodeRef(lhs)) : rhs.key() < lhs.key();
+          return reverse ? greater : less;
+        });
+        for (const auto& entry : entries) {
+          auto pair = result.append_child();
+          pair |= ryml::SEQ;
+          pair.append_child() << entry.key();
+          size_t last_pair_child = pair.last_child().id();
+          append_node(pair, entry, last_pair_child);
+        }
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Items: {
+      const auto args = get_arguments<1>(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      if (args[0].valid() && args[0].node.is_map()) {
+        for (const auto& item : args[0].node.children()) {
+          auto pair = result.append_child();
+          pair |= ryml::SEQ;
+          pair.append_child() << item.key();
+          pair.tree()->duplicate(item.tree(), item.id(), pair.id(), pair.last_child().id());
+        }
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::List: {
+      const auto args = get_arguments<1>(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      size_t last_child = NONE;
+      if (args[0].valid() && (args[0].node.is_seq() || args[0].node.is_map())) {
+        for (const auto& item : args[0].node.children()) {
+          append_node(result, item, last_child);
+        }
+      } else {
+        for (const auto character : native_to_string(args[0])) {
+          result.append_child() << std::string(1, character);
+        }
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Reverse: {
+      const auto args = get_arguments<1>(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      size_t last_child = NONE;
+      if (args[0].valid() && (args[0].node.is_seq() || args[0].node.is_map())) {
+        for (size_t index = args[0].node.num_children(); index > 0; --index) {
+          append_node(result, args[0].node.child(index - 1), last_child);
+        }
+      } else {
+        auto value = native_to_string(args[0]);
+        std::reverse(value.begin(), value.end());
+        result.append_child() << value;
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Slice:
+    case Op::Batch: {
+      const auto args = get_argument_vector(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      std::vector<ConstNodeRef> items;
+      if (args[0].valid() && args[0].is_seq()) {
+        for (const auto& item : args[0].children()) {
+          items.push_back(item);
+        }
+      }
+      const auto size = node_to_int(args[1]).value_or(0);
+      if (size > 0) {
+        if (node.operation == Op::Batch) {
+          for (size_t start = 0; start < items.size(); start += static_cast<size_t>(size)) {
+            auto batch = result.append_child();
+            batch |= ryml::SEQ;
+            size_t last_child = NONE;
+            const auto end = std::min(items.size(), start + static_cast<size_t>(size));
+            for (size_t index = start; index < end; ++index) append_node(batch, items[index], last_child);
+            while (batch.num_children() < static_cast<size_t>(size) && args.size() > 2) {
+              append_node(batch, args[2], last_child);
+            }
+          }
+        } else {
+          const size_t slices = static_cast<size_t>(size);
+          const size_t length = items.size();
+          const size_t base = length / slices;
+          const size_t remainder = length % slices;
+          size_t offset = 0;
+          for (size_t slice = 0; slice < slices; ++slice) {
+            auto column = result.append_child();
+            column |= ryml::SEQ;
+            size_t last_child = NONE;
+            const size_t count = base + (slice < remainder ? 1 : 0);
+            for (size_t index = 0; index < count; ++index) append_node(column, items[offset + index], last_child);
+            if (args.size() > 2 && slice >= remainder) append_node(column, args[2], last_child);
+            offset += count;
+          }
+        }
+      }
+      data_eval_stack.emplace_back(result);
     } break;
     case Op::None:
       break;

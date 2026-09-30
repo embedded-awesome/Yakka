@@ -4,6 +4,8 @@
 #include "inja/utils.hpp"
 #include "test-common.hpp"
 
+#include <tuple>
+
 TEST_CASE("functions") {
   inja::Environment env;
 
@@ -251,6 +253,36 @@ TEST_CASE("functions") {
     CHECK(env.render("{{ isNumber(u64) }}", data.rootref()) == "true");
     CHECK(env.render("{{ isString(u64) }}", data.rootref()) == "false");
   }
+
+      SUBCASE("sequence selection") {
+        auto people = root["people"];
+        people |= ryml::SEQ;
+        for (const auto& person : {std::tuple{"Alice", "red", "true", "NY"},
+               std::tuple{"Bob", "blue", "false", "LA"},
+               std::tuple{"Cara", "red", "true", "NY"}}) {
+      auto entry = people.append_child();
+      entry |= ryml::MAP;
+      entry["name"] << std::get<0>(person);
+      entry["team"] << std::get<1>(person);
+      entry["active"] << std::get<2>(person);
+      entry["profile"] |= ryml::MAP;
+      entry["profile"]["city"] << std::get<3>(person);
+        }
+
+        CHECK(env.render("{{ map(people, \"name\") }}", data.rootref()) == "[\"Alice\",\"Bob\",\"Cara\"]");
+        CHECK(env.render("{{ map(people, \"profile.city\") }}", data.rootref()) == "[\"NY\",\"LA\",\"NY\"]");
+            CHECK(env.render("{{ map(select(people, \"active\"), \"name\") }}", data.rootref()) == "[\"Alice\",\"Cara\"]");
+            CHECK(env.render("{{ map(rejectattr(people, \"active\"), \"name\") }}", data.rootref()) == "[\"Bob\"]");
+        CHECK(env.render("{{ select(people, \"team\", \"equalto\", \"red\")|map(\"name\") }}", data.rootref()) ==
+          "[\"Alice\",\"Cara\"]");
+        CHECK(env.render("{{ map(groupby(people, \"team\"), \"grouper\") }}", data.rootref()) == "[\"blue\",\"red\"]");
+        CHECK(env.render("{{ dictsort({\"b\": 2, \"a\": 1}) }}", data.rootref()) == "[[\"a\",1],[\"b\",2]]");
+        CHECK(env.render("{{ items({\"a\": 1, \"b\": 2}) }}", data.rootref()) == "[[\"a\",1],[\"b\",2]]");
+        CHECK(env.render("{{ list(\"abc\") }}", data.rootref()) == "[\"a\",\"b\",\"c\"]");
+        CHECK(env.render("{{ reverse([1, 2, 3]) }}", data.rootref()) == "[3,2,1]");
+        CHECK(env.render("{{ slice([1, 2, 3, 4, 5], 2) }}", data.rootref()) == "[[1,2,3],[4,5]]");
+        CHECK(env.render("{{ batch([1, 2, 3, 4, 5], 2, 0) }}", data.rootref()) == "[[1,2],[3,4],[5,0]]");
+      }
 }
 
 TEST_CASE("assignments") {
