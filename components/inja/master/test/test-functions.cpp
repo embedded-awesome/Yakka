@@ -283,6 +283,23 @@ TEST_CASE("functions") {
         CHECK(env.render("{{ slice([1, 2, 3, 4, 5], 2) }}", data.rootref()) == "[[1,2,3],[4,5]]");
         CHECK(env.render("{{ batch([1, 2, 3, 4, 5], 2, 0) }}", data.rootref()) == "[[1,2],[3,4],[5,0]]");
       }
+
+  SUBCASE("aggregation and formatting") {
+    CHECK(env.render("{{ sum(vars) }}", data.rootref()) == "3");
+    CHECK(env.render("{{ sum(vars, \"\", 10) }}", data.rootref()) == "13");
+    CHECK(env.render("{{ abs(-5.2) }}", data.rootref()) == "5.2");
+    CHECK(env.render("{{ string(42) }}", data.rootref()) == "42");
+    CHECK(env.render("{{ format(\"%s=%d\", name, age) }}", data.rootref()) == "Peter=29");
+    CHECK(env.render("{{ title(\"hello WORLD\") }}", data.rootref()) == "Hello World");
+    CHECK(env.render("{{ center(\"cat\", 7) }}", data.rootref()) == "  cat  ");
+    CHECK(env.render("{{ indent(\"a\\nb\", 2) }}", data.rootref()) == "a\n  b");
+    CHECK(env.render("{{ indent(\"a\\nb\", 2, true) }}", data.rootref()) == "  a\n  b");
+    CHECK(env.render("{{ truncate(\"foo bar baz\", 7, false, \"...\", 0) }}", data.rootref()) == "foo...");
+    CHECK(env.render("{{ truncate(\"foo bar baz\", 7, true, \"...\", 0) }}", data.rootref()) == "foo ...");
+    CHECK(env.render("{{ wordcount(\"one  two\\nthree\") }}", data.rootref()) == "3");
+    CHECK(env.render("{{ wordwrap(\"one two three\", 7) }}", data.rootref()) == "one two\nthree");
+    CHECK(env.render("{{ pprint([1, 2]) }}", data.rootref()) == "[1,2]");
+  }
 }
 
 TEST_CASE("assignments") {

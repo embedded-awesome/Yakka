@@ -1546,6 +1546,198 @@ class Renderer : public NodeVisitor {
       }
       data_eval_stack.emplace_back(result);
     } break;
+    case Op::Sum: {
+      const auto args = get_argument_vector(node);
+      const auto attribute = args.size() > 1 ? node_to_string(args[1]) : std::string {};
+      double total = args.size() > 2 ? node_to_double(args[2]).value_or(0.0) : 0.0;
+      bool all_integer = args.size() <= 2 || node_to_int(args[2]).has_value();
+      if (args[0].valid() && (args[0].is_seq() || args[0].is_map())) {
+        for (const auto& item : args[0].children()) {
+          const auto value = resolve_attribute(item, attribute);
+          total += node_to_double(value).value_or(0.0);
+          all_integer = all_integer && node_to_int(value).has_value();
+        }
+      }
+      if (all_integer && total >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
+          total <= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+        make_result(static_cast<int64_t>(total));
+      } else {
+        make_result(total);
+      }
+    } break;
+    case Op::Abs: {
+      const auto value = get_arguments<1>(node)[0];
+      if (value.kind() == NativeKind::Int64) {
+        make_result(std::abs(value.value().i64));
+      } else if (value.kind() == NativeKind::UInt64) {
+        make_result(value.value().u64);
+      } else {
+        make_result(std::abs(native_to_double(value).value_or(0.0)));
+      }
+    } break;
+    case Op::String: {
+      make_result(native_to_string(get_arguments<1>(node)[0]));
+    } break;
+    case Op::Format: {
+      const auto args = get_argument_vector(node);
+      std::string result = args.empty() ? std::string {} : node_to_string(args[0]);
+      size_t argument_index = 1;
+      for (size_t index = 0; index + 1 < result.size(); ++index) {
+        if (result[index] != '%') {
+          continue;
+        }
+        if (result[index + 1] == '%') {
+          result.erase(index, 1);
+          continue;
+        }
+        if (argument_index < args.size() && (result[index + 1] == 's' || result[index + 1] == 'd' || result[index + 1] == 'i' || result[index + 1] == 'f')) {
+          result.replace(index, 2, node_to_string(args[argument_index++]));
+          index = index == 0 ? 0 : index - 1;
+        }
+      }
+      make_result(result);
+    } break;
+    case Op::Title: {
+      auto result = native_to_string(get_arguments<1>(node)[0]);
+      bool word_start = true;
+      for (auto& character : result) {
+        if (std::isalpha(static_cast<unsigned char>(character))) {
+          character = static_cast<char>(word_start ? std::toupper(static_cast<unsigned char>(character))
+                                                   : std::tolower(static_cast<unsigned char>(character)));
+          word_start = false;
+        } else {
+          word_start = true;
+        }
+      }
+      make_result(result);
+    } break;
+    case Op::Center: {
+      const auto args = get_argument_vector(node);
+      const auto value = args.empty() ? std::string {} : node_to_string(args[0]);
+      const auto width = args.size() > 1 ? node_to_int(args[1]).value_or(80) : 80;
+      if (width <= static_cast<int64_t>(value.size())) {
+        make_result(value);
+      } else {
+        const auto padding = static_cast<size_t>(width) - value.size();
+        make_result(std::string(padding / 2, ' ') + value + std::string(padding - padding / 2, ' '));
+      }
+    } break;
+    case Op::Indent: {
+      const auto args = get_argument_vector(node);
+      const auto value = args.empty() ? std::string {} : node_to_string(args[0]);
+      const auto width = args.size() > 1 ? node_to_int(args[1]).value_or(4) : 4;
+      const auto prefix = std::string(static_cast<size_t>(std::max<int64_t>(0, width)), ' ');
+      const bool first = args.size() > 2 && node_to_bool(args[2]).value_or(false);
+      const bool blank = args.size() > 3 && node_to_bool(args[3]).value_or(false);
+      std::string result;
+      size_t line_start = 0;
+      bool first_line = true;
+      while (line_start <= value.size()) {
+        const auto line_end = value.find('\n', line_start);
+        const auto line = value.substr(line_start, line_end == std::string::npos ? std::string::npos : line_end - line_start);
+        if ((!first_line || first) && (blank || !line.empty())) {
+          result += prefix;
+        }
+        result += line;
+        if (line_end == std::string::npos) {
+          break;
+        }
+        result += '\n';
+        line_start = line_end + 1;
+        first_line = false;
+      }
+      make_result(result);
+    } break;
+    case Op::Truncate: {
+      const auto args = get_argument_vector(node);
+      const auto value = args.empty() ? std::string {} : node_to_string(args[0]);
+      const auto length = args.size() > 1 ? node_to_int(args[1]).value_or(255) : 255;
+      const bool kill_words = args.size() > 2 && node_to_bool(args[2]).value_or(false);
+      const auto suffix = args.size() > 3 ? node_to_string(args[3]) : "...";
+      const auto leeway = args.size() > 4 ? node_to_int(args[4]).value_or(5) : 5;
+      if (length < 0 || value.size() <= static_cast<size_t>(length) ||
+          value.size() <= static_cast<size_t>(length + leeway)) {
+        make_result(value);
+        break;
+      }
+      const auto limit = static_cast<size_t>(std::max<int64_t>(0, length - static_cast<int64_t>(suffix.size())));
+      size_t cut = std::min(limit, value.size());
+      if (!kill_words) {
+        const auto whitespace = value.find_last_of(" \t\n", cut);
+        if (whitespace != std::string::npos && whitespace > 0) {
+          cut = whitespace;
+        }
+      }
+      make_result(value.substr(0, cut) + suffix);
+    } break;
+    case Op::WordCount: {
+      const auto value = native_to_string(get_arguments<1>(node)[0]);
+      size_t count = 0;
+      bool in_word = false;
+      for (const auto character : value) {
+        if (std::isspace(static_cast<unsigned char>(character))) {
+          in_word = false;
+        } else if (!in_word) {
+          in_word = true;
+          ++count;
+        }
+      }
+      make_result(count);
+    } break;
+    case Op::WordWrap: {
+      const auto args = get_argument_vector(node);
+      const auto value = args.empty() ? std::string {} : node_to_string(args[0]);
+      const auto width = static_cast<size_t>(std::max<int64_t>(1, args.size() > 1 ? node_to_int(args[1]).value_or(79) : 79));
+      const bool break_long_words = args.size() > 2 ? node_to_bool(args[2]).value_or(true) : true;
+      const auto wrap_string = args.size() > 4 ? node_to_string(args[4]) : "\n";
+      std::string result;
+      size_t paragraph_start = 0;
+      while (paragraph_start <= value.size()) {
+        const auto paragraph_end = value.find('\n', paragraph_start);
+        const auto paragraph = value.substr(paragraph_start, paragraph_end == std::string::npos ? std::string::npos : paragraph_end - paragraph_start);
+        size_t line_length = 0;
+        size_t word_start = 0;
+        while (word_start < paragraph.size()) {
+          while (word_start < paragraph.size() && std::isspace(static_cast<unsigned char>(paragraph[word_start]))) ++word_start;
+          if (word_start >= paragraph.size()) break;
+          auto word_end = paragraph.find_first_of(" \t", word_start);
+          if (word_end == std::string::npos) word_end = paragraph.size();
+          auto word = paragraph.substr(word_start, word_end - word_start);
+          if (break_long_words && word.size() > width) {
+            while (word.size() > width) {
+              if (!result.empty()) result += wrap_string;
+              result += word.substr(0, width);
+              word.erase(0, width);
+              line_length = 0;
+            }
+          }
+          if (line_length != 0 && line_length + 1 + word.size() > width) {
+            result += wrap_string;
+            line_length = 0;
+          } else if (line_length != 0) {
+            result += ' ';
+            ++line_length;
+          }
+          result += word;
+          line_length += word.size();
+          word_start = word_end;
+        }
+        if (paragraph_end == std::string::npos) break;
+        result += wrap_string;
+        paragraph_start = paragraph_end + 1;
+      }
+      make_result(result);
+    } break;
+    case Op::PPrint: {
+      const auto value = get_arguments<1>(node)[0];
+      if (value.valid() && value.node.has_children() && !value.node.is_val()) {
+        std::ostringstream output;
+        output << ryml::as_json(*value.node.tree(), value.node.id());
+        make_result(output.str());
+      } else {
+        make_result(native_to_string(value));
+      }
+    } break;
     case Op::None:
       break;
     }
