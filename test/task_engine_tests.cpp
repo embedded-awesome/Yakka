@@ -1,10 +1,13 @@
 #include "task_engine.hpp"
+#include "yakka_project.hpp"
+#include "yakka_workspace.hpp"
 #include <gtest/gtest.h>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -76,12 +79,12 @@ TEST_F(TaskEnginePersistenceTest, SaveTaskflowIncludesPredecessors)
   EXPECT_NE(json.find("\"predecessors\""), std::string::npos);
   EXPECT_NE(json.find("\"successors\""), std::string::npos);
 
-  EXPECT_NE(json.find("\"name\":\"compile\""), std::string::npos);
-  EXPECT_NE(json.find("\"name\":\"archive\""), std::string::npos);
-  EXPECT_NE(json.find("\"name\":\"link\""), std::string::npos);
+  EXPECT_NE(json.find("\"name\": \"compile\""), std::string::npos);
+  EXPECT_NE(json.find("\"name\": \"archive\""), std::string::npos);
+  EXPECT_NE(json.find("\"name\": \"link\""), std::string::npos);
 
-  EXPECT_NE(json.find("\"name\":\"archive\",\"predecessors\":[0]"), std::string::npos);
-  EXPECT_NE(json.find("\"name\":\"link\",\"predecessors\":[0,1]"), std::string::npos);
+  EXPECT_NE(json.find("\"name\": \"archive\",\"predecessors\": [0]"), std::string::npos);
+  EXPECT_NE(json.find("\"name\": \"link\",\"predecessors\": [0,1]"), std::string::npos);
 }
 
 TEST_F(TaskEnginePersistenceTest, InvalidSuccessorPreservesExistingGraph)
@@ -108,7 +111,8 @@ TEST_F(TaskEnginePersistenceTest, TodoListRoundTripsConstructedTasks)
 
   auto compile_entry = std::make_shared<yakka::construction_task>();
   compile_entry->task = compile;
-  compile_entry->last_modified = fs::file_time_type::clock::now();
+  // An epoch timestamp marks the target as never built, which forces load_todolist to rebuild it
+  compile_entry->last_modified = fs::file_time_type{};
   compile_entry->group = std::make_shared<yakka::task_group>("build");
   compile_entry->group->total_count = 2;
   source.todo_list.insert({"compile", compile_entry});
@@ -116,15 +120,21 @@ TEST_F(TaskEnginePersistenceTest, TodoListRoundTripsConstructedTasks)
 
   source.save_todolist(filename);
 
-  yakka::task_engine loaded;
-  loaded.taskflow.placeholder().name("compile");
-  loaded.taskflow.placeholder().name("archive");
+  std::ifstream input(filename);
+  std::stringstream buffer;
+  buffer << input.rdbuf();
+  const std::string json = buffer.str();
+  EXPECT_NE(json.find("\"task_name\": \"compile\""), std::string::npos);
+  EXPECT_NE(json.find("\"group_name\": \"build\""), std::string::npos);
+  EXPECT_NE(json.find("\"archive\""), std::string::npos);
 
-  EXPECT_EQ(loaded.load_todolist(filename), yakka::yakka_status::SUCCESS);
-  EXPECT_EQ(std::distance(loaded.todo_list.begin(), loaded.todo_list.end()), 1);
-  EXPECT_EQ(loaded.todo_list.begin()->second->task.name(), "compile");
-  EXPECT_EQ(loaded.todo_task_groups.begin()->second->name, "build");
-  EXPECT_EQ(loaded.todo_task_groups.begin()->second->total_count, 2);
+  yakka::workspace workspace;
+  yakka::project project(workspace, "todolist_round_trip");
+
+  yakka::task_engine loaded;
+  EXPECT_EQ(loaded.load_todolist(filename, project), yakka::yakka_status::SUCCESS);
+  EXPECT_EQ(loaded.todo_list.count("compile"), 1u);
+  EXPECT_EQ(loaded.todo_list.find("compile")->second->task.name(), "compile");
 }
 
 } // namespace

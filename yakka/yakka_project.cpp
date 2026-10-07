@@ -61,6 +61,19 @@ void add_tool_entry(ryml::ConstNodeRef child, ryml::NodeRef project_summary, inj
 
   spdlog::error("Tool '{}' in component '{}' is missing a 'command' entry", ryml_string(child.key()), component_path.string());
 }
+
+/// @brief Records the source file timestamp and content hash so the next run can detect changes cheaply.
+void record_component_file_state(ryml::NodeRef component_node, const std::filesystem::path &component_path)
+{
+  std::error_code error;
+  const auto last_modified = std::filesystem::last_write_time(component_path, error);
+  if (!error)
+    component_node["yakka_file_timestamp"] << static_cast<int64_t>(last_modified.time_since_epoch().count());
+
+  const auto hash = project_diff::hash_file(component_path);
+  if (hash)
+    component_node["yakka_file_hash"] << project_diff::to_hex(*hash);
+}
 } // namespace
 
 project::project(yakka::workspace &workspace, const std::string project_name) : project_name(project_name), yakka_home_directory("/.yakka"), project_directory("."), workspace(workspace)
@@ -86,14 +99,6 @@ project::project(yakka::workspace &workspace, const std::string project_name) : 
   project_data["initial_components"] |= ryml::SEQ;
   project_data["commands"] |= ryml::SEQ;
 
-  previous_summary = project_data.rootref().append_child() << ryml::key("previous");
-  previous_summary |= ryml::MAP;
-  // previous_summary["choices"] |= ryml::MAP;
-  previous_summary["components"] |= ryml::MAP;
-  // previous_summary["features"] |= ryml::SEQ;
-  // previous_summary["tools"] |= ryml::MAP;
-  // previous_summary["data"] |= ryml::MAP;
-  
   template_contributions = project_data.rootref().append_child() << ryml::key("template_contributions");
   template_contributions |= ryml::MAP;
 
@@ -212,16 +217,8 @@ void project::init_project()
     // }
     // project_summary = result.value().rootref();
 
-    // Fill required_features with features from project summary
-    for (const auto &f: project_summary["features"]) {
-      if (!f.has_val()) {
-        spdlog::error("Invalid feature entry in project summary: '{}'", f.key());
-        continue;
-      }
-      required_features.insert(f.val());
-    }
-
-    update_summary();
+    diff.capture_baseline(project_summary);
+    detect_changed_components();
   } else {
     fs::create_directories(output_path);
 
@@ -356,35 +353,48 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
   }
 }
 
-/// @brief Executes update_summary.
+/// @brief Compares every component recorded in the loaded summary against its source file, then clears
+/// the sections of the summary that this run regenerates from scratch.
 
-void project::update_summary()
+void project::detect_changed_components()
 {
-  // Check if any component files have been modified
+  diff.detect_component_changes(project_summary_last_modified);
 
-  for (auto node: project_summary["components"].children()) {
-    if (!node.valid())
-      continue;
-
-    const auto name = node.key();
-    if (!node.has_child("yakka_file")) {
-      spdlog::error("Project summary for component '{}' is missing 'yakka_file' entry", name);
-      project_summary["components"].remove_child(name);
-      unprocessed_components.insert(name);
-      continue;
-    }
-
-    auto yakka_file = ryml_path(node["yakka_file"].val());
-    if (!std::filesystem::exists(yakka_file) || std::filesystem::last_write_time(yakka_file) > project_summary_last_modified) {
-      // If so, move existing node to previous summary
-      node.move(previous_summary["components"], previous_summary["components"].last_child());
-      unprocessed_components.insert(name);
-    } else {
-      // Previous summary should point to the same object
-      previous_summary["components"][name] = node;
-    }
+  // A modified component file can add or drop feature requirements, so the previous feature list is
+  // only safe to carry forward while every component file is untouched
+  if (diff.components_modified.empty()) {
+    if (project_summary.has_child("features"))
+      for (const auto &f: project_summary["features"]) {
+        if (!f.has_val()) {
+          spdlog::error("Invalid feature entry in project summary: '{}'", f.key());
+          continue;
+        }
+        required_features.insert(f.val());
+      }
+  } else {
+    spdlog::info("Recomputing the project feature list because {} component file(s) changed", diff.components_modified.size());
   }
-  previous_summary["data"] = project_summary["data"];
+
+  // Every component is re-parsed each run, so the regenerated sections must start empty to avoid
+  // duplicate keys and stale entries accumulating in the summary
+  for (const auto section: { "components", "features", "tools", "data", "initial", "configuration" }) {
+    const auto key = ryml::to_csubstr(section);
+    if (project_summary.has_child(key))
+      project_summary.remove_child(key);
+  }
+
+  project_summary["components"] |= ryml::MAP;
+  project_summary["features"] |= ryml::SEQ;
+  project_summary["tools"] |= ryml::MAP;
+  project_summary["data"] |= ryml::MAP;
+}
+
+/// @brief Resolves the diff once the current summary has been fully regenerated.
+
+void project::finalize_diff()
+{
+  diff.finalize(project_summary, required_components, required_features);
+  spdlog::info("Project diff: {}", diff.describe());
 }
 
 /// @brief Executes add_component.
@@ -428,6 +438,7 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
   new_component_node |= ryml::MAP;
   if (new_component->parse_file(component_path, package_path, new_component_node) == yakka::yakka_status::SUCCESS) {
     components.push_back(new_component);
+    record_component_file_state(new_component_node, component_path);
   } else {
     project_summary["components"].remove_child(component_id);
     current_state = project::state::PROJECT_HAS_INVALID_COMPONENT;
@@ -728,7 +739,8 @@ project::state project::evaluate_dependencies()
       unprocessed_components.clear();
       unprocessed_features.clear();
       components.clear();
-      project_summary["components"].clear();
+      // clear_children() rather than clear(), which would also drop the node's key
+      project_summary["components"].clear_children();
 
       // Set the initial state
       for (const auto &c: initial_components)

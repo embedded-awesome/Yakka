@@ -321,6 +321,9 @@ int main(int argc, char **argv)
   // Merge project data
   project.update_project_data();
 
+  // Resolve what changed compared to the summary left behind by the previous run
+  project.finalize_diff();
+
   // Evaluate the project schema including defaults
   auto t1 = std::chrono::high_resolution_clock::now();
   project.validate_schema();
@@ -355,7 +358,8 @@ int main(int argc, char **argv)
   t1 = std::chrono::high_resolution_clock::now();
 
   // Check for existing blueprints file
-  if (std::filesystem::exists(project.output_path / "blueprints.json")) {
+  const bool reuse_cached_state = project.diff.empty();
+  if (reuse_cached_state && std::filesystem::exists(project.output_path / "blueprints.json")) {
     project.blueprint_database.load(project.output_path / "blueprints.json");
   } else {
     project.process_blueprints();
@@ -403,11 +407,11 @@ int main(int argc, char **argv)
   
   t1 =t2;
   try {
-    if (project.target_database.load(project.output_path / "target_database.json") == yakka::yakka_status::SUCCESS) {
+    if (reuse_cached_state && project.target_database.load(project.output_path / "target_database.json") == yakka::yakka_status::SUCCESS) {
       // TODO: Sort out additional tools
       spdlog::info("Loaded target database from {}", (project.output_path / "target_database.json").string());
     } else {
-      spdlog::info("No target database found. Generating a new one");
+      spdlog::info("Generating a new target database");
       project.generate_target_database();
       project.target_database.save(project.output_path / "target_database.json");
     }
@@ -422,12 +426,12 @@ int main(int argc, char **argv)
   yakka::task_engine task_engine;
   progress_bar_task_ui progress_bar_ui;
   try {
-    if (task_engine.load_taskflow(project.output_path / "taskflow.json") == yakka::yakka_status::SUCCESS && 
+    if (reuse_cached_state && task_engine.load_taskflow(project.output_path / "taskflow.json") == yakka::yakka_status::SUCCESS &&
         task_engine.load_todolist(project.output_path / "todolist.json", project) == yakka::yakka_status::SUCCESS) {
       spdlog::info("Loaded taskflow from {}", (project.output_path / "taskflow.json").string());
       spdlog::info("Loaded todolist from {}", (project.output_path / "todolist.json").string());
     } else {
-      spdlog::info("No taskflow found. Generating a new one");
+      spdlog::info("Generating a new taskflow");
       task_engine.create_taskflow(project);
       task_engine.save_taskflow(project.output_path / "taskflow.json");
     }

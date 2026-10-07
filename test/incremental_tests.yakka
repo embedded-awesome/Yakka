@@ -1,0 +1,11 @@
+name: Yakka incremental build tests
+
+sources:
+  - incremental_build_tests.cpp
+  - task_engine_tests.cpp
+  - project_lifecycle_tests.cpp
+
+requires:
+  components:
+    - yakka
+    - googletest

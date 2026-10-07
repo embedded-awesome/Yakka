@@ -7,6 +7,7 @@ sources:
   - template_callback_tests.cpp
   - project_lifecycle_tests.cpp
   - task_engine_tests.cpp
+  - incremental_build_tests.cpp
   - schema_validation_tests.cpp
 
 requires:

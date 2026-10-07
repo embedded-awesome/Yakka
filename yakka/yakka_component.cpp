@@ -88,26 +88,26 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
 
   // Check if file is an omap (sequence of single-key maps). Convert it to a map
   if (root.is_seq()) {
-    auto new_root = root.append_sibling();
-    // ryml::Tree new_tree;
-    // auto new_root = new_tree.rootref();
-    new_root |= ryml::MAP;
-
+    // Collect the entries first so the node can be rewritten in place and keep its key
+    std::vector<std::pair<ryml::csubstr, ryml::csubstr>> entries;
     for (const auto &item: root.children()) {
-      if (item.is_map() && item.num_children() == 1) {
-        for (const auto &kv: item.children()) {
-          auto child = new_root.append_child();
-          child.set_key(kv.key());
-          if (kv.has_val()) {
-            child.set_val(kv.val());
-          } else if (kv.is_map() || kv.is_seq()) {
-            // TODO: Need to properly copy the subtree
-          }
-        }
+      if (!item.is_map() || item.num_children() != 1)
+        continue;
+      for (const auto &kv: item.children()) {
+        // TODO: Need to properly copy map and seq subtrees
+        entries.emplace_back(kv.key(), kv.has_val() ? kv.val() : ryml::csubstr{});
       }
     }
-    root.clear();
-    root = new_root;
+
+    root.clear_children();
+    root.change_type(ryml::MAP);
+
+    for (const auto &[key, value]: entries) {
+      auto child = root.append_child();
+      child.set_key(key);
+      if (!value.empty())
+        child.set_val(value);
+    }
   }
 
   if (file_path.filename().extension() == slce_component_extension) {

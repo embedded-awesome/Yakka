@@ -69,13 +69,7 @@ void task_engine::init(task_complete_type task_complete_handler)
 void task_engine::process_data_dependency(const std::shared_ptr<construction_task> &construct_task, const std::string &target_name, project &project, std::filesystem::file_time_type start_time)
 {
   // spdlog::info("{}: data", target_name);
-  auto result = has_data_dependency_changed(target_name, project.previous_summary, project.project_summary);
-  if (result) {
-    construct_task->last_modified = *result ? fs::file_time_type::max() : fs::file_time_type::min();
-  } else {
-    spdlog::error("Data dependency '{}' error: {}", target_name, result.error());
-    return;
-  }
+  construct_task->last_modified = project.diff.has_data_changed(c4::to_csubstr(target_name)) ? fs::file_time_type::max() : fs::file_time_type::min();
   if (construct_task->last_modified > start_time)
     spdlog::info("{} has been updated", target_name);
 }
@@ -586,18 +580,19 @@ std::shared_ptr<yakka::construction_task> task_engine::build_tasks_from_todo_lis
   if (existing_todo.first != existing_todo.second)
     return existing_todo.first->second;
 
-  const auto has_match = item["has_match"].val<bool>();
+  const bool has_match = item.has_child("has_match") && item["has_match"].val<bool>().value_or(false);
 
   // If it has a match, retrieve the blueprint match from the project target database
   std::shared_ptr<blueprint_match> match = nullptr;
   if (has_match) {
-    const auto &targets = project.target_database.get_target(target_name);
-    for (const auto &i: targets) {
-      if (i) {
-        match = i;
-        break;
+    const auto targets = project.target_database.targets.find(target_name);
+    if (targets != project.target_database.targets.end())
+      for (const auto &i: targets->second) {
+        if (i) {
+          match = i;
+          break;
+        }
       }
-    }
   }
 
   // Create a node for the current match
@@ -612,7 +607,12 @@ std::shared_ptr<yakka::construction_task> task_engine::build_tasks_from_todo_lis
       if (successor_name.empty())
         continue;
 
-      const auto successor_item = todo_list_tree.rootref()["items"][successor_name];
+      auto items          = todo_list_tree.rootref()["items"];
+      auto successor_item = items.find_child(successor_name);
+      if (!successor_item.valid()) {
+        spdlog::warn("Todo list successor '{}' of '{}' is missing", successor_name, target_name);
+        continue;
+      }
 
       const auto successor_task = build_tasks_from_todo_list(successor_item, project, start_time);
       if (successor_task)

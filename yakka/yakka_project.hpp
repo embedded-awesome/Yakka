@@ -6,6 +6,7 @@
 #include "component_database.hpp"
 #include "target_database.hpp"
 #include "blueprint_database.hpp"
+#include "project_diff.hpp"
 #include "yakka_schema.hpp"
 //#include "yaml-cpp/yaml.h"
 #include <ryml.hpp>
@@ -68,7 +69,8 @@ public:
   void process_blueprints(const std::shared_ptr<component> c);
 
   void process_blueprints();
-  void update_summary();
+  void detect_changed_components();
+  void finalize_diff();
   void generate_project_summary();
 
   // Target database management
@@ -124,8 +126,8 @@ public:
   yakka::target_database target_database;
 
   ryml::Tree project_data;
-  ryml::NodeRef previous_summary;
   ryml::NodeRef project_summary;
+  yakka::project_diff diff;
 
   yakka::schema project_schema;
   yakka::schema data_schema;

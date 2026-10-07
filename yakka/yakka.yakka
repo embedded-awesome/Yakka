@@ -2,6 +2,7 @@ name: Yakka
 
 sources:
   - yakka_project.cpp
+  - project_diff.cpp
   - yakka_component.cpp
   - yakka_workspace.cpp
   - component_database.cpp
