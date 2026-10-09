@@ -276,8 +276,7 @@ void blueprint_database::save(const std::filesystem::path filename)
     }
   }
 
-  std::ofstream file(filename);
-  file << ryml::emitrs_json<std::string>(output);
+  write_file_if_changed(filename, ryml::emitrs_json<std::string>(output));
 }
 
 /**

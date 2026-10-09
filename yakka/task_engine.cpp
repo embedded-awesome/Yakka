@@ -16,6 +16,15 @@
 using namespace std::chrono_literals;
 
 namespace yakka {
+namespace {
+
+void log_task_phase_time(const std::string &project_name, const char *phase, std::chrono::steady_clock::time_point start)
+{
+  const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+  spdlog::info("[{}] Timing {}: {:.3f} ms", project_name, phase, elapsed);
+}
+
+} // namespace
 
 /// @brief Executes is_valid.
 
@@ -50,10 +59,8 @@ bool task_engine::is_valid()
   /// @brief Executes for_each_task.
 
   taskflow.for_each_task([&](tf::Task task) {
-    if (task.num_successors() == 0)
-      if (search_dependencies(task))
-
-        is_circular = true;
+    if (search_dependencies(task))
+      is_circular = true;
   });
 
   return !is_circular;
@@ -428,6 +435,7 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
           retcode                           = test_result.retcode;
         } else {
           spdlog::error("{} tool doesn't exist", command_name);
+          return { captured_output, -1 };
         }
 
         if (retcode != 0)
@@ -502,77 +510,187 @@ void task_engine::run_taskflow(yakka::project &project, task_engine_ui *ui)
 
 void task_engine::save_todolist(const std::filesystem::path &filename)
 {
+  struct saved_item {
+    std::string target;
+    int64_t last_modified = 0;
+    bool has_match = false;
+    std::vector<size_t> successors;
+  };
+
+  const auto construction_start = std::chrono::steady_clock::now();
+  std::vector<saved_item> items;
+  std::unordered_map<std::string, size_t> item_indices;
+  std::unordered_map<tf::Task, size_t> task_indices;
+  std::vector<std::pair<size_t, tf::Task>> current_tasks;
+  const auto get_or_add_item = [&](const std::string &target) -> saved_item & {
+    const auto found = item_indices.find(target);
+    if (found != item_indices.end())
+      return items[found->second];
+    const auto index = items.size();
+    item_indices.emplace(target, index);
+    items.push_back({ target });
+    return items.back();
+  };
+
+  auto phase_start = std::chrono::steady_clock::now();
+  for (const auto &[target_name, construct_task]: todo_list) {
+    const auto target = ryml_string(target_name);
+    auto &item = get_or_add_item(target);
+    const auto item_index = item_indices.at(target);
+    if (!construct_task) {
+      item.last_modified = 0;
+      item.has_match = false;
+      item.successors.clear();
+      continue;
+    }
+    item.last_modified = static_cast<int64_t>(construct_task->last_modified.time_since_epoch().count());
+    item.has_match = construct_task->match != nullptr;
+    item.successors.clear();
+    task_indices.insert_or_assign(construct_task->task, item_index);
+    current_tasks.emplace_back(item_index, construct_task->task);
+  }
+  log_task_phase_time(project_name, "todolist current target indexing", phase_start);
+
+  // Carry targets skipped as up to date into the next snapshot.
+  phase_start = std::chrono::steady_clock::now();
+  std::vector<size_t> previous_index_to_item;
+  std::vector<size_t> carried_v2_items;
+  std::vector<ryml::ConstNodeRef> carried_v1_items;
+  if (!todo_list_tree.empty()) {
+    const auto previous_root = todo_list_tree.rootref();
+    if (previous_root.is_map() && previous_root.has_child("version") && previous_root.has_child("items")) {
+      const auto previous_version = previous_root["version"].val<int>().value_or(0);
+      const auto previous_items = previous_root["items"];
+      const bool previous_items_valid = (previous_version == 1 && previous_items.is_map()) ||
+                                        (previous_version == 2 && previous_items.is_seq());
+      if (previous_items_valid) {
+        const auto carry_forward = [&](const ryml::ConstNodeRef &previous_item, size_t previous_index) {
+          const auto previous_target = previous_version == 1 ? previous_item.key() :
+                                       previous_item.has_child("target") ? previous_item["target"].val() : c4::csubstr{};
+          if (previous_target.empty())
+            return items.size();
+          const auto target = ryml_string(previous_target);
+          const auto existing = item_indices.find(target);
+          if (existing != item_indices.end())
+            return existing->second;
+
+          auto &item = get_or_add_item(target);
+          item.last_modified = previous_item.has_child("last_modified")
+                                 ? previous_item["last_modified"].val<int64_t>().value_or(0) : 0;
+          item.has_match = previous_item.has_child("has_match") &&
+                           previous_item["has_match"].val<bool>().value_or(false);
+          if (previous_version == 1)
+            carried_v1_items.push_back(previous_item);
+          else
+            carried_v2_items.push_back(previous_index);
+          return item_indices.at(target);
+        };
+
+        if (previous_version == 2)
+          previous_index_to_item.resize(previous_items.num_children(), previous_items.num_children());
+        size_t previous_index = 0;
+        for (const auto previous_item: previous_items.children()) {
+          const auto output_index = carry_forward(previous_item, previous_index);
+          if (previous_version == 2)
+            previous_index_to_item[previous_index] = output_index;
+          ++previous_index;
+        }
+      }
+    }
+  }
+  log_task_phase_time(project_name, "todolist carry-forward indexing", phase_start);
+
+  phase_start = std::chrono::steady_clock::now();
+  for (const auto &[item_index, task]: current_tasks) {
+    task.for_each_successor([&](tf::Task successor) {
+      const auto successor_index = task_indices.find(successor);
+      if (successor_index != task_indices.end()) {
+        items[item_index].successors.push_back(successor_index->second);
+        return;
+      }
+      const auto successor_name = successor.name();
+      const auto persisted_index = item_indices.find(successor_name);
+      if (persisted_index != item_indices.end())
+        items[item_index].successors.push_back(persisted_index->second);
+      else
+        spdlog::warn("Todo list successor '{}' of '{}' is missing while saving", successor_name, items[item_index].target);
+    });
+  }
+
+  if (!todo_list_tree.empty()) {
+    const auto previous_root = todo_list_tree.rootref();
+    if (previous_root.is_map() && previous_root.has_child("version") && previous_root.has_child("items")) {
+      const auto previous_version = previous_root["version"].val<int>().value_or(0);
+      const auto previous_items = previous_root["items"];
+      if (previous_version == 1) {
+        for (const auto &previous_item: carried_v1_items) {
+          if (!previous_item.has_child("successors") || !previous_item["successors"].is_seq())
+            continue;
+          const auto previous_target = ryml_string(previous_item.key());
+          const auto item_index = item_indices.find(previous_target);
+          if (item_index == item_indices.end())
+            continue;
+          for (const auto successor: previous_item["successors"].children()) {
+            if (!successor.has_val() || successor.val().empty())
+              continue;
+            const auto successor_index = item_indices.find(ryml_string(successor.val()));
+            if (successor_index != item_indices.end())
+              items[item_index->second].successors.push_back(successor_index->second);
+          }
+        }
+      } else if (previous_version == 2) {
+        for (const auto previous_index: carried_v2_items) {
+          const auto previous_item = previous_items.child(previous_index);
+          if (!previous_item.has_child("successors") || !previous_item["successors"].is_seq())
+            continue;
+          const auto output_index = previous_index_to_item[previous_index];
+          if (output_index >= items.size())
+            continue;
+          for (const auto successor: previous_item["successors"].children()) {
+            const auto successor_index = successor.val<size_t>();
+            if (!successor_index || *successor_index >= previous_index_to_item.size())
+              continue;
+            const auto mapped_index = previous_index_to_item[*successor_index];
+            if (mapped_index < items.size())
+              items[output_index].successors.push_back(mapped_index);
+          }
+        }
+      }
+    }
+  }
+  log_task_phase_time(project_name, "todolist successor indexing", phase_start);
+  log_task_phase_time(project_name, "todolist save record construction", construction_start);
+
   ryml::Tree output;
   auto root = output.rootref();
   root |= ryml::MAP;
-  root["version"] << 1;
+  root["version"] << 2;
 
   auto serialized_items = root["items"];
-  serialized_items |= ryml::MAP;
-
-  for (const auto &[target_name, construct_task]: todo_list) {
-    auto item = serialized_items[target_name];
+  serialized_items |= ryml::SEQ;
+  for (const auto &saved: items) {
+    auto item = serialized_items.append_child();
     item |= ryml::MAP;
-
-    if (construct_task) {
-      item["task_name"] << construct_task->task.name();
-      item["task_hash"] << construct_task->task.hash_value();
-      item["last_modified"] << static_cast<int64_t>(construct_task->last_modified.time_since_epoch().count());
-      item["has_match"] << static_cast<int>(construct_task->match != nullptr);
-
-      auto group_name = item["group_name"];
-      if (construct_task->group) {
-        group_name << ryml_string(construct_task->group->name);
-        item["group_total_count"] << construct_task->group->total_count;
-        item["group_current_count"] << construct_task->group->current_count.load();
-      } else {
-        group_name << "";
-        item["group_total_count"] << 0;
-        item["group_current_count"] << 0;
-      }
-      item["successors"] |= ryml::SEQ;
-      construct_task->task.for_each_successor([&](tf::Task successor) {
-        item["successors"].append_child() << successor.name();
-      });
-    } else {
-      item["task_name"] << "";
-      item["task_hash"] << 0;
-      item["last_modified"] << 0;
-      item["has_match"] << 0;
-      item["group_name"] << "";
-      item["group_total_count"] << 0;
-      item["group_current_count"] << 0;
-    }
+    item["target"] << saved.target;
+    item["last_modified"] << saved.last_modified;
+    item["has_match"] << static_cast<int>(saved.has_match);
+    item["successors"] |= ryml::SEQ;
+    for (const auto successor_index: saved.successors)
+      item["successors"].append_child() << successor_index;
   }
 
-  // Targets that were up to date are absent from todo_list, so carry their recorded state forward rather than dropping them
-  if (!todo_list_tree.empty()) {
-    const auto previous_root = todo_list_tree.rootref();
-    if (previous_root.is_map() && previous_root.has_child("items")) {
-      for (const auto previous_item: previous_root.find_child("items").children()) {
-        if (!previous_item.has_key() || serialized_items.has_child(previous_item.key()))
-          continue;
-        auto item = serialized_items.append_child();
-        item.set_key_serialized(previous_item.key());
-        merge_nodes(item, previous_item);
-      }
-    }
-  }
-
-  std::ofstream file(filename, std::ios::binary | std::ios::trunc);
-  if (!file) {
-    spdlog::error("Failed to open todo list file '{}' for writing", filename.string());
-    return;
-  }
-
-  file << ryml::emitrs_json<std::string>(output);
-  if (!file)
-    spdlog::error("Failed to write todo list file '{}'", filename.string());
+  const auto serialization_start = std::chrono::steady_clock::now();
+  const auto serialized = ryml::emitrs_json<std::string>(output);
+  log_task_phase_time(project_name, "todolist JSON serialization", serialization_start);
+  const auto write_start = std::chrono::steady_clock::now();
+  write_file_if_changed(filename, serialized);
+  log_task_phase_time(project_name, "todolist compare/write", write_start);
 }
 
 std::shared_ptr<yakka::construction_task> task_engine::build_tasks_from_todo_list(const c4::yml::NodeRef &item, yakka::project &project, std::filesystem::file_time_type start_time)
 {
-  const auto target_name        = item.key();
+  const auto version = todo_list_tree.rootref()["version"].val<int>().value_or(1);
+  const auto target_name = version == 1 ? item.key() : item["target"].val();
   const auto target_name_string = ryml_string(target_name);
 
   // Reuse an already reconstructed target. This also terminates recursion on shared or circular successors
@@ -601,16 +719,22 @@ std::shared_ptr<yakka::construction_task> task_engine::build_tasks_from_todo_lis
   // Create parent nodes
   if (item.has_child("successors") && item["successors"].is_seq()) {
     for (const auto successor: item["successors"].children()) {
-      if (!successor.has_val())
-        continue;
-      const auto successor_name = successor.val();
-      if (successor_name.empty())
-        continue;
-
       auto items          = todo_list_tree.rootref()["items"];
-      auto successor_item = items.find_child(successor_name);
+      ryml::NodeRef successor_item;
+      if (version == 1) {
+        if (!successor.has_val() || successor.val().empty())
+          continue;
+        successor_item = items.find_child(successor.val());
+      } else {
+        const auto successor_index = successor.val<size_t>();
+        if (!successor_index || *successor_index >= items.num_children()) {
+          spdlog::warn("Todo list successor index of '{}' is out of range", target_name);
+          continue;
+        }
+        successor_item = items.child(*successor_index);
+      }
       if (!successor_item.valid()) {
-        spdlog::warn("Todo list successor '{}' of '{}' is missing", successor_name, target_name);
+        spdlog::warn("Todo list successor of '{}' is missing", target_name);
         continue;
       }
 
@@ -628,7 +752,26 @@ yakka_status task_engine::load_todolist(const std::filesystem::path &filename, y
     return yakka_status::FILE_NOT_FOUND;
   }
 
-  todo_list_tree = ryml_load_file(filename).value();
+  auto phase_start = std::chrono::steady_clock::now();
+  auto file_content = get_file_contents<std::string>(filename);
+  log_task_phase_time(project_name, "todolist file read", phase_start);
+  if (!file_content) {
+    spdlog::error("Failed to read todo list file '{}': {}", filename.string(), file_content.error().message());
+    return yakka_status::FAIL;
+  }
+
+  phase_start = std::chrono::steady_clock::now();
+  try {
+    todo_list_tree = ryml::parse_in_arena(ryml::to_csubstr(*file_content));
+  } catch (const std::exception &error) {
+    spdlog::error("Failed to parse todo list file '{}': {}", filename.string(), error.what());
+    return yakka_status::FAIL;
+  } catch (...) {
+    spdlog::error("Failed to parse todo list file '{}'", filename.string());
+    return yakka_status::FAIL;
+  }
+  log_task_phase_time(project_name, "todolist JSON parse", phase_start);
+
   if (todo_list_tree.empty()) {
     spdlog::error("Failed to load todo list file '{}'", filename.string());
     return yakka_status::FAIL;
@@ -641,14 +784,14 @@ yakka_status task_engine::load_todolist(const std::filesystem::path &filename, y
   }
 
   const auto version = root["version"].val<int>();
-  if (!version || *version != 1) {
+  if (!version || (*version != 1 && *version != 2)) {
     spdlog::error("Todo list file '{}' has an unsupported version", filename.string());
     return yakka_status::FAIL;
   }
 
   auto serialized_items = root["items"];
-  if (!serialized_items.is_map()) {
-    spdlog::error("Todo list file '{}' has an invalid items map", filename.string());
+  if ((*version == 1 && !serialized_items.is_map()) || (*version == 2 && !serialized_items.is_seq())) {
+    spdlog::error("Todo list file '{}' has an invalid items collection", filename.string());
     return yakka_status::FAIL;
   }
 
@@ -657,20 +800,28 @@ yakka_status task_engine::load_todolist(const std::filesystem::path &filename, y
   todo_list.clear();
   todo_task_groups.clear();
   todo_task_groups["Processing"] = std::make_shared<yakka::task_group>("Processing");
-  // auto finish                    = taskflow.emplace([&]() {
-  //   // execution_progress = 100;
-  // });
-  // auto start_time = std::filesystem::file_time_type::clock::now();
 
-  const auto is_valid_item = [&](const ryml::NodeRef &item) -> bool {
-    return item.is_map() && item.has_key() && !item.key().empty();
+  const auto item_target = [&](const ryml::NodeRef &item) {
+    return *version == 1 ? item.key() : item["target"].val();
   };
 
   const auto has_item_changed = [&](const ryml::NodeRef &item) -> bool {
-    const auto target_name        = ryml_string(item.key());
-    const auto last_modified      = fs::file_time_type{ fs::file_time_type::duration(item["last_modified"].val<int64_t>().value_or(0)) };
-    const auto file_last_modified = fs::exists(target_name) ? fs::last_write_time(target_name) : fs::file_time_type::min();
-    return file_last_modified > last_modified;
+    const auto target_name = ryml_string(item_target(item));
+    std::error_code filesystem_error;
+    const auto file_last_modified = fs::last_write_time(target_name, filesystem_error);
+    const bool target_exists = !filesystem_error;
+    if (!target_exists && item.has_child("has_match") && item["has_match"].val<bool>().value_or(false))
+      return true;
+    const auto last_modified = fs::file_time_type{ fs::file_time_type::duration(item["last_modified"].val<int64_t>().value_or(0)) };
+    return target_exists && file_last_modified > last_modified;
+  };
+
+  const auto is_valid_item = [&](const ryml::NodeRef &item) -> bool {
+    if (!item.is_map())
+      return false;
+    if (*version == 1)
+      return item.has_key() && !item.key().empty();
+    return item.has_child("target") && item["target"].has_val() && !item["target"].val().empty();
   };
 
   const auto has_uninitialized_timestamp = [&](const ryml::NodeRef &item) -> bool {
@@ -682,78 +833,27 @@ yakka_status task_engine::load_todolist(const std::filesystem::path &filename, y
 
   auto start_time = std::filesystem::file_time_type::clock::now();
 
+  phase_start = std::chrono::steady_clock::now();
+  std::vector<ryml::NodeRef> items_to_restore;
+  items_to_restore.reserve(serialized_items.num_children());
+  size_t scanned_items = 0;
   for (const auto serialized_item: serialized_items.children()) {
     if (!is_valid_item(serialized_item)) {
       spdlog::warn("Skipping invalid todo list item");
       continue;
     }
-    if (!has_item_changed(serialized_item) && !project.commands.contains(serialized_item.key()) && !has_uninitialized_timestamp(serialized_item)) {
-      continue;
-    }
-
-    build_tasks_from_todo_list(serialized_item, project, start_time);
-
-    // const auto target_name        = serialized_item["target"].val();
-    // const auto target_name_string = ryml_string(target_name);
-    // const auto has_match          = serialized_item["has_match"].val<bool>();
-
-    // if (!has_match) {
-    //   auto construct_task = create_task_leaf_node(target_name, project, start_time);
-    //   construct_task->task.precede(finish);
-    // } else {
-    //   auto construct_task = create_task_node(target_name, project, target_name_string);
-    //   construct_task->task.precede(finish);
-    // }
-
-    // auto construct_task = std::make_shared<construction_task>();
-    // if (serialized_item.has_child("task_name") && serialized_item["task_name"].has_val()) {
-    //   const auto task_name = ryml_string(serialized_item["task_name"].val());
-    //   construct_task->task = restore_task(task_name);
-    // }
-
-    // const auto last_modified = serialized_item.has_child("last_modified") ? serialized_item["last_modified"].val<int64_t>() : std::optional<int64_t>{};
-    // if (last_modified)
-    //   construct_task->last_modified = fs::file_time_type{ fs::file_time_type::duration(*last_modified) };
-
-    // std::string group_name = "Processing";
-    // if (serialized_item.has_child("group_name") && serialized_item["group_name"].has_val())
-    //   group_name = ryml_string(serialized_item["group_name"].val());
-    // if (group_name.empty())
-    //   group_name = "Processing";
-
-    // const auto group_key = [&]() {
-    //   persistent_strings.emplace_back(group_name);
-    //   const auto &value = persistent_strings.back();
-    //   return ryml::csubstr{ value.data(), value.size() };
-    // }();
-
-    // if (!todo_task_groups.contains(group_key)) {
-    //   auto group = std::make_shared<task_group>(group_key);
-    //   if (serialized_item.has_child("group_total_count"))
-    //     group->total_count = serialized_item["group_total_count"].val<int>().value_or(0);
-    //   if (serialized_item.has_child("group_current_count"))
-    //     group->current_count = serialized_item["group_current_count"].val<int>().value_or(0);
-    //   todo_task_groups[group_key] = group;
-    //   construct_task->group       = group;
-    // } else {
-    //   construct_task->group = todo_task_groups[group_key];
-    // }
-
-    // todo_list.emplace(target_key, construct_task);
-
-    // if (serialized_item.has_child("successors") && serialized_item["successors"].is_seq()) {
-    //   for (const auto serialized_successor: serialized_item["successors"].children()) {
-    //     if (!serialized_successor.has_val())
-    //       continue;
-    //     const auto successor_name = ryml_string(serialized_successor.val());
-    //     if (successor_name.empty())
-    //       continue;
-    //     const auto successor_task = restore_task(successor_name);
-    //     if (!successor_task.empty())
-    //       construct_task->task.precede(successor_task);
-    //   }
-    // }
+    ++scanned_items;
+    const auto target_name = item_target(serialized_item);
+    if (has_item_changed(serialized_item) || project.commands.contains(target_name) || has_uninitialized_timestamp(serialized_item))
+      items_to_restore.push_back(serialized_item);
   }
+  log_task_phase_time(project_name, "todolist freshness scan", phase_start);
+
+  phase_start = std::chrono::steady_clock::now();
+  for (const auto &serialized_item: items_to_restore)
+    build_tasks_from_todo_list(serialized_item, project, start_time);
+  log_task_phase_time(project_name, "todolist graph reconstruction", phase_start);
+  spdlog::info("[{}] Todolist entries scanned: {}, graph roots restored: {}", project_name, scanned_items, items_to_restore.size());
 
   return yakka_status::SUCCESS;
 }
@@ -803,15 +903,7 @@ void task_engine::save_taskflow(const std::filesystem::path &filename)
     });
   }
 
-  std::ofstream file(filename, std::ios::binary | std::ios::trunc);
-  if (!file) {
-    spdlog::error("Failed to open taskflow file '{}' for writing", filename.string());
-    return;
-  }
-
-  file << ryml::emitrs_json<std::string>(output);
-  if (!file)
-    spdlog::error("Failed to write taskflow file '{}'", filename.string());
+  write_file_if_changed(filename, ryml::emitrs_json<std::string>(output));
 }
 
 yakka_status task_engine::load_taskflow(const std::filesystem::path &filename)

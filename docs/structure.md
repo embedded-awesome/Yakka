@@ -19,3 +19,48 @@ Projects generally require an evaluation process that identifies dependencies an
   - If missing choices, prompt user to make a choice
 - If any actions have occurred in response to project state, get project to evaluate
 
+## Component features
+
+A component can declare build features in a top-level, name-keyed `features` map:
+
+```yaml
+name: platform
+requires:
+  data:
+    - /config
+config:
+  logging: true
+features:
+  platform_available: {}
+  logging:
+    condition: "data.config.logging == true"
+```
+
+These declarations are separate from `supports.features`, which describes how a
+component reacts to a feature already selected for the build. They also differ
+from `provides.features`, which advertises capabilities without selecting them.
+An enabled component feature is both provided and selected, and activates matching
+`supports.features` rules throughout the project.
+
+Features without a condition are enabled automatically. A condition is an Inja
+expression without delimiters: Yakka wraps it in `{{` and `}}` and renders it
+against the project summary. It must produce `true` or `false`; invalid expressions,
+missing values at the end of resolution, and non-boolean results fail evaluation
+with a component/feature diagnostic.
+
+Conditions are evaluated after ordinary component and feature requirements,
+supported relationships, choice defaults, replacements, recommendations, and SLC
+dependency resolution have settled. Before each condition pass, Yakka partially
+collects `requires.data` from the components resolved so far, applies data merge
+strategies, and overlays command-line `--data`. Conditions can access this as
+`data`, together with `components`, selected `features`, choices, and project metadata.
+This template context is separate from the project summary: feature evaluation
+updates internal feature state, while summary generation and the final data update
+publish the resolved values.
+
+Enabling features may introduce more components, features, or required data.
+Yakka repeats dependency resolution and rechecks inactive conditions until no more
+features activate. Resolution is additive: once enabled, a feature stays enabled
+for that evaluation even if later data would make its condition false. Each build
+reevaluates component features from fresh data rather than inheriting cached
+selections. Partial data collection does not duplicate merged arrays on later passes.

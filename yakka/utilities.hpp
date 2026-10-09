@@ -50,6 +50,7 @@ YAML::Node yaml_path(const YAML::Node &node, std::string path);
 bool ryml_has_child(ryml::ConstNodeRef node, c4::csubstr key);
 std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem::path &path);
 void ryml_save_file(const std::filesystem::path &path, ryml::ConstNodeRef node);
+void write_file_if_changed(const std::filesystem::path &path, std::string_view content);
 std::filesystem::path ryml_path(c4::csubstr path);
 static inline std::string ryml_string(c4::csubstr str)
 {

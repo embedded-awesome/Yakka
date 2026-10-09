@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <regex>
 #include <map>
+#include <set>
 #include <unordered_set>
 #include <optional>
 #include <functional>
@@ -55,6 +56,8 @@ public:
   void parse_project_string(const std::vector<std::string> &project_string);
   void process_requirements(std::shared_ptr<yakka::component> component, ryml::ConstNodeRef child_node);
   state evaluate_dependencies();
+  /// Evaluate component-provided features against partially collected project data.
+  bool evaluate_component_features();
   bool add_component(std::string &component_name, component_database::flag flags);
   bool add_component(c4::csubstr component_name, component_database::flag flags);
   bool add_feature(c4::csubstr &feature_name);
@@ -107,6 +110,7 @@ public:
   std::unordered_set<c4::csubstr> required_features;
   std::unordered_set<c4::csubstr> provided_features;
   std::unordered_set<c4::csubstr> unprovided_features;
+  std::set<std::pair<c4::csubstr, c4::csubstr>> activated_component_features;
   std::map<c4::csubstr, ryml::ConstNodeRef> feature_recommendations;
   std::unordered_set<c4::csubstr> additional_tools;
   std::unordered_set<c4::csubstr> commands;
@@ -166,6 +170,9 @@ public:
   bool condition_is_fulfilled(ryml::ConstNodeRef node);
   void process_slc_rules();
   void create_config_file(const std::shared_ptr<yakka::component> component, ryml::ConstNodeRef config, const std::string &prefix, std::string instance_name);
+
+private:
+  void collect_required_data(ryml::NodeRef data);
 };
 
 } /* namespace yakka */

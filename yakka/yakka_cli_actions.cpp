@@ -179,7 +179,10 @@ int fetch_action(workspace &workspace, const cxxopts::ParseResult &result)
   yakka::project project(workspace);
 
   // Identify components named on command line and add to unknown components
-  for (auto s: result.unmatched()) {
+  const auto arguments = result.unmatched();
+  for (const auto &s: arguments) {
+    if (s.empty())
+      continue;
     if (s.front() == '+' || s.back() == '!')
       continue;
     else
@@ -187,7 +190,13 @@ int fetch_action(workspace &workspace, const cxxopts::ParseResult &result)
   }
 
   // Fetch the components
-  download_unknown_components(workspace, project);
+  try {
+    download_unknown_components(workspace, project);
+  } catch (const std::exception &error) {
+    spdlog::error("{}", error.what());
+    show_console_cursor(true);
+    return -1;
+  }
   return 0;
 }
 
@@ -280,8 +289,7 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
       if (fetch_list.empty()) {
         for (const auto &i: project.unknown_components)
           spdlog::error("Cannot fetch {}", std::string(i.str, i.len));
-        spdlog::shutdown();
-        exit(0);
+        throw std::runtime_error("Cannot fetch missing components from the configured registries");
       }
 
       // Wait for one of the components to be complete
@@ -296,10 +304,7 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
 
       // Check if the fetch worked
       if (new_component_path.empty()) {
-        spdlog::error("Failed to fetch {}", std::string(completed_fetch->first.str, completed_fetch->first.len));
-        project.unknown_components.erase(completed_fetch->first);
-        fetch_list.erase(completed_fetch);
-        continue;
+        throw std::runtime_error("Failed to fetch " + yakka::ryml_string(completed_fetch->first));
       }
 
       // Update the component database
@@ -308,22 +313,20 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
         workspace.shared_database.scan_for_components(new_component_path);
         auto result = workspace.shared_database.save();
         if (!result.has_value()) {
-          spdlog::error("Failed to save shared database: {}", result.error().message());
-          exit(1);
+          throw std::runtime_error("Failed to save shared database: " + result.error().message());
         }
       } else {
         spdlog::info("Scanning for new component in local database");
         workspace.local_database.scan_for_components(new_component_path);
-        auto result = workspace.shared_database.save();
+        auto result = workspace.local_database.save();
         if (!result.has_value()) {
-          spdlog::error("Failed to save shared database: {}", result.error().message());
-          exit(1);
+          throw std::runtime_error("Failed to save local database: " + result.error().message());
         }
       }
 
       // Check if any of our unknown components have been found
       for (auto i = project.unknown_components.cbegin(); i != project.unknown_components.cend();) {
-        if (!workspace.local_database.get_component(*i, project.component_flags).has_value() || !workspace.shared_database.get_component(*i, project.component_flags).has_value()) {
+        if (workspace.local_database.get_component(*i, project.component_flags).has_value() || workspace.shared_database.get_component(*i, project.component_flags).has_value()) {
           // Remove component from the unknown list and add it to the unprocessed list
           project.unprocessed_components.insert(*i);
           i = project.unknown_components.erase(i);

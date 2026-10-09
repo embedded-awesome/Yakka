@@ -1481,16 +1481,26 @@ void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const sche
 void ryml_save_file(const std::filesystem::path &path, ryml::ConstNodeRef node)
 {
   try {
-
-    std::ofstream file(path);
-    if (!file.is_open()) {
-      spdlog::error("Failed to open file for writing: {}", path.generic_string());
-      return;
-    }
-    file << ryml::emitrs_yaml<std::string>(node);
+    write_file_if_changed(path, ryml::emitrs_yaml<std::string>(node));
   } catch (const std::exception &e) {
     spdlog::error("Error saving ryml tree to file {}: {}", path.generic_string(), e.what());
   }
+}
+
+void write_file_if_changed(const std::filesystem::path &path, std::string_view content)
+{
+  const auto existing = get_file_contents<std::string>(path);
+  if (existing && *existing == content)
+    return;
+
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  if (!file.is_open()) {
+    spdlog::error("Failed to open file for writing: {}", path.generic_string());
+    return;
+  }
+  file.write(content.data(), static_cast<std::streamsize>(content.size()));
+  if (!file)
+    spdlog::error("Failed to write file: {}", path.generic_string());
 }
 
 } // namespace yakka

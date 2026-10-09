@@ -77,7 +77,8 @@ public:
   std::shared_ptr<construction_task> create_task_node(ryml::csubstr target_name, yakka::project &project, std::shared_ptr<blueprint_match> i, const std::string &target_name_string);
   std::shared_ptr<yakka::construction_task> build_tasks_from_todo_list(const c4::yml::NodeRef &serialized_item, yakka::project &project, std::filesystem::file_time_type start_time);
 
-  std::atomic<bool> abort_build;
+  std::atomic<bool> abort_build{ false };
+  std::string project_name;
   ryml::Tree project_data;
   tf::Taskflow taskflow;
 

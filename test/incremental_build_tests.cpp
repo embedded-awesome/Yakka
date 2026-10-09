@@ -700,8 +700,12 @@ TEST_F(TodoListReloadTest, SavingCarriesForwardTargetsThatWereSkipped)
   buffer << input.rdbuf();
   const std::string saved = buffer.str();
 
+  EXPECT_NE(saved.find("\"version\": 2"), std::string::npos);
   EXPECT_NE(saved.find("untouched.o"), std::string::npos) << "Skipped targets must not be dropped from the persisted graph";
   EXPECT_NE(saved.find(":/components/*/flags/ld/global"), std::string::npos);
+
+  yakka::task_engine reloaded;
+  EXPECT_EQ(reloaded.load_todolist(saved_path, project), yakka::yakka_status::SUCCESS);
 }
 
 TEST_F(TodoListReloadTest, MissingTodoListIsReported)

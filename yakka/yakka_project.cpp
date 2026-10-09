@@ -18,6 +18,7 @@
 #include <thread>
 #include <string>
 #include <charconv>
+#include <stdexcept>
 
 using namespace std;
 
@@ -362,7 +363,14 @@ void project::detect_changed_components()
 
   // A modified component file can add or drop feature requirements, so the previous feature list is
   // only safe to carry forward while every component file is untouched
-  if (diff.components_modified.empty()) {
+  bool has_component_features = false;
+  if (project_summary.has_child("components"))
+    for (const auto &c: project_summary["components"])
+      if (c.has_child("features") && c["features"].is_map())
+        has_component_features = true;
+
+  // Conditional features and their dependencies must be resolved from fresh data, not the cache.
+  if (diff.components_modified.empty() && !has_component_features) {
     if (project_summary.has_child("features"))
       for (const auto &f: project_summary["features"]) {
         if (!f.has_val()) {
@@ -372,7 +380,7 @@ void project::detect_changed_components()
         required_features.insert(f.val());
       }
   } else {
-    spdlog::info("Recomputing the project feature list because {} component file(s) changed", diff.components_modified.size());
+    spdlog::info("Recomputing the project feature list because components changed or declare features");
   }
 
   // Every component is re-parsed each run, so the regenerated sections must start empty to avoid
@@ -691,7 +699,7 @@ project::state project::evaluate_dependencies()
   //project_has_slcc = false;
 
   // Start processing all the required components and features
-  while (!unprocessed_components.empty() || !unprocessed_features.empty() || !slc_required.empty()) {
+  while (true) {
     // Loop through the list of unprocessed components.
     // Note: Items will be added to unprocessed_components during processing
     component_list_t temp_component_list = std::move(unprocessed_components);
@@ -734,6 +742,10 @@ project::state project::evaluate_dependencies()
 
       // Restart the whole process
       required_features.clear();
+      provided_features.clear();
+      unprovided_features.clear();
+      activated_component_features.clear();
+      feature_recommendations.clear();
       required_components.clear();
       unprocessed_choices.clear();
       unprocessed_components.clear();
@@ -741,6 +753,7 @@ project::state project::evaluate_dependencies()
       components.clear();
       // clear_children() rather than clear(), which would also drop the node's key
       project_summary["components"].clear_children();
+      project_summary["choices"].clear_children();
 
       // Set the initial state
       for (const auto &c: initial_components)
@@ -861,8 +874,14 @@ project::state project::evaluate_dependencies()
       }
     }
 
-    if (unprocessed_components.empty() && unprocessed_features.empty())
+    if (unprocessed_components.empty() && unprocessed_features.empty()) {
+      const bool activated = unknown_components.empty() && evaluate_component_features();
+      if (current_state != state::PROJECT_VALID)
+        return current_state;
+      if (activated)
+        continue;
       break;
+    }
   }
 
   for (const auto &r: slc_required) {
@@ -880,6 +899,83 @@ project::state project::evaluate_dependencies()
     return project::state::PROJECT_HAS_UNRESOLVED_REQUIREMENTS;
 
   return project::state::PROJECT_VALID;
+}
+
+bool project::evaluate_component_features()
+{
+  bool has_features = false;
+  for (const auto &c: components)
+    if (c->type == component::YAKKA_FILE && c->root.has_child("features"))
+      has_features = true;
+  if (!has_features)
+    return false;
+
+  ryml::Tree evaluation_data;
+  auto context = evaluation_data.rootref();
+  context |= ryml::MAP;
+  context["project_name"] << project_name;
+  context["project_file"] << project_file.string();
+  context["project_output"] << output_path.generic_string();
+  context["host"] |= ryml::MAP;
+  context["host"]["name"] << host_os_string;
+  workspace.summary["configuration"].duplicate(context, context.last_child());
+  project_summary["choices"].duplicate(context, context.last_child());
+  context["components"] |= ryml::MAP;
+  for (const auto &c: components)
+    c->root.duplicate(context["components"], context["components"].last_child());
+  context["features"] |= ryml::SEQ;
+  for (const auto &f: required_features)
+    context["features"].append_child() << f;
+  collect_required_data(context["data"]);
+
+  std::vector<std::pair<c4::csubstr, c4::csubstr>> enabled;
+  std::vector<std::string> errors;
+  for (const auto &c: components) {
+    if (c->type != component::YAKKA_FILE || !c->root.has_child("features"))
+      continue;
+    const auto declarations = c->root["features"];
+    if (!declarations.is_map()) {
+      errors.push_back("Component '" + ryml_string(c->id) + "': features must be a name-keyed map");
+      continue;
+    }
+    for (const auto &feature: declarations) {
+      const auto identity = std::make_pair(c->id, feature.key());
+      if (activated_component_features.contains(identity))
+        continue;
+      try {
+        if (!feature.is_map())
+          throw std::runtime_error("feature declaration must be an object");
+        if (feature.has_child("condition")) {
+          const auto condition = feature["condition"];
+          if (!condition.has_val() || condition.val_is_null())
+            throw std::runtime_error("condition must be a string expression");
+          const auto result = inja_environment.render("{{" + ryml_string(condition.val()) + "}}", context);
+          if (result == "false")
+            continue;
+          if (result != "true")
+            throw std::runtime_error("condition must evaluate to true or false, got '" + result + "'");
+        }
+        enabled.push_back(identity);
+      } catch (const std::exception &e) {
+        errors.push_back("Component '" + ryml_string(c->id) + "', feature '" + ryml_string(feature.key()) + "': " + e.what());
+      }
+    }
+  }
+
+  // A newly enabled feature may supply data needed by another condition in the next pass.
+  if (enabled.empty() && !errors.empty()) {
+    for (const auto &error: errors)
+      spdlog::error("Feature condition error: {}", error);
+    current_state = state::PROJECT_HAS_INVALID_COMPONENT;
+    return false;
+  }
+  for (auto &[component_id, feature]: enabled) {
+    activated_component_features.emplace(component_id, feature);
+    provided_features.insert(feature);
+    unprovided_features.erase(feature);
+    unprocessed_features.insert(feature);
+  }
+  return !enabled.empty();
 }
 
 /// @brief Executes evaluate_choices.
@@ -947,6 +1043,8 @@ void project::generate_project_summary()
   project_summary["project_file"] << project_file.string();
   project_summary["project_output"] << default_output_directory + project_name;
   // project_summary["configuration"]  << workspace.summary["configuration"];
+  if (project_summary.has_child("configuration"))
+    project_summary.remove_child("configuration");
   workspace.summary["configuration"].duplicate(project_summary, project_summary.last_child());
 
   // TODO: Implement ryml version - needs json::object()
@@ -972,7 +1070,7 @@ void project::generate_project_summary()
     }
   }
 
-  // project_summary["features"] |= ryml::SEQ;
+  project_summary["features"].clear_children();
   for (auto &i: this->required_features)
     project_summary["features"].append_child() << i;
 
@@ -1111,8 +1209,14 @@ void project::validate_schema()
  * @brief Updates the project data by merging all the component data into the project summary.
  */
 void project::update_project_data()
-
 {
+  collect_required_data(project_summary["data"]);
+}
+
+void project::collect_required_data(ryml::NodeRef data)
+{
+  data |= ryml::MAP;
+  data.clear_children();
   std::unordered_set<ryml::csubstr> required_data;
 
   // Gather all the required data
@@ -1122,7 +1226,7 @@ void project::update_project_data()
         required_data.insert(d.val());
       }
 
-  // Merge all the component data into the project summary
+  // Merge all the component data into the requested destination.
   for (const auto &c: components) {
     for (const auto &r: required_data) {
       const auto pointer = ryml::Pointer(r);
@@ -1131,23 +1235,26 @@ void project::update_project_data()
       }
       auto component_node = c->root.at(pointer);
 
-      if (!project_summary["data"].contains(pointer)) {
+      if (!data.contains(pointer)) {
         if (component_node.is_seq())
-          project_summary["data"][pointer] |= ryml::SEQ;
+          data[pointer] |= ryml::SEQ;
         else if (component_node.is_map())
-          project_summary["data"][pointer] |= ryml::MAP;
+          data[pointer] |= ryml::MAP;
         else
-          project_summary["data"][pointer] |= ryml::VAL;
+          data[pointer] |= ryml::VAL;
       }
 
-      json_node_merge(pointer, project_summary["data"].at(pointer), component_node, &data_schema);
+      json_node_merge(pointer, data.at(pointer), component_node, &data_schema);
 
-      auto test_node = project_summary["data"].at(pointer);
+      auto test_node = data.at(pointer);
       if (!test_node.is_seq() && !test_node.is_map() && !test_node.has_val()) {
         spdlog::error("BAD");
       }
     }
   }
+
+  if (project_data.rootref().has_child("request_data"))
+    merge_nodes(data, project_data["request_data"]);
 
   // Apply schema with default values
 }

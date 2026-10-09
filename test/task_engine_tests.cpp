@@ -115,6 +115,9 @@ TEST_F(TaskEnginePersistenceTest, TodoListRoundTripsConstructedTasks)
   compile_entry->last_modified = fs::file_time_type{};
   compile_entry->group = std::make_shared<yakka::task_group>("build");
   compile_entry->group->total_count = 2;
+  auto archive_entry = std::make_shared<yakka::construction_task>();
+  archive_entry->task = archive;
+  source.todo_list.insert({"archive", archive_entry});
   source.todo_list.insert({"compile", compile_entry});
   source.todo_task_groups["build"] = compile_entry->group;
 
@@ -124,9 +127,17 @@ TEST_F(TaskEnginePersistenceTest, TodoListRoundTripsConstructedTasks)
   std::stringstream buffer;
   buffer << input.rdbuf();
   const std::string json = buffer.str();
-  EXPECT_NE(json.find("\"task_name\": \"compile\""), std::string::npos);
-  EXPECT_NE(json.find("\"group_name\": \"build\""), std::string::npos);
-  EXPECT_NE(json.find("\"archive\""), std::string::npos);
+  EXPECT_NE(json.find("\"version\": 2"), std::string::npos);
+  EXPECT_NE(json.find("\"target\": \"compile\""), std::string::npos);
+  EXPECT_NE(json.find("\"successors\": [0]"), std::string::npos);
+  EXPECT_EQ(json.find("\"task_name\""), std::string::npos);
+  EXPECT_EQ(json.find("\"task_hash\""), std::string::npos);
+  EXPECT_EQ(json.find("\"group_name\""), std::string::npos);
+
+  const auto unchanged_time = fs::file_time_type::clock::now() - std::chrono::minutes(1);
+  fs::last_write_time(filename, unchanged_time);
+  source.save_todolist(filename);
+  EXPECT_EQ(fs::last_write_time(filename), unchanged_time);
 
   yakka::workspace workspace;
   yakka::project project(workspace, "todolist_round_trip");
@@ -135,6 +146,8 @@ TEST_F(TaskEnginePersistenceTest, TodoListRoundTripsConstructedTasks)
   EXPECT_EQ(loaded.load_todolist(filename, project), yakka::yakka_status::SUCCESS);
   EXPECT_EQ(loaded.todo_list.count("compile"), 1u);
   EXPECT_EQ(loaded.todo_list.find("compile")->second->task.name(), "compile");
+  EXPECT_EQ(loaded.todo_list.count("archive"), 1u);
+  EXPECT_EQ(describe(loaded.taskflow), (task_graph{{"archive", {}}, {"compile", {"archive"}}}));
 }
 
 } // namespace

@@ -25,6 +25,16 @@ properties:
     description: Name
     type: string
 
+  features:
+    type: object
+    description: Features provided and enabled by this component
+    additionalProperties:
+      type: object
+      properties:
+        condition:
+          type: string
+          minLength: 1
+
   requires:
     type: object
     description: Requires relationships

@@ -86,6 +86,8 @@ blueprints:
     depends:
       - data:
           - '/*/flags/ld'
+          - ':/components/*/sources'
+          - ':/components/xcode/blueprints'
     process:
       - inja: "{% for name,component in components %}{% for flag in component.flags.ld.global %}{{flag}} {% endfor %}{%endfor%} {% for name, component in components %}{%if existsIn(component,\"sources\") %}{% for source in component.sources %}{{project_output}}/components/{{name}}/{{source}}.o {% endfor %}{% endif %}{% endfor %}"
       - save: 

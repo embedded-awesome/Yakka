@@ -1,6 +1,8 @@
 name: Yakka
 
 sources:
+  - build_request.cpp
+  - build_session.cpp
   - yakka_project.cpp
   - project_diff.cpp
   - yakka_component.cpp
