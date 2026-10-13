@@ -7,6 +7,8 @@ includes:
 requires:
   components:
     - spdlog
+    - libsodium
+    - rapidhash
 
 defines:
   global:

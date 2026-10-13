@@ -1,0 +1,5 @@
+name: rapidhash
+
+includes:
+  global:
+    - v3/collisions/allcodecs
