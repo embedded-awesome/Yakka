@@ -1,9 +1,0 @@
-name: Inja test
-
-sources:
-  - inja_test.cpp
-
-requires:
-  components:
-    - inja
-    - rapidyaml
