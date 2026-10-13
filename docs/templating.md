@@ -41,6 +41,10 @@ The Yakka project uses the Inja template engine (a modern C++ template engine) w
 
 ### File System Operations
 
+`dir`, `not_dir`, `parent_path`, and `extension` are lexical Inja built-ins:
+they inspect only their arguments, not the filesystem. Absolute/relative path
+resolution, filesystem queries, globbing, and file loading remain Yakka callbacks.
+
 - `dir(path)`: Returns the parent directory of a path. If the path is a directory, returns the path itself
 - `not_dir(path)`: Returns the filename portion of a path
 - `parent_path(path)`: Returns the parent directory of a path
@@ -64,7 +68,9 @@ The Yakka project uses the Inja template engine (a modern C++ template engine) w
 - `replace(input, target, match)`: Performs regex-based string replacement
 - `regex_escape(input)`: Escapes regex metacharacters in a string
 - `split(input, delimiter)`: Splits a string by a delimiter and returns an array
-- `starts_with(input, start)`: Returns true if the input string starts with the given prefix
+- `startswith(input, prefix)`: Built-in Inja function returning `true` or `false`
+  for a case-sensitive prefix match. An empty prefix always matches. The legacy
+  `starts_with` callback has been removed; use `startswith` in templates and conditions.
 - `substring(input, index)`: Returns a substring starting from the given index
 - `trim(input)`: Removes whitespace from both ends of a string
 
@@ -75,6 +81,28 @@ The Yakka project uses the Inja template engine (a modern C++ template engine) w
 ### Numeric Operations
 
 - `hex2dec(hex_string)`: Converts a hexadecimal string to its decimal value
+
+### Argument-only Inja Built-ins
+
+These functions are available on a plain `inja::Environment`, without registering
+Yakka callbacks, in both the modular and single-header versions:
+
+- Paths: `dir`, `not_dir`, `parent_path`, `extension`
+- Strings/conversion: `quote`, `regex_escape`, `hex2dec`, `concatenate(args...)`
+- Collections: `join(array, delimiter)`, `find_json(value, key)`
+- Hashing: `sha256sum`, `xxh64sum`, `fnv1a_32`
+
+Hash functions return lowercase hexadecimal strings of 64, 16, and 8 characters,
+respectively. Scalars are hashed as their original text; maps and arrays are
+hashed as their JSON serialization. `xxh64sum` uses seed zero.
+`find_json` returns matching key paths in traversal order, using dots for map
+keys and brackets for array indices (for example, `devices[0].name`).
+An empty `join` returns an empty string; its first argument must be an array.
+An extensionless path returns an empty string from `extension`.
+
+The incomplete `merge` and `load_xml` callbacks remain in Yakka. The existing
+Inja `merge` built-in is unchanged and is still shadowed by Yakka's callback
+when common callbacks are registered.
 
 ### Usage Examples
 

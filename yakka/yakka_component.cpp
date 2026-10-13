@@ -247,13 +247,13 @@ yakka_status component::parse_file(std::filesystem::path file_path, std::filesys
     }
 
     this->root["id"] << component_id_from_path(file_path);
-    this->id = this->root["id"].val();
   }
 
   // Add known information
   auto yakka_file_node = root.append_child();
   yakka_file_node << ryml::key("yakka_file");
   yakka_file_node << file_path.string();
+  this->id = this->root["id"].val();
 
   // Populate json cache for backward compatibility
   // json = ryml_to_json(tree.rootref());

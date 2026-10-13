@@ -9,6 +9,7 @@
 // =============================================================================
 
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include "utilities.hpp"
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/null_sink.h"
@@ -135,7 +136,7 @@ TEST_F(TemplateCallbackTest, FileExistsTrue)
   auto p   = write_test_file("exists.txt", "data");
   auto tpl = R"({{ file_exists(")" + p + R"(") }})";
   auto result = render(tpl);
-  EXPECT_EQ(result, "true");
+  EXPECT_EQ(result, "1");
 }
 
 TEST_F(TemplateCallbackTest, FileExistsFalse)
@@ -143,7 +144,7 @@ TEST_F(TemplateCallbackTest, FileExistsFalse)
   auto missing = (test_dir / "no_such_file.txt").generic_string();
   auto tpl     = R"({{ file_exists(")" + missing + R"(") }})";
   auto result  = render(tpl);
-  EXPECT_EQ(result, "false");
+  EXPECT_EQ(result, "0");
 }
 
 TEST_F(TemplateCallbackTest, FilesizeMatchesActualSize)
@@ -225,14 +226,49 @@ TEST_F(TemplateCallbackTest, SplitProducesArray)
 
 TEST_F(TemplateCallbackTest, StartsWithTrue)
 {
-  auto result = render(R"({{ starts_with("hello world", "hello") }})");
+  auto result = render(R"({{ startswith("hello world", "hello") }})");
   EXPECT_EQ(result, "true");
 }
 
 TEST_F(TemplateCallbackTest, StartsWithFalse)
 {
-  auto result = render(R"({{ starts_with("world hello", "hello") }})");
+  auto result = render(R"({{ startswith("world hello", "hello") }})");
   EXPECT_EQ(result, "false");
+}
+
+TEST_F(TemplateCallbackTest, LegacyStartsWithIsNotRegistered)
+{
+  EXPECT_THROW(env.parse(R"({{ starts_with("hello world", "hello") }})"), inja::ParserError);
+}
+
+TEST_F(TemplateCallbackTest, BuiltinStartsWithReturnsBoolean)
+{
+  inja::Environment builtin_env;
+  EXPECT_EQ(builtin_env.render(R"({{ startswith("hello world", "hello") }})", empty_data), "true");
+  EXPECT_EQ(builtin_env.render(R"({{ startswith("world hello", "hello") }})", empty_data), "false");
+  EXPECT_EQ(builtin_env.render(R"({{ startswith("Hello", "hello") }})", empty_data), "false");
+  EXPECT_EQ(builtin_env.render(R"({{ startswith("hello", "hello") }})", empty_data), "true");
+  EXPECT_EQ(builtin_env.render(R"({{ startswith("hi", "hello") }})", empty_data), "false");
+  EXPECT_EQ(builtin_env.render(R"({{ startswith("hello", "") }})", empty_data), "true");
+  EXPECT_EQ(builtin_env.render(R"({{ startswith("", "") }})", empty_data), "true");
+  EXPECT_EQ(builtin_env.render(R"({{ startswith("", "hello") }})", empty_data), "false");
+}
+
+TEST_F(TemplateCallbackTest, BuiltinStartsWithSupportsDataAndBooleanExpressions)
+{
+  inja::Environment builtin_env;
+  auto data = ryml::parse_in_arena("input: hello world\nprefix: hello\n");
+  EXPECT_EQ(builtin_env.render(
+    R"({% if startswith(input, prefix) and not startswith(input, "world") %}matched{% endif %})",
+    data.crootref()), "matched");
+  EXPECT_EQ(builtin_env.render(R"({{ startswith(input, prefix) == true }})", data.crootref()), "true");
+}
+
+TEST_F(TemplateCallbackTest, BuiltinStartsWithRequiresTwoArguments)
+{
+  inja::Environment builtin_env;
+  EXPECT_THROW(builtin_env.render(R"({{ startswith("hello") }})", empty_data), inja::ParserError);
+  EXPECT_THROW(builtin_env.render(R"({{ startswith("hello", "he", "x") }})", empty_data), inja::ParserError);
 }
 
 TEST_F(TemplateCallbackTest, SubstringFromIndex)
@@ -305,6 +341,82 @@ TEST_F(TemplateCallbackTest, Sha256sumProducesHexString)
   EXPECT_FALSE(result.empty());
   for (char c : result)
     EXPECT_TRUE(std::isxdigit(static_cast<unsigned char>(c)));
+}
+
+TEST_F(TemplateCallbackTest, ArgumentOnlyBuiltinsWorkWithoutYakkaCallbacks)
+{
+  inja::Environment builtin_env;
+  const std::vector<std::pair<std::string, std::string>> cases = {
+    { R"({{ dir("/some/path/file.txt") }})", "/some/path" },
+    { R"({{ dir("/some/path/") }})", "/some/path/" },
+    { R"({{ not_dir("/some/path/file.txt") }})", "file.txt" },
+    { R"({{ parent_path("/some/path/file.txt") }})", "/some/path" },
+    { R"({{ extension("file.txt") }})", "txt" },
+    { R"({{ extension("file") }})", "" },
+    { R"({{ extension(".hidden") }})", "" },
+    { R"({{ quote("hello") }})", "\"hello\"" },
+    { R"({{ quote("a\"b\\c") }})", R"("a\"b\\c")" },
+    { R"({{ regex_escape("a.b+c") }})", R"(a\.b\+c)" },
+    { R"({{ hex2dec("FF") }})", "255" },
+    { R"({{ hex2dec("0x10") }})", "16" },
+    { R"({{ concatenate("hello", " ", "world") }})", "hello world" },
+    { R"({{ concatenate("only") }})", "only" },
+    { R"({{ join(["a", "b", "c"], "-") }})", "a-b-c" },
+    { R"({{ join([], "-") }})", "" },
+    { R"({{ join(["01", "1.00"], "-") }})", "01-1.00" },
+    { R"({{ sha256sum("abc") }})", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" },
+    { R"({{ sha256sum("") }})", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+    { R"({{ xxh64sum("") }})", "ef46db3751d8e999" },
+    { R"({{ xxh64sum("abc") }})", "44bc2cf5ad770999" },
+    { R"({{ fnv1a_32("") }})", "811c9dc5" },
+    { R"({{ fnv1a_32("hello") }})", "4f9f2cab" },
+  };
+  for (const auto &[expression, expected]: cases) {
+    SCOPED_TRACE(expression);
+    EXPECT_EQ(builtin_env.render(expression, empty_data), expected);
+    EXPECT_EQ(env.render(expression, empty_data), expected);
+  }
+}
+
+TEST_F(TemplateCallbackTest, ArgumentOnlyBuiltinsFindNestedPathsAndHashContainers)
+{
+  inja::Environment builtin_env;
+  auto data = ryml::parse_in_arena(
+    "name: root\nnested:\n  name: child\n"
+    "items:\n  - name: first\n  - nested:\n      name: second\n"
+    "payload: [a, b]\n");
+  const auto expression = R"({{ join(find_json(input, "name"), ";") }})";
+  auto wrapper = ryml::parse_in_arena("{}");
+  wrapper.rootref()["input"] |= ryml::MAP;
+  wrapper.duplicate_contents(&data, data.root_id(), wrapper.rootref()["input"].id());
+  EXPECT_EQ(builtin_env.render(expression, wrapper.crootref()),
+            "name;nested.name;items[0].name;items[1].nested.name");
+  EXPECT_EQ(builtin_env.render(R"({{ join(find_json(input, "absent"), ";") }})", wrapper.crootref()), "");
+  EXPECT_EQ(builtin_env.render(R"({{ length(find_json("scalar", "name")) }})", empty_data), "0");
+  for (const auto function: { "sha256sum", "xxh64sum", "fnv1a_32" }) {
+    const auto expression = std::string("{{ ") + function + "(payload) }}";
+    const auto serialized = ryml::emitrs_json<std::string>(data.crootref()["payload"]);
+    auto hash_data = ryml::parse_in_arena("{}");
+    hash_data.rootref()["text"] << serialized;
+    const auto expected = builtin_env.render(std::string("{{ ") + function + "(text) }}", hash_data.crootref());
+    EXPECT_EQ(builtin_env.render(expression, data.crootref()), expected);
+    EXPECT_EQ(env.render(expression, data.crootref()), expected);
+  }
+}
+
+TEST_F(TemplateCallbackTest, ArgumentOnlyBuiltinsReportInvalidInputsAndArity)
+{
+  inja::Environment builtin_env;
+  EXPECT_THROW(builtin_env.render(R"({{ join("text", ",") }})", empty_data), inja::RenderError);
+  EXPECT_THROW(builtin_env.render(R"({{ hex2dec("invalid") }})", empty_data), std::invalid_argument);
+  EXPECT_THROW(builtin_env.parse(R"({{ concatenate() }})"), inja::ParserError);
+  EXPECT_THROW(builtin_env.parse(R"({{ find_json({}) }})"), inja::ParserError);
+  for (const auto function: { "dir", "not_dir", "parent_path", "extension", "quote", "regex_escape",
+                             "hex2dec", "sha256sum", "xxh64sum", "fnv1a_32" }) {
+    SCOPED_TRACE(function);
+    EXPECT_THROW(builtin_env.parse(std::string("{{ ") + function + "() }}"), inja::ParserError);
+    EXPECT_THROW(builtin_env.parse(std::string("{{ ") + function + "(\"a\", \"b\") }}"), inja::ParserError);
+  }
 }
 
 TEST_F(TemplateCallbackTest, GlobReturnsMatchingPaths)

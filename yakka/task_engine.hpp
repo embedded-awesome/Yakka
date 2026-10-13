@@ -79,6 +79,7 @@ public:
 
   std::atomic<bool> abort_build{ false };
   std::string project_name;
+  bool include_project_name_in_progress = true;
   ryml::Tree project_data;
   tf::Taskflow taskflow;
 

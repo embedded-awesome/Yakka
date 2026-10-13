@@ -106,12 +106,20 @@ void task_engine::process_task(const std::shared_ptr<construction_task> &constru
           if (result.second != 0) {
             spdlog::info("Aborting: {} returned {}", target_name, result.second);
             engine.abort_build = true;
+            std::error_code ec;
+            if (fs::is_regular_file(target_name, ec) && fs::file_size(target_name, ec) == 0) {
+              fs::remove(target_name, ec);
+            }
             return;
           }
           construct_task->last_modified = fs::file_time_type::clock::now();
         } catch (const std::exception &e) {
           spdlog::error("Error running command for {}: {}", target_name, e.what());
           engine.abort_build = true;
+          std::error_code ec;
+          if (fs::is_regular_file(target_name, ec) && fs::file_size(target_name, ec) == 0) {
+            fs::remove(target_name, ec);
+          }
           return;
         }
       }
@@ -140,12 +148,20 @@ void task_engine::process_task(const std::shared_ptr<construction_task> &constru
           if (retcode != 0) {
             spdlog::info("Aborting: {} returned {}", target_name, retcode);
             engine.abort_build = true;
+            std::error_code ec;
+            if (fs::is_regular_file(target_name, ec) && fs::file_size(target_name, ec) == 0) {
+              fs::remove(target_name, ec);
+            }
             return;
           }
           construct_task->last_modified = fs::file_time_type::clock::now();
         } catch (const std::exception &e) {
           spdlog::error("Error running command for {}: {}", target_name, e.what());
           engine.abort_build = true;
+          std::error_code ec;
+          if (fs::is_regular_file(target_name, ec) && fs::file_size(target_name, ec) == 0) {
+            fs::remove(target_name, ec);
+          }
           return;
         }
       }
@@ -220,7 +236,7 @@ void task_engine::create_tasks(ryml::csubstr target_name, tf::Task &parent, yakk
   if (target_name.empty()) {
     spdlog::error("Empty target name");
   }
-  spdlog::info("Create tasks for: {}", target_name);
+  // spdlog::info("Create tasks for: {}", target_name);
 
   // Check if this target has already been processed
   const auto &existing_todo = todo_list.equal_range(target_name);
@@ -267,7 +283,10 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   /// @brief Executes add_callback.
 
   inja_env.add_callback("$", 1, [&blueprint](inja::Arguments &args, ryml::NodeRef additional_data) {
-    return additional_data["values"].append_child() << blueprint->regex_matches[args[0].val<int>().value()];
+    const auto index = args[0].val<int>().value();
+    if (index < 0 || static_cast<size_t>(index) >= blueprint->regex_matches.size())
+      throw std::out_of_range("blueprint capture index is out of range");
+    return additional_data["values"].append_child() << blueprint->regex_matches[index];
   });
 
   /// @brief Executes add_callback.
@@ -296,43 +315,9 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   /// @brief Executes add_callback.
 
   inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
-    ryml::NodeRef aggregate = additional_data["values"].append_child();
-    aggregate |= ryml::MAP;
-
-    auto path = ryml::Pointer{ args[0].val() };
-    // Loop through components, check if object path exists, if so add it to the aggregate
-    for (const auto node: project.project_summary["components"].children()) {
-      if (!node.contains(path) || !node[path].valid())
-        continue;
-
-      auto v = node[path];
-      if (v.is_map())
-        for (const auto i: v.children()) {
-          aggregate[i.key()] = i.has_val() ? i.val() : nullptr; //try_render(inja_env, i.second.as<std::string>(), project->project_summary, log);
-        }
-      else if (v.is_seq())
-        for (const auto i: v.children())
-          if (i.is_map())
-            aggregate.append_child() << i.val();
-          else
-            aggregate.append_child() << try_render(inja_env, i.val<std::string>().value(), project.project_summary);
-      else if (v.valid())
-        aggregate.append_child() << try_render(inja_env, v.val<std::string>().value(), project.project_summary);
-    }
-
-    // Check project data
-    if (project.project_summary["data"].contains(path)) {
-      auto v = project.project_summary["data"][path];
-      if (v.is_map())
-        for (const auto i: v.children())
-          aggregate[i.key()] = i.has_val() ? i.val() : nullptr;
-      else if (v.is_seq())
-        for (const auto i: v.children())
-          aggregate.append_child() << inja_env.render(i.val<std::string>().value(), project.project_summary);
-      else
-        aggregate.append_child() << inja_env.render(v.val<std::string>().value(), project.project_summary);
-    }
-    return aggregate;
+    const std::string path = args[0].val<std::string>().value();
+    return aggregate_blueprint_data(inja_env, project.project_summary, c4::to_csubstr(path),
+                                    additional_data["values"].append_child());
   });
   /// @brief Executes add_callback.
 
@@ -345,8 +330,9 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
     }
     auto [component_path, package_path] = component_location.value();
     yakka::component new_component;
-    if (new_component.parse_file(component_path, package_path) == yakka::yakka_status::SUCCESS) {
-      return new_component.root;
+    auto output = additional_data["values"].append_child();
+    if (new_component.parse_file(component_path, package_path, output) == yakka::yakka_status::SUCCESS) {
+      return output;
     } else {
       return ryml::NodeRef{};
     }
@@ -354,20 +340,25 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
   /// @brief Executes set_include_callback.
 
   inja_env.set_include_callback([&](const std::filesystem::path &path, const std::string &template_name) {
-    const auto template_path = try_render(inja_env, template_name, project.project_summary);
+    const auto template_path = inja_env.render(template_name, project.project_summary);
     std::ifstream file;
 
     file.open(template_path);
     if (!file.fail()) {
       const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-      return inja::Template(text);
+      return inja_env.parse(text);
     } else {
       spdlog::error("Failed to open template file: {}", template_name);
-      return inja::Template();
+      throw inja::FileError("Failed to open template file: " + template_name);
     }
   });
 
   std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+
+  if (blueprint->blueprint->process.valid() && !blueprint->blueprint->process.is_seq()) {
+    spdlog::error("Process for target '{}' must be a sequence", target);
+    return { "", -1 };
+  }
 
   // Note: A blueprint process is a sequence of maps
   if (blueprint->blueprint->process.valid() && blueprint->blueprint->process.is_seq())
@@ -394,18 +385,28 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
           auto tool                = project.project_summary["tools"][command_name];
           std::string command_text = "";
 
-          command_text.append(tool.val<std::string>().value());
+          if (tool.is_map()) {
+            if (!tool.has_child("command") || !tool["command"].has_val()) {
+              spdlog::error("Tool '{}' is missing its command", command_name);
+              return { "", -1 };
+            }
+            command_text = tool["command"].val<std::string>().value();
+          } else {
+            command_text = tool.val<std::string>().value();
+          }
 
           std::string arg_text = command.val<std::string>().value();
 
           // Apply template engine
-          arg_text = try_render(inja_env, arg_text, project.project_summary);
+          try {
+            arg_text = inja_env.render(arg_text, project.project_summary);
+          } catch (const std::exception &e) {
+            spdlog::error("Failed to render tool arguments '{}': {}", arg_text, e.what());
+            return { "", -1 };
+          }
 
           auto [temp_output, temp_retcode] = exec(command_text, arg_text);
           retcode                          = temp_retcode;
-
-          if (retcode != 0)
-            spdlog::error("Returned {}\n{}", retcode, temp_output);
 
           // If the tool declares a set of acceptable return values, enforce it
           if (tool.is_map() && tool.has_child("tool_return_success") ) {
@@ -420,8 +421,11 @@ std::pair<std::string, int> task_engine::run_command(const std::string target, s
               spdlog::error("'{}' returned {} which is not an accepted success value for target '{}'", command_name, retcode, target);
               return { temp_output, -1 };
             }
-          } else if (retcode != 0)
+            retcode = 0;
+          } else if (retcode != 0) {
+            spdlog::error("Returned {}\n{}", retcode, temp_output);
             return { temp_output, retcode };
+          }
 
           captured_output = temp_output;
           // Echo the output of the command

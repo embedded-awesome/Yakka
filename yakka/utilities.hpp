@@ -70,7 +70,6 @@ std::string try_render_file(inja::Environment &env, const std::string &filename,
 std::string try_render_file(inja::Environment &env, const std::filesystem::path &file_path, ryml::ConstNodeRef data);
 std::pair<std::string, int> download_resource(const std::string url, std::filesystem::path destination);
 ryml::Pointer create_condition_pointer(ryml::ConstNodeRef condition);
-void find_json_keys(ryml::ConstNodeRef j, const std::string &target_key, const std::string &current_path, ryml::NodeRef paths);
 
 void hash_file(std::filesystem::path filename, uint8_t out_hash[32]) noexcept;
 void xml_to_json(const pugi::xml_node& node, ryml::NodeRef& target);
@@ -78,6 +77,8 @@ void xml_to_json(const pugi::xml_node& node, ryml::NodeRef& target);
 std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, ryml::ConstNodeRef left, ryml::ConstNodeRef right) noexcept;
 
 void add_common_template_commands(inja::Environment &inja_env);
+ryml::NodeRef aggregate_blueprint_data(inja::Environment &env, ryml::ConstNodeRef summary,
+                                      c4::csubstr path, ryml::NodeRef output);
 
 
 template <class CharContainer>

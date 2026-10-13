@@ -925,6 +925,19 @@ public:
     Range,
     Replace,
     Split,
+    StartsWith,
+    Sha256sum,
+    Xxh64sum,
+    Fnv1a32,
+    Dir,
+    NotDir,
+    ParentPath,
+    Extension,
+    Hex2Dec,
+    Quote,
+    RegexEscape,
+    FindJson,
+    Concatenate,
     Substring,
     Trim,
     Filter,
@@ -1008,6 +1021,19 @@ private:
       {std::make_pair("range", 1), FunctionData {Operation::Range}},
       {std::make_pair("replace", 3), FunctionData {Operation::Replace}},
       {std::make_pair("split", 2), FunctionData {Operation::Split}},
+      {std::make_pair("startswith", 2), FunctionData {Operation::StartsWith}},
+      {std::make_pair("sha256sum", 1), FunctionData {Operation::Sha256sum}},
+      {std::make_pair("xxh64sum", 1), FunctionData {Operation::Xxh64sum}},
+      {std::make_pair("fnv1a_32", 1), FunctionData {Operation::Fnv1a32}},
+      {std::make_pair("dir", 1), FunctionData {Operation::Dir}},
+      {std::make_pair("not_dir", 1), FunctionData {Operation::NotDir}},
+      {std::make_pair("parent_path", 1), FunctionData {Operation::ParentPath}},
+      {std::make_pair("extension", 1), FunctionData {Operation::Extension}},
+      {std::make_pair("hex2dec", 1), FunctionData {Operation::Hex2Dec}},
+      {std::make_pair("quote", 1), FunctionData {Operation::Quote}},
+      {std::make_pair("regex_escape", 1), FunctionData {Operation::RegexEscape}},
+      {std::make_pair("find_json", 2), FunctionData {Operation::FindJson}},
+      {std::make_pair("concatenate", -1), FunctionData {Operation::Concatenate}},
       {std::make_pair("substring", 2), FunctionData {Operation::Substring}},
       {std::make_pair("trim", 1), FunctionData {Operation::Trim}},
       {std::make_pair("filter", 2), FunctionData {Operation::Filter}},
@@ -3052,6 +3078,9 @@ public:
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <iomanip>
 #include <memory>
 #include <numeric>
 #include <ostream>
@@ -3062,6 +3091,11 @@ public:
 #include <utility>
 #include <vector>
 #include <regex>
+#include <sodium/crypto_hash_sha256.h>
+#ifndef XXH_INLINE_ALL
+#define XXH_INLINE_ALL
+#endif
+#include <xxhash.h>
 
 // #include "config.hpp"
 
@@ -3101,6 +3135,34 @@ inline std::string htmlescape(const std::string& data) {
 }
 
 namespace detail {
+
+inline std::string hash_input(ConstNodeRef value) {
+  if (!value.valid()) {
+    INJA_THROW(RenderError("hash function input is missing", SourceLocation {}));
+  }
+  if (value.has_val()) {
+    return value.val<std::string>().value();
+  }
+  return ryml::emitrs_json<std::string>(value);
+}
+
+inline void find_json_paths(ConstNodeRef value, const std::string& key,
+                            const std::string& path, NodeRef output) {
+  if (value.is_map()) {
+    for (const auto child : value.children()) {
+      const std::string name(child.key().str, child.key().len);
+      const auto child_path = path.empty() ? name : path + "." + name;
+      if (name == key) {
+        output.append_child() << child_path;
+      }
+      find_json_paths(child, key, child_path, output);
+    }
+  } else if (value.is_seq()) {
+    for (size_t i = 0; i < value.num_children(); ++i) {
+      find_json_paths(value[i], key, path + "[" + std::to_string(i) + "]", output);
+    }
+  }
+}
 
 struct LoopFrameSketch {
   ConstNodeRef value;
@@ -4050,6 +4112,87 @@ class Renderer : public NodeVisitor {
 
       data_eval_stack.emplace_back(result);
     } break;
+    case Op::StartsWith: {
+      const auto args = get_arguments<2>(node);
+      const auto input = native_to_string(args[0]);
+      const auto prefix = native_to_string(args[1]);
+      make_result(inja::string_view::starts_with(input, prefix));
+    } break;
+    case Op::Sha256sum: {
+      const auto input = detail::hash_input(get_arguments<1>(node)[0].node);
+      unsigned char digest[crypto_hash_sha256_BYTES];
+      if (crypto_hash_sha256(digest, reinterpret_cast<const unsigned char*>(input.data()),
+                             static_cast<unsigned long long>(input.size())) != 0) {
+        INJA_THROW(RenderError("sha256sum() failed to hash input",
+                               get_source_location(current_template->content, node.pos)));
+      }
+      std::ostringstream output;
+      output << std::hex << std::setfill('0');
+      for (const auto byte : digest) {
+        output << std::setw(2) << static_cast<unsigned int>(byte);
+      }
+      make_result(output.str());
+    } break;
+    case Op::Xxh64sum: {
+      const auto input = detail::hash_input(get_arguments<1>(node)[0].node);
+      std::ostringstream output;
+      output << std::hex << std::setfill('0') << std::setw(16) << XXH64(input.data(), input.size(), 0);
+      make_result(output.str());
+    } break;
+    case Op::Fnv1a32: {
+      const auto input = detail::hash_input(get_arguments<1>(node)[0].node);
+      uint32_t hash = 0x811C9DC5;
+      for (const unsigned char byte : input) {
+        hash ^= byte;
+        hash *= 0x01000193;
+      }
+      std::ostringstream output;
+      output << std::hex << std::setfill('0') << std::setw(8) << hash;
+      make_result(output.str());
+    } break;
+    case Op::Dir:
+    case Op::NotDir:
+    case Op::ParentPath:
+    case Op::Extension: {
+      const auto path = std::filesystem::path(get_arguments<1>(node)[0].node.val<std::string>().value());
+      if (node.operation == Op::Dir) {
+        make_result((path.has_filename() ? path.parent_path() : path).string());
+      } else if (node.operation == Op::NotDir) {
+        make_result(path.filename().string());
+      } else if (node.operation == Op::ParentPath) {
+        make_result(path.parent_path().string());
+      } else {
+        const auto extension = path.extension().string();
+        make_result(extension.empty() ? std::string() : extension.substr(1));
+      }
+    } break;
+    case Op::Hex2Dec: {
+      make_result(std::stoul(get_arguments<1>(node)[0].node.val<std::string>().value(), nullptr, 16));
+    } break;
+    case Op::Quote: {
+      std::ostringstream output;
+      output << std::quoted(get_arguments<1>(node)[0].node.val<std::string>().value());
+      make_result(output.str());
+    } break;
+    case Op::RegexEscape: {
+      const auto input = get_arguments<1>(node)[0].node.val<std::string>().value();
+      const std::regex metacharacters(R"([\.\^\$\+\(\)\[\]\{\}\|\?])");
+      make_result(std::regex_replace(input, metacharacters, "\\$&"));
+    } break;
+    case Op::FindJson: {
+      const auto args = get_arguments<2>(node);
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      detail::find_json_paths(args[0].node, args[1].node.val<std::string>().value(), "", result);
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Concatenate: {
+      std::string result;
+      for (const auto arg : get_argument_vector(node)) {
+        result += arg.val<std::string>().value();
+      }
+      make_result(result);
+    } break;
     case Op::Substring: {
       const auto args = get_arguments<2>(node);
       const auto input = native_to_string(args[0]);
@@ -4183,13 +4326,17 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Join: {
       const auto args = get_arguments<2>(node);
+      if (!args[0].valid() || !args[0].node.is_seq()) {
+        INJA_THROW(RenderError("join() expects an array as the first argument",
+                               get_source_location(current_template->content, node.pos)));
+      }
       const auto separator = native_to_string(args[1]);
       std::ostringstream os;
       std::string sep;
       for (const auto& value : args[0].node.children()) {
         os << sep;
         if (value.is_val() || value.is_keyval()) {
-          os << node_to_string(value);
+          os << value.val<std::string>().value();
         } else {
           os << ryml::as_json(*value.tree(), value.id());
         }

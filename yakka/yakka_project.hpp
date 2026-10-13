@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <regex>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_set>
 #include <optional>
@@ -63,6 +64,8 @@ public:
   bool add_feature(c4::csubstr &feature_name);
   //std::optional<std::filesystem::path> find_component(const std::string component_dotname);
   void evaluate_choices();
+  /// Describe evaluation failures, including selection sources and suggested corrections.
+  std::string evaluation_error() const;
   project::state process_choice(c4::csubstr &choice_name);
   void add_additional_tool(const std::filesystem::path component_path);
   void add_command(const std::string command);
@@ -111,6 +114,11 @@ public:
   std::unordered_set<c4::csubstr> provided_features;
   std::unordered_set<c4::csubstr> unprovided_features;
   std::set<std::pair<c4::csubstr, c4::csubstr>> activated_component_features;
+  struct feature_condition {
+    std::unique_ptr<inja::Template> parsed_template;
+    std::set<std::string> input_variables;
+  };
+  std::map<std::pair<std::string, std::string>, feature_condition> feature_conditions;
   std::map<c4::csubstr, ryml::ConstNodeRef> feature_recommendations;
   std::unordered_set<c4::csubstr> additional_tools;
   std::unordered_set<c4::csubstr> commands;
@@ -172,7 +180,12 @@ public:
   void create_config_file(const std::shared_ptr<yakka::component> component, ryml::ConstNodeRef config, const std::string &prefix, std::string instance_name);
 
 private:
-  void collect_required_data(ryml::NodeRef data);
+  std::map<std::string, std::set<std::string>> feature_sources;
+  std::map<std::string, std::set<std::string>> component_sources;
+  std::map<std::string, std::string> choice_sources;
+  std::map<std::string, std::string> invalid_data_choices;
+  void record_requirement_sources(const component &component, ryml::ConstNodeRef node);
+  void collect_required_data(ryml::NodeRef data, const std::set<std::string> &input_variables = {});
 };
 
 } /* namespace yakka */

@@ -57,15 +57,14 @@ void log_phase_time(const std::string &project_name, const char *phase, std::chr
   spdlog::info("[{}] Timing {}: {:.3f} ms", project_name, phase, elapsed);
 }
 
-void prepare_project(project_build &build, workspace &workspace, const build_request &request,
-                     const build_options &options, const std::string &data)
+void prepare_project(project_build &build, workspace &workspace, const build_request &request, const build_options &options, const std::string &data)
 {
-  auto &current = *build.current;
-  const auto prepare_start = std::chrono::steady_clock::now();
-  current.output_path = workspace.workspace_path / default_output_directory / request.project_name;
+  auto &current                = *build.current;
+  const auto prepare_start     = std::chrono::steady_clock::now();
+  current.output_path          = workspace.workspace_path / default_output_directory / request.project_name;
   current.project_summary_file = current.output_path / project_summary_filename;
-  current.project_file = workspace.workspace_path / (request.project_name + ".yakka");
-  auto phase_start = std::chrono::steady_clock::now();
+  current.project_file         = workspace.workspace_path / (request.project_name + ".yakka");
+  auto phase_start             = std::chrono::steady_clock::now();
   current.init_project(request.arguments);
   if (!data.empty()) {
     auto additional_data = current.project_data["request_data"];
@@ -74,10 +73,9 @@ void prepare_project(project_build &build, workspace &workspace, const build_req
   }
   log_phase_time(current.project_name, "project initialization", phase_start);
 
-  const auto signature = request_signature(request, options, data);
+  const auto signature               = request_signature(request, options, data);
   const auto previous_signature_node = current.project_summary.find_child("build_request_signature");
-  const auto previous_signature = previous_signature_node.valid() && previous_signature_node.has_val()
-                                    ? ryml_string(previous_signature_node.val()) : std::string{};
+  const auto previous_signature      = previous_signature_node.valid() && previous_signature_node.has_val() ? ryml_string(previous_signature_node.val()) : std::string{};
 
   if (options.ignore_yakka)
     current.component_flags = component_database::flag::IGNORE_YAKKA;
@@ -132,13 +130,12 @@ void prepare_project(project_build &build, workspace &workspace, const build_req
   current.validate_schema();
   current.finalize_diff();
   if (current.current_state != project::state::PROJECT_VALID && !options.ignore_eval)
-    throw std::runtime_error("Project evaluation failed with state " + std::to_string(static_cast<int>(current.current_state)));
+    throw std::runtime_error(current.evaluation_error());
   log_phase_time(current.project_name, "summary, schema, and diff", phase_start);
 
   const bool reuse_cached_state = current.diff.empty() && previous_signature == signature;
-  spdlog::info("[{}] Cached state: reuse={}, diff_empty={}, signature_match={}", current.project_name,
-               reuse_cached_state, current.diff.empty(), previous_signature == signature);
-  phase_start = std::chrono::steady_clock::now();
+  spdlog::info("[{}] Cached state: reuse={}, diff_empty={}, signature_match={}", current.project_name, reuse_cached_state, current.diff.empty(), previous_signature == signature);
+  phase_start                  = std::chrono::steady_clock::now();
   const bool blueprints_loaded = reuse_cached_state && fs::exists(current.output_path / "blueprints.json");
   if (blueprints_loaded)
     current.blueprint_database.load(current.output_path / "blueprints.json");
@@ -146,8 +143,7 @@ void prepare_project(project_build &build, workspace &workspace, const build_req
     current.process_blueprints();
 
   for (const auto &command: current.commands) {
-    if (current.blueprint_database.blueprints.contains(command) ||
-        !current.blueprint_database.find_match(command, current.project_summary).empty())
+    if (current.blueprint_database.blueprints.contains(command) || !current.blueprint_database.find_match(command, current.project_summary).empty())
       continue;
     const auto providers = workspace.find_blueprint(command);
     if (!providers || providers->num_children() != 1)
@@ -156,8 +152,7 @@ void prepare_project(project_build &build, workspace &workspace, const build_req
     if (!location)
       throw std::runtime_error("Missing component for blueprint: " + ryml_string(command));
     current.add_additional_tool(location->first);
-    if (!current.blueprint_database.blueprints.contains(command) &&
-        current.blueprint_database.find_match(command, current.project_summary).empty())
+    if (!current.blueprint_database.blueprints.contains(command) && current.blueprint_database.find_match(command, current.project_summary).empty())
       throw std::runtime_error("Missing blueprint for command: " + ryml_string(command));
   }
   log_phase_time(current.project_name, "blueprint processing", phase_start);
@@ -178,11 +173,11 @@ void prepare_project(project_build &build, workspace &workspace, const build_req
   }
   log_phase_time(current.project_name, "persist project state", phase_start);
 
-  auto &engine = *build.engine;
-  engine.project_name = current.project_name;
+  auto &engine           = *build.engine;
+  engine.project_name    = current.project_name;
   bool task_state_loaded = false;
   if (reuse_cached_state) {
-    phase_start = std::chrono::steady_clock::now();
+    phase_start       = std::chrono::steady_clock::now();
     task_state_loaded = engine.load_todolist(current.output_path / "todolist.json", current) == yakka_status::SUCCESS;
     log_phase_time(current.project_name, "todolist restore", phase_start);
   }
@@ -205,8 +200,7 @@ size_t build_options::default_jobs()
   return std::max(1U, std::min(32U, std::thread::hardware_concurrency()));
 }
 
-build_session::build_session(workspace &workspace, build_options options)
-  : workspace_(workspace), options_(std::move(options))
+build_session::build_session(workspace &workspace, build_options options) : workspace_(workspace), options_(std::move(options))
 {
   if (options_.jobs == 0)
     throw std::invalid_argument("The worker count must be greater than zero");
@@ -220,7 +214,7 @@ std::vector<build_result> build_session::run(const std::vector<build_request> &r
     const auto validated = expand_build_requests(request.arguments, request.project_name);
     if (!validated || validated->size() != 1)
       throw std::invalid_argument(validated ? "Expand matrix arguments before running a session" : validated.error());
-    const auto &resolved = validated->front();
+    const auto &resolved         = validated->front();
     const auto [claim, inserted] = output_claims.emplace(resolved.project_name, resolved.arguments);
     if (!inserted) {
       if (claim->second != resolved.arguments)
@@ -245,10 +239,10 @@ std::vector<build_result> build_session::run(const std::vector<build_request> &r
     const auto result_index = results.size();
     results.push_back({ request.project_name, false, {} });
     try {
-      auto build = std::make_unique<project_build>();
+      auto build          = std::make_unique<project_build>();
       build->result_index = result_index;
-      build->current = std::make_unique<project>(workspace_, request.project_name);
-      build->engine = std::make_unique<task_engine>();
+      build->current      = std::make_unique<project>(workspace_, request.project_name);
+      build->engine       = std::make_unique<task_engine>();
       prepare_project(*build, workspace_, request, options_, data);
       builds.push_back(std::move(build));
     } catch (const std::exception &error) {
@@ -262,22 +256,28 @@ std::vector<build_result> build_session::run(const std::vector<build_request> &r
     for (const auto &[target, matches]: build->current->target_database.targets) {
       if (build->current->commands.contains(target))
         continue;
-      if (std::none_of(matches.begin(), matches.end(), [](const auto &match) { return match->blueprint->process.valid(); }))
+      if (std::none_of(matches.begin(), matches.end(), [](const auto &match) {
+            return match->blueprint->process.valid();
+          }))
         continue;
-      const auto path = fs::absolute(ryml_string(target)).lexically_normal().generic_string();
+      const auto path              = fs::absolute(ryml_string(target)).lexically_normal().generic_string();
       const auto [claim, inserted] = target_claims.emplace(path, build->result_index);
       if (!inserted && claim->second != build->result_index) {
-        results[claim->second].error = "Conflicting output target: " + path;
+        results[claim->second].error       = "Conflicting output target: " + path;
         results[build->result_index].error = "Conflicting output target: " + path;
       }
     }
 
+  const auto active_build_count = std::count_if(builds.begin(), builds.end(), [&results](const auto &build) {
+    return results[build->result_index].error.empty();
+  });
   tf::Executor executor(options_.jobs);
   std::vector<std::pair<project_build *, tf::Future<void>>> running;
   running.reserve(builds.size());
   for (auto &build: builds) {
     if (!results[build->result_index].error.empty())
       continue;
+    build->engine->include_project_name_in_progress = active_build_count > 1;
     if (ui)
       ui->init(*build->engine);
   }
@@ -303,7 +303,7 @@ std::vector<build_result> build_session::run(const std::vector<build_request> &r
       if (future.valid())
         future.wait();
       result.success = false;
-      result.error = error.what();
+      result.error   = error.what();
     }
   }
   for (auto &[build, future]: running) {
@@ -316,7 +316,7 @@ std::vector<build_result> build_session::run(const std::vector<build_request> &r
         ui->finish(*build->engine);
     } catch (const std::exception &error) {
       result.success = false;
-      result.error = error.what();
+      result.error   = error.what();
     }
   }
   return results;

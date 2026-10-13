@@ -103,41 +103,9 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
 /// @brief Executes add_callback.
 
     local_inja_env.add_callback("aggregate", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
-      auto aggregate = additional_data["values"].append_child();
-      aggregate |= ryml::MAP;
-
-      auto path = ryml::Pointer{ args[0].val() };
-
-      // Loop through components, check if object path exists, if so add it to the aggregate
-      for (const auto &child: project_summary["components"].children()) {
-        // auto c_value = child.val();
-        if (!child.contains(path))
-          continue;
-
-        auto v = child[path];
-        if (v.is_map())
-          for (auto i: v.children())
-            aggregate[i.key()] = i.val(); //local_inja_env.render(i.second.as<std::string>(), this->project_summary);
-        else if (v.is_seq())
-          for (const auto &i: v.children())
-            aggregate.append_child() << local_inja_env.render(i.val<std::string>().value(), project_summary);
-        else
-          aggregate.append_child() << local_inja_env.render(v.val<std::string>().value(), project_summary);
-      }
-
-      // Check project data
-      if (project_summary["data"].contains(path)) {
-        auto v = project_summary["data"][path];
-        if (v.is_map())
-          for (auto i: v.children())
-            aggregate[i.key()] = i.val();
-        else if (v.is_seq())
-          for (const auto &i: v.children())
-            aggregate.append_child() << local_inja_env.render(i.val<std::string>().value(), project_summary);
-        else
-          aggregate.append_child() << local_inja_env.render(v.val<std::string>().value(), project_summary);
-      }
-      return aggregate;
+      const std::string path = args[0].val<std::string>().value();
+      return aggregate_blueprint_data(local_inja_env, project_summary, c4::to_csubstr(path),
+                                      additional_data["values"].append_child());
     });
 
     // Run template engine on dependencies
@@ -151,6 +119,10 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
         }
         case blueprint::dependency::DATA_DEPENDENCY: {
           std::string data_name = yakka::try_render(local_inja_env, d.name, project_summary);
+          if (data_name.empty()) {
+            spdlog::error("Empty data dependency for '{}'", target);
+            return {};
+          }
           if (data_name.front() != yakka::data_dependency_identifier)
             data_name.insert(0, 1, yakka::data_dependency_identifier);
           auto dependency = database["dependencies"].append_child() << data_name;
@@ -169,6 +141,9 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
         spdlog::error("Error evaluating dependency for {}\r\nCouldn't apply template: '{}'\n{}", blueprint.first, d.name, e.what());
         return result;
       }
+
+      if (generated_depend.empty())
+        continue;
 
       // Check if the input was a YAML array construct
       if (generated_depend.front() == '[' && generated_depend.back() == ']') {
@@ -193,7 +168,7 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
   }
 
   if (!blueprint_match_found) {
-    if (!fs::exists(ryml_string(target)) && target[0] != yakka::data_dependency_identifier)
+    if (!target.empty() && !fs::exists(ryml_string(target)) && target[0] != yakka::data_dependency_identifier)
       spdlog::info("No blueprint for '{}'", target);
   }
   return result;
@@ -203,12 +178,23 @@ std::vector<std::shared_ptr<blueprint_match>> blueprint_database::find_match(rym
 
 void blueprint_database::load(const std::filesystem::path filename)
 {
-  database = ryml_load_file(filename).value();
-
-
-  // Generate blueprints from database
+  auto loaded = ryml_load_file(filename);
+  if (!loaded) {
+    spdlog::error("Failed to load blueprints '{}': {}", filename.string(), loaded.error().message());
+    return;
+  }
+  if (!loaded->crootref().is_map()) {
+    spdlog::error("Blueprint database '{}' must be a map", filename.string());
+    return;
+  }
   blueprints.clear();
-  for (const auto &blueprint_group: database.rootref().children()) {
+  database.clear();
+  database.rootref() |= ryml::MAP;
+  database["blueprints"] |= ryml::SEQ;
+  database["matches"] |= ryml::SEQ;
+  database["dependencies"] |= ryml::SEQ;
+  loaded_blueprints = std::move(*loaded);
+  for (const auto &blueprint_group: loaded_blueprints.crootref().children()) {
     auto load_blueprint = [&](ryml::ConstNodeRef blueprint_node) {
       if (!blueprint_node.is_map())
         return;
@@ -217,6 +203,12 @@ void blueprint_database::load(const std::filesystem::path filename)
       auto new_blueprint = std::make_shared<blueprint>(target, blueprint_node, blueprint_node.has_child("parent_path") ? blueprint_node["parent_path"].val() : c4::csubstr{});
       if (new_blueprint->regex.has_value() && new_blueprint->regex->empty())
         new_blueprint->regex.reset();
+      if (blueprint_node.has_child("requirements")) {
+        for (const auto requirement: blueprint_node["requirements"].children())
+          new_blueprint->requirements.push_back(requirement.val());
+      }
+      if (blueprint_node.has_child("task_group"))
+        new_blueprint->task_group = blueprint_node["task_group"].val();
 
       if (blueprint_node.has_child("dependencies") && blueprint_node["dependencies"].is_seq()) {
         new_blueprint->dependencies.clear();
@@ -265,6 +257,15 @@ void blueprint_database::save(const std::filesystem::path filename)
     blueprint["target"] << bp.second->target;
     blueprint["regex"] << bp.second->regex.value_or("");
     blueprint["parent_path"] << bp.second->parent_path;
+    blueprint["task_group"] << bp.second->task_group;
+    auto requirements = blueprint.append_child() << ryml::Key("requirements");
+    requirements |= ryml::SEQ;
+    for (const auto requirement: bp.second->requirements)
+      requirements.append_child() << requirement;
+    if (bp.second->process.valid()) {
+      auto process = blueprint.append_child() << ryml::Key("process");
+      merge_nodes(process, bp.second->process);
+    }
 
     auto dependencies = blueprint.append_child() << ryml::Key("dependencies");
     dependencies |= ryml::SEQ;
@@ -298,26 +299,45 @@ std::vector<ryml::csubstr> blueprint_database::parse_gcc_dependency_file(const s
 
   std::string line;
 
-  // Find and ignore the first line with the target. Typically "<target>: \"
-  do {
-    std::getline(infile, line);
-  } while (line.length() > 0 && line.find(':') == std::string::npos);
+  // Ignore the target, retaining dependencies that occur on the same line.
+  while (std::getline(infile, line) && line.find(':') == std::string::npos) {}
 
-  while (std::getline(infile, line, ' ')) {
-    if (line.empty() || line.compare("\\\n") == 0)
-      continue;
-    if (line.back() == '\n')
-      line.pop_back();
-    if (line.back() == '\r')
-      line.pop_back();
-    if (line.rfind("./", 0) == 0) {
-      auto dependency = database["dependencies"].append_child() << line.substr(2);
-      dependencies.push_back(dependency.val());
+  const auto separator = line.find(':');
+  if (separator == std::string::npos)
+    return {};
+  std::string content = line.substr(separator + 1);
+  content.push_back('\n');
+  content.append(std::istreambuf_iterator<char>(infile), {});
+  std::string token;
+  const auto append = [&]() {
+    if (token.empty())
+      return;
+    auto dependency = database["dependencies"].append_child() << (token.starts_with("./") ? token.substr(2) : token);
+    dependencies.push_back(dependency.val());
+    token.clear();
+  };
+  for (size_t i = 0; i < content.size(); ++i) {
+    const char character = content[i];
+    if (character == '\\' && i + 1 < content.size()) {
+      if (content[i + 1] == '\r' || content[i + 1] == '\n') {
+        ++i;
+        if (content[i] == '\r' && i + 1 < content.size() && content[i + 1] == '\n')
+          ++i;
+      } else if (content[i + 1] == ' ' || content[i + 1] == '\\') {
+        token.push_back(content[++i]);
+      } else {
+        token.push_back(character);
+      }
+    } else if (character == '\n' || character == '\r') {
+      append();
+      break;
+    } else if (std::isspace(static_cast<unsigned char>(character))) {
+      append();
     } else {
-      auto dependency = database["dependencies"].append_child() << line;
-      dependencies.push_back(dependency.val());
+      token.push_back(character);
     }
   }
+  append();
 
   return dependencies;
 }

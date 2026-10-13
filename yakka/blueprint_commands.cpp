@@ -17,9 +17,14 @@ namespace yakka {
 
 process_return echo_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (command.valid() && command.has_val() && !command.val().empty())
-
-    captured_output = try_render(inja_env, command.val<std::string>().value(), project_summary);
+  if (command.valid() && command.has_val() && !command.val().empty()) {
+    try {
+      captured_output = inja_env.render(std::string_view(command.val().str, command.val().len), project_summary);
+    } catch (std::exception &e) {
+      spdlog::error("Failed to render echo template: {}\n{}", command.val<std::string>().value(), e.what());
+      return { "", -1 };
+    }
+  }
 
   spdlog::get("console")->info("{}", captured_output);
   return { captured_output, 0 };
@@ -93,11 +98,17 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
     spdlog::error("'regex' command missing 'search'");
     return { "", -1 };
   }
+  std::regex regex_search;
+  try {
 #if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
-  std::regex regex_search(search_node.val<std::string>().value());
+    regex_search = std::regex(search_node.val<std::string>().value());
 #else
-  std::regex regex_search(search_node.val<std::string>().value(), std::regex::multiline);
+    regex_search = std::regex(search_node.val<std::string>().value(), std::regex::multiline);
 #endif
+  } catch (const std::regex_error &error) {
+    spdlog::error("'regex' has an invalid search expression: {}", error.what());
+    return { "", -1 };
+  }
   const auto prefix_node = command.find_child("prefix");
   const auto suffix_node = command.find_child("suffix");
   std::string prefix     = prefix_node.valid() ? try_render(inja_env, prefix_node.val<std::string>().value(), project_summary) : "";
@@ -115,24 +126,26 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
         captured_output.append(r);
       } else if (command.has_child("match")) {
         std::smatch sm;
-        std::string new_output      = prefix_node.valid() ? prefix_node.val<std::string>().value() : "";
+        std::string new_output      = prefix;
         inja::Environment local_env = inja_env; // Create copy and override `$()` function
         const auto match_string     = command.find_child("match");
 /// @brief Executes add_callback.
 
         local_env.add_callback("reg", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
-          auto node = additional_data["values"].append_child() << sm[args[0].val<int>().value()].str();
+          const auto index = args[0].val<int>().value();
+          if (index < 0 || static_cast<size_t>(index) >= sm.size())
+            throw std::out_of_range("regex capture index is out of range");
+          auto node = additional_data["values"].append_child() << sm[index].str();
           return node;
 
         });
-        for (; std::regex_search(captured_output, sm, regex_search);) {
+        for (auto it = std::sregex_iterator(line.begin(), line.end(), regex_search); it != std::sregex_iterator{}; ++it) {
+          sm = *it;
           // Render the match template
           new_output += try_render(local_env, match_string, project_summary);
-          captured_output = sm.suffix();
         }
-        if (suffix_node.valid())
-          new_output += suffix_node.val<std::string>().value();
-        captured_output = new_output;
+        new_output += suffix;
+        captured_output += new_output;
       } else if (command.has_child("to_yaml")) {
         std::smatch s;
         if (!std::regex_match(line, s, regex_search))
@@ -155,7 +168,8 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
     }
   } else if (command.has_child("to_yaml")) {
     YAML::Node yaml;
-    for (std::smatch sm; std::regex_search(captured_output, sm, regex_search);) {
+    for (auto it = std::sregex_iterator(captured_output.begin(), captured_output.end(), regex_search); it != std::sregex_iterator{}; ++it) {
+      const auto &sm = *it;
       YAML::Node new_node;
       int i                   = 1;
       const auto to_yaml_node = command.find_child("to_yaml");
@@ -163,7 +177,6 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
         new_node[v.val<std::string>().value()] = sm[i++].str();
       }
       yaml.push_back(new_node);
-      captured_output = sm.suffix();
     }
 
     captured_output.erase();
@@ -183,14 +196,17 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
 /// @brief Executes add_callback.
 
     local_env.add_callback("reg", 1, [&](inja::Arguments &args, ryml::NodeRef additional_data) {
-      auto node = additional_data["values"].append_child() << sm[args[0].val<int>().value()].str();
+      const auto index = args[0].val<int>().value();
+      if (index < 0 || static_cast<size_t>(index) >= sm.size())
+        throw std::out_of_range("regex capture index is out of range");
+      auto node = additional_data["values"].append_child() << sm[index].str();
       return node;
 
     });
-    for (; std::regex_search(captured_output, sm, regex_search);) {
+    for (auto it = std::sregex_iterator(captured_output.begin(), captured_output.end(), regex_search); it != std::sregex_iterator{}; ++it) {
+      sm = *it;
       // Render the match template
       new_output += try_render(local_env, match_string, project_summary);
-      captured_output = sm.suffix();
     }
     captured_output = new_output + suffix;
     //captured_output = std::regex_replace(captured_output, regex_search, command["match"].get<std::string>(), std::regex_constants::format_no_copy);
@@ -207,9 +223,7 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
 process_return template_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
   try {
-
-    std::string template_string;
-    std::string template_filename;
+    std::filesystem::path template_filename;
     ryml::Tree data;
     auto data_root   = data.crootref();
     auto render_data = [&]() -> ryml::ConstNodeRef {
@@ -221,35 +235,59 @@ process_return template_command(std::string target, ryml::ConstNodeRef command, 
     };
 
     if (command.valid() && command.has_val() && !command.is_map() && !command.is_seq()) {
-      captured_output = try_render(inja_env, command.val<std::string>().value(), project_summary);
+      captured_output = inja_env.render(std::string_view(command.val().str, command.val().len), project_summary);
       return { captured_output, 0 };
     }
 
     if (command.valid() && command.is_map()) {
       if (command.has_child("data_file")) {
-        std::filesystem::path data_filename = try_render(inja_env, command["data_file"], project_summary);
+        const auto &df_node = command["data_file"];
+        if (!df_node.has_val()) {
+          spdlog::error("'data_file' must be a scalar filename");
+          return { "", -1 };
+        }
+        std::filesystem::path data_filename = inja_env.render(std::string_view(df_node.val().str, df_node.val().len), project_summary);
         auto loaded                         = ryml_load_file(data_filename);
         if (loaded) {
           data = std::move(*loaded);
+        } else {
+          spdlog::error("Failed to load template data '{}': {}", data_filename.string(), loaded.error().message());
+          return { "", -1 };
         }
       } else if (command.has_child("data")) {
-        std::string data_string = try_render(inja_env, command["data"], project_summary);
-        try {
-          data = ryml::parse_in_arena(ryml::to_csubstr(data_string));
-        } catch (...) {
-          spdlog::error("Failed to parse inline data for template");
+        const auto &data_node = command["data"];
+        if (data_node.has_val()) {
+          std::string data_string = inja_env.render(std::string_view(data_node.val().str, data_node.val().len), project_summary);
+          try {
+            data = ryml::parse_in_arena(ryml::to_csubstr(data_string));
+          } catch (...) {
+            spdlog::error("Failed to parse inline data for template");
+            return { "", -1 };
+          }
+        } else if (data_node.is_map() || data_node.is_seq()) {
+          data.rootref() |= (data_node.is_map() ? ryml::MAP : ryml::SEQ);
+          merge_nodes(data.rootref(), data_node);
         }
       }
 
       if (command.has_child("template_file")) {
-        template_filename = try_render(inja_env, command["template_file"], project_summary);
-        captured_output   = try_render_file(inja_env, template_filename, render_data());
+        const auto &tf_node = command["template_file"];
+        if (!tf_node.has_val()) {
+          spdlog::error("'template_file' must be a scalar filename");
+          return { "", -1 };
+        }
+        template_filename = inja_env.render(std::string_view(tf_node.val().str, tf_node.val().len), project_summary);
+        captured_output   = inja_env.render_file(template_filename, render_data());
         return { captured_output, 0 };
       }
 
       if (command.has_child("template")) {
-        // template_string = try_render(inja_env, command["template"], project_summary);
-        captured_output = try_render(inja_env, command["template"], render_data());
+        const auto &tmpl_node = command["template"];
+        if (!tmpl_node.has_val()) {
+          spdlog::error("'template' must be a scalar template string");
+          return { "", -1 };
+        }
+        captured_output = inja_env.render(std::string_view(tmpl_node.val().str, tmpl_node.val().len), render_data());
         return { captured_output, 0 };
       }
     }
@@ -260,8 +298,7 @@ process_return template_command(std::string target, ryml::ConstNodeRef command, 
     spdlog::error("Failed to apply template: {}\n{}", ryml::emitrs_yaml<std::string>(command), e.what());
     return { "", -1 };
   }
-  return { captured_output, 0 };
-};
+}
 
 // Backwards compatibility with old 'inja' command
 // blueprint_commands["inja"] = [](std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env) -> yakka::process_return {
@@ -270,8 +307,7 @@ process_return template_command(std::string target, ryml::ConstNodeRef command, 
 process_return inja_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
   return template_command(target, command, captured_output, project_summary, project_data, inja_env);
-
-};
+}
 
 // blueprint_commands["save"] = [](std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env) -> yakka::process_return {
 /// @brief Executes save_command.
@@ -280,11 +316,19 @@ process_return save_command(std::string target, ryml::ConstNodeRef command, std:
 {
   std::string save_filename;
 
-
-  if (!command.valid() || (command.val().empty() && command.num_children() == 0))
+  if (!command.valid() || ((!command.has_val() || command.val().empty()) && command.num_children() == 0))
     save_filename = target;
-  else
-    save_filename = try_render(inja_env, command.val<std::string>().value(), project_summary);
+  else if (command.has_val()) {
+    try {
+      save_filename = inja_env.render(std::string_view(command.val().str, command.val().len), project_summary);
+    } catch (std::exception &e) {
+      spdlog::error("Failed to render save filename: {}\n{}", command.val<std::string>().value(), e.what());
+      return { "", -1 };
+    }
+  } else {
+    spdlog::error("'save' requires a scalar filename");
+    return { "", -1 };
+  }
 
   // Special case to save data depenencies
   if (!save_filename.empty() && save_filename[0] == data_dependency_identifier) {
@@ -293,19 +337,32 @@ process_return save_command(std::string target, ryml::ConstNodeRef command, std:
       return { "", -1 };
     }
     auto pointer     = ryml::Pointer{ save_filename.substr(6) };
-    auto target_node = project_data.at(pointer); //ryml_navigate_path(project_data, pointer, true);
-    if (target_node.valid()) {
-      target_node << captured_output;
-    }
+    project_data[pointer] << captured_output;
     return { captured_output, 0 };
   }
 
+  if (save_filename.empty()) {
+    spdlog::error("'save' requires a valid filename");
+    return { "", -1 };
+  }
+
   try {
-    std::ofstream save_file;
-    std::filesystem::path p(save_filename);
-    if (!p.parent_path().empty())
-      fs::create_directories(p.parent_path());
-    save_file.open(save_filename, std::ios_base::binary);
+    const std::filesystem::path p(save_filename);
+    const auto parent_path = p.parent_path();
+    if (!parent_path.empty()) {
+      std::error_code ec;
+      fs::create_directories(parent_path, ec);
+      if (ec) {
+        spdlog::error("Failed to create parent directory '{}' for saving '{}': {}", parent_path.string(), save_filename, ec.message());
+        return { "", -1 };
+      }
+      if (!fs::exists(parent_path, ec) || !fs::is_directory(parent_path, ec)) {
+        spdlog::error("Parent path '{}' does not exist or is not a directory for saving '{}'", parent_path.string(), save_filename);
+        return { "", -1 };
+      }
+    }
+
+    std::ofstream save_file(save_filename, std::ios_base::binary);
     if (!save_file.is_open()) {
       spdlog::error("Failed to save file: '{}'", save_filename);
       return { "", -1 };
@@ -313,8 +370,8 @@ process_return save_command(std::string target, ryml::ConstNodeRef command, std:
     save_file << captured_output;
     save_file.flush();
     save_file.close();
-  } catch (std::exception &e) {
-    spdlog::error("Failed to save file: '{}'", save_filename);
+  } catch (const std::exception &e) {
+    spdlog::error("Failed to save file '{}': {}", save_filename, e.what());
     return { "", -1 };
   }
   return { captured_output, 0 };
@@ -333,7 +390,7 @@ process_return create_command(std::string target, ryml::ConstNodeRef command, st
       filename = try_render(inja_env, filename, project_summary);
       if (!filename.empty()) {
         std::filesystem::path p(filename);
-        fs::create_directories(p.parent_path());
+        fs::create_directories(p);
       }
     } catch (std::exception &e) {
       spdlog::error("Couldn't create directory for '{}'", filename);
@@ -348,8 +405,8 @@ process_return create_command(std::string target, ryml::ConstNodeRef command, st
 
 process_return verify_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (!command.valid() || command.val().empty()) {
-
+  if (!command.valid() || !command.has_val() || command.val().empty()) {
+    spdlog::error("'verify' requires a filename");
     return { "", -1 };
   }
   std::string filename = command.val<std::string>().value();
@@ -368,8 +425,8 @@ process_return verify_command(std::string target, ryml::ConstNodeRef command, st
 
 process_return rm_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (!command.valid() || command.val().empty()) {
-
+  if (!command.valid() || !command.has_val() || command.val().empty()) {
+    spdlog::error("'rm' requires a filename or file list");
     return { "", -1 };
   }
   std::string filename = command.val<std::string>().value();
@@ -380,11 +437,16 @@ process_return rm_command(std::string target, ryml::ConstNodeRef command, std::s
     try {
       auto file_list = YAML::Load(filename);
       for (auto i: file_list) {
+        if (!i.IsScalar()) {
+          spdlog::error("'rm' file list entries must be scalar filenames");
+          return { "", -1 };
+        }
         const auto file = i.Scalar();
         fs::remove(file);
       }
     } catch (std::exception &e) {
       spdlog::error("Failed to parse file list: {}", filename);
+      return { "", -1 };
     }
   } else {
     fs::remove(filename);
@@ -397,8 +459,8 @@ process_return rm_command(std::string target, ryml::ConstNodeRef command, std::s
 
 process_return rmdir_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (!command.valid() || command.val().empty()) {
-
+  if (!command.valid() || !command.has_val() || command.val().empty()) {
+    spdlog::error("'rmdir' requires a directory");
     return { "", -1 };
   }
   std::string path = command.val<std::string>().value();
@@ -406,8 +468,9 @@ process_return rmdir_command(std::string target, ryml::ConstNodeRef command, std
   // Put some checks here
   std::error_code ec;
   fs::remove_all(path, ec);
-  if (!ec) {
+  if (ec) {
     spdlog::error("'rmdir' command failed {}\n", ec.message());
+    return { "", -1 };
   }
   return { captured_output, 0 };
 };
@@ -417,12 +480,9 @@ process_return rmdir_command(std::string target, ryml::ConstNodeRef command, std
 
 process_return pack_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  std::vector<std::byte> data_output;
-
-
   const auto data_node   = command.find_child("data");
   const auto format_node = command.find_child("format");
-  if (!data_node.valid()) {
+  if (!data_node.valid() || !data_node.is_seq()) {
     spdlog::error("'pack' command requires 'data'\n");
     return { "", -1 };
   }
@@ -433,57 +493,69 @@ process_return pack_command(std::string target, ryml::ConstNodeRef command, std:
 
   std::string format = format_node.val<std::string>().value();
   format             = try_render(inja_env, format, project_summary);
+  if (format.size() != data_node.num_children()) {
+    spdlog::error("'pack' format length must match the number of values");
+    return { "", -1 };
+  }
 
   auto i = format.begin();
+  std::string data_output;
+  const auto append = [&](const auto value) {
+    data_output.append(reinterpret_cast<const char *>(&value), sizeof(value));
+  };
   for (const auto &d: data_node.children()) {
+    if (!d.has_val()) {
+      spdlog::error("'pack' values must be scalars");
+      return { "", -1 };
+    }
     auto v       = try_render(inja_env, d.val<std::string>().value(), project_summary);
     const char c = *i++;
-    union {
-      int8_t s8;
-      uint8_t u8;
-      int16_t s16;
-      uint16_t u16;
-      int32_t s32;
-      uint32_t u32;
-      unsigned long value;
-      std::byte bytes[8];
-    } temp;
-    const auto result = (v.size() > 1 && v[1] == 'x') ? std::from_chars(v.data() + 2, v.data() + v.size(), temp.u32, 16)
-                        : (v[0] == '-')               ? std::from_chars(v.data(), v.data() + v.size(), temp.s32)
-                                                      : std::from_chars(v.data(), v.data() + v.size(), temp.u32);
-    if (result.ec != std::errc()) {
-      spdlog::error("Error converting number: {}\n", v);
+    if (c == 'x') {
+      data_output.push_back('\0');
+      continue;
+    }
+    const bool is_signed = c == 'c' || c == 's' || c == 'l';
+    const int bits = c == 'C' || c == 'c' ? 8 : c == 'S' || c == 's' ? 16 : c == 'L' || c == 'l' ? 32 : 0;
+    if (bits == 0 || v.empty()) {
+      spdlog::error("'pack' has an invalid format or empty value");
+      return { "", -1 };
+    }
+    int64_t value = 0;
+    const auto begin = v.data() + (v.starts_with("0x") ? 2 : 0);
+    const auto end = v.data() + v.size();
+    const auto parsed = std::from_chars(begin, end, value, v.starts_with("0x") ? 16 : 10);
+    const int64_t minimum = is_signed ? -(int64_t{1} << (bits - 1)) : 0;
+    const int64_t maximum = (int64_t{1} << (is_signed ? bits - 1 : bits)) - 1;
+    if (parsed.ec != std::errc{} || parsed.ptr != end || value < minimum || value > maximum) {
+      spdlog::error("'pack' cannot represent value '{}' with format '{}'", v, c);
+      return { "", -1 };
     }
 
     switch (c) {
       case 'L':
-        data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[4]);
+        append(static_cast<uint32_t>(value));
         break;
       case 'l':
-        data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[4]);
+        append(static_cast<int32_t>(value));
         break;
       case 'S':
-        data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[2]);
+        append(static_cast<uint16_t>(value));
         break;
       case 's':
-        data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[2]);
+        append(static_cast<int16_t>(value));
         break;
       case 'C':
-        data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[1]);
+        append(static_cast<uint8_t>(value));
         break;
       case 'c':
-        data_output.insert(data_output.end(), &temp.bytes[0], &temp.bytes[1]);
-        break;
-      case 'x':
-        data_output.push_back(std::byte{ 0 });
+        append(static_cast<int8_t>(value));
         break;
       default:
         spdlog::error("Unknown pack type\n");
         break;
     }
   }
-  auto *chars = reinterpret_cast<char const *>(data_output.data());
-  captured_output.insert(captured_output.end(), chars, chars + data_output.size());
+  captured_output += data_output;
   return { captured_output, 0 };
 };
 
@@ -530,7 +602,7 @@ process_return copy_command(std::string target, ryml::ConstNodeRef command, std:
       return { "", -1 };
     }
 
-    if (!source.val().empty() && !source.is_map() && !source.is_seq()) {
+    if (source.has_val() && !source.val().empty() && !source.is_map() && !source.is_seq()) {
       auto source_string = try_render(inja_env, source.val<std::string>().value(), project_summary);
       std::filesystem::copy(source_string, destination, std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
     } else if (source.is_seq()) {
@@ -579,13 +651,17 @@ process_return copy_command(std::string target, ryml::ConstNodeRef command, std:
 
 process_return cat_command(std::string target, ryml::ConstNodeRef command, std::string captured_output, ryml::ConstNodeRef project_summary, ryml::NodeRef project_data, inja::Environment &inja_env)
 {
-  if (!command.valid() || command.val().empty()) {
-
+  if (!command.valid() || !command.has_val() || command.val().empty()) {
+    spdlog::error("'cat' requires a filename");
     return { "", -1 };
   }
   std::string filename = try_render(inja_env, command.val<std::string>().value(), project_summary);
   std::ifstream datafile;
   datafile.open(filename, std::ios_base::in | std::ios_base::binary);
+  if (!datafile.is_open()) {
+    spdlog::error("'cat' command failed to open '{}'", filename);
+    return { "", -1 };
+  }
   std::stringstream string_stream;
   string_stream << datafile.rdbuf();
   captured_output = string_stream.str();

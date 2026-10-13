@@ -11,11 +11,8 @@
 #include "glob/glob.h"
 #include "yakka_schema.hpp"
 #include "blake3.h"
-#include "sodium/crypto_hash_sha256.h"
 #include "pugixml.hpp"
 #include "rapidyaml_json.hpp"
-#define XXH_INLINE_ALL
-#include "../components/rapidhash/v3/collisions/allcodecs/xxhash.h"
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 #include <concepts>
@@ -281,7 +278,7 @@ static void copy_node_recursive(ryml::ConstNodeRef source, ryml::NodeRef destina
 
   if (source.has_val()) {
     destination.change_type(ryml::VAL);
-    destination.set_val(source.val());
+    destination.tree()->duplicate_contents(source.tree(), source.id(), destination.id());
   }
 }
 
@@ -645,109 +642,51 @@ std::string try_render_file(inja::Environment &env, const std::filesystem::path 
 
 }
 
-/// @brief Executes bytes_to_hex.
-
-static std::string bytes_to_hex(const unsigned char *bytes, std::size_t len)
-{
-  std::ostringstream out;
-
-  out << std::hex << std::setfill('0');
-  for (std::size_t i = 0; i < len; ++i) {
-    out << std::setw(2) << static_cast<unsigned int>(bytes[i]);
-  }
-  return out.str();
-}
-
-/// @brief Executes u64_to_hex.
-
-static std::string u64_to_hex(uint64_t value)
-{
-  std::ostringstream out;
-
-  out << std::hex << std::setfill('0') << std::setw(16) << value;
-  return out.str();
-}
-
-static std::string u32_to_hex(uint32_t value)
-{
-  std::ostringstream out;
-  out << std::hex << std::setfill('0') << std::setw(8) << value;
-  return out.str();
-}
-
-static uint32_t fnv1a_32_hash(std::string_view input)
-{
-  constexpr uint32_t offset_basis = 0x811C9DC5;
-  constexpr uint32_t prime        = 0x01000193;
-
-  uint32_t hash = offset_basis;
-  for (unsigned char c: input) {
-    hash ^= c;
-    hash *= prime;
-  }
-  return hash;
-}
-
-static std::string template_arg_to_string(ryml::ConstNodeRef arg)
-{
-  if (!arg.valid()) {
-
-    return {};
-  }
-  if (arg.has_val()) {
-    return arg.val<std::string>().value();
-  }
-  return ryml::emitrs_json<std::string>(arg);
-}
-
 /// @brief Executes add_common_template_commands.
+
+ryml::NodeRef aggregate_blueprint_data(inja::Environment &env, ryml::ConstNodeRef summary,
+                                      c4::csubstr path, ryml::NodeRef output)
+{
+  const std::string path_text = ryml_string(path);
+  const ryml::Pointer pointer{path_text};
+  const auto append = [&](ryml::ConstNodeRef source) {
+    if (!source.is_map() || !source.contains(pointer))
+      return;
+    const auto value = source.at(pointer);
+    if (value.is_map()) {
+      if (output.is_seq())
+        throw std::invalid_argument("aggregate cannot mix map and sequence values");
+      output |= ryml::MAP;
+      merge_node_default(output, value);
+    } else {
+      if (output.is_map())
+        throw std::invalid_argument("aggregate cannot mix map and sequence values");
+      output |= ryml::SEQ;
+      const auto append_value = [&](ryml::ConstNodeRef item) {
+        if (item.is_map() || item.is_seq())
+          copy_node_recursive(item, output.append_child());
+        else
+          output.append_child() << env.render(item.val<std::string>().value(), summary);
+      };
+      if (value.is_seq())
+        for (const auto item: value.children())
+          append_value(item);
+      else
+        append_value(value);
+    }
+  };
+  if (summary.has_child("components"))
+    for (const auto component: summary["components"].children())
+      append(component);
+  if (summary.has_child("data"))
+    append(summary["data"]);
+  if (!output.is_map() && !output.is_seq())
+    output |= ryml::SEQ;
+  return output;
+}
 
 void add_common_template_commands(inja::Environment &inja_env)
 {
-  inja_env.add_callback("sha256sum", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-
-    const auto input = template_arg_to_string(args[0]);
-    unsigned char digest[crypto_hash_sha256_BYTES];
-    if (crypto_hash_sha256(digest,
-                           reinterpret_cast<const unsigned char *>(input.data()),
-                           static_cast<unsigned long long>(input.size())) != 0) {
-      spdlog::error("sha256sum() failed to hash input");
-      return additional_data["values"].append_child() << "";
-    }
-    return additional_data["values"].append_child() << bytes_to_hex(digest, crypto_hash_sha256_BYTES);
-  });
-/// @brief Executes add_callback.
-
-  inja_env.add_callback("xxh64sum", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    const auto input = template_arg_to_string(args[0]);
-    const auto hash  = XXH64(input.data(), input.size(), 0);
-
-    return additional_data["values"].append_child() << u64_to_hex(hash);
-  });
-  inja_env.add_callback("fnv1a_32", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    const auto input = template_arg_to_string(args[0]);
-    const auto hash  = fnv1a_32_hash(input);
-    return additional_data["values"].append_child() << u32_to_hex(hash);
-  });
-  inja_env.add_callback("dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
-    auto path = std::filesystem::path{ args[0].val<std::string>().value() };
-    return additional_data["values"].append_child() << (path.has_filename() ? path.parent_path().string() : path.string());
-
-  });
-/// @brief Executes add_callback.
-
-  inja_env.add_callback("not_dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
-    return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.filename().string();
-  });
-
-/// @brief Executes add_callback.
-
-  inja_env.add_callback("parent_path", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
-    return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.parent_path().string();
-  });
-
-/// @brief Executes add_callback.
-
   inja_env.add_callback("glob", [](inja::Arguments &args, inja::NodeRef additional_data) {
     ryml::NodeRef aggregate = additional_data["values"].append_child();
     aggregate |= ryml::SEQ;
@@ -792,12 +731,6 @@ void add_common_template_commands(inja::Environment &inja_env)
   });
 /// @brief Executes add_callback.
 
-  inja_env.add_callback("extension", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
-    return additional_data["values"].append_child() << std::filesystem::path{ args[0].val<std::string>().value() }.extension().string().substr(1);
-  });
-
-/// @brief Executes add_callback.
-
   inja_env.add_callback("filesize", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     return additional_data["values"].append_child() << fs::file_size(args[0].val<std::string>().value());
   });
@@ -808,13 +741,6 @@ void add_common_template_commands(inja::Environment &inja_env)
     return additional_data["values"].append_child() << fs::exists(args[0].val<std::string>().value());
   });
 
-/// @brief Executes add_callback.
-
-  inja_env.add_callback("hex2dec", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    std::string hex_string = args[0].val<std::string>().value();
-    return additional_data["values"].append_child() << std::stoul(hex_string, nullptr, 16);
-
-  });
 /// @brief Executes add_callback.
 
   inja_env.add_callback("read_file", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
@@ -866,55 +792,6 @@ void add_common_template_commands(inja::Environment &inja_env)
   });
 /// @brief Executes add_callback.
 
-  inja_env.add_callback("quote", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    std::stringstream ss;
-    ss << std::quoted(args[0].val<std::string>().value());
-
-    return additional_data["values"].append_child() << ss.str();
-  });
-  inja_env.add_callback("regex_escape", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    auto input = args[0].val<std::string>().value();
-    const std::regex metacharacters(R"([\.\^\$\+\(\)\[\]\{\}\|\?])");
-
-    return additional_data["values"].append_child() << std::regex_replace(input, metacharacters, "\\$&");
-  });
-  inja_env.add_callback("starts_with", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    auto input = args[0].val<std::string>().value();
-    auto start = args[1].val<std::string>().value();
-
-    return additional_data["values"].append_child() << (input.rfind(start, 0) == 0);
-  });
-  inja_env.add_callback("join", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    const auto input = args[0];
-    if (!input.valid() || !input.is_seq()) {
-
-      spdlog::error("join() expects an array as the first argument");
-      return ryml::NodeRef{};
-    }
-    const auto separator = args[1].val<std::string>().value();
-    // Add the first element (input already checked to be not empty)
-    auto it            = input.first_child();
-    std::string output = it.val<std::string>().value();
-    // Iterate through the rest of the elements and append them with the separator
-    for (it = it.next_sibling(); it.valid(); it = it.next_sibling()) {
-      output += separator + it.val<std::string>().value();
-    }
-    auto result = additional_data["values"].append_child() << output;
-    return result;
-  });
-/// @brief Executes add_callback.
-
-  inja_env.add_callback("find_json", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    auto input            = args[0];
-    const auto search_key = args[1].val<std::string>().value();
-
-    auto output           = additional_data["values"].append_child();
-    output |= ryml::SEQ;
-    find_json_keys(input, search_key, "", output);
-    return output;
-  });
-/// @brief Executes add_callback.
-
   inja_env.add_callback("merge", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto target = args[0];
     // const auto data = args[1];
@@ -922,16 +799,6 @@ void add_common_template_commands(inja::Environment &inja_env)
     // TODO:
     // target.update(data, true);
     return target;
-  });
-/// @brief Executes add_callback.
-
-  inja_env.add_callback("concatenate", [](const inja::Arguments &args, inja::NodeRef additional_data) {
-    std::string aggregate;
-    for (const auto i: args)
-
-      aggregate.append(i.val<std::string>().value());
-    auto result = additional_data["values"].append_child() << aggregate;
-    return result;
   });
 }
 
@@ -990,7 +857,7 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
     return false;
   }
 
-  if (data_path[1] != '/') {
+  if (data_path.size() < 2 || data_path[1] != '/') {
     return std::unexpected{ "Invalid path format: missing root separator" };
   }
 
@@ -1008,6 +875,30 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
   if (parts.empty()) {
     return false;
   }
+
+  const auto resolve_pointer = [](ryml::ConstNodeRef node, const ryml::Pointer &pointer) {
+    for (const auto token: pointer.tokens()) {
+      if (!node.valid()) {
+        return ryml::ConstNodeRef{};
+      }
+      if (node.is_map()) {
+        if (!node.has_child(token)) {
+          return ryml::ConstNodeRef{};
+        }
+        node = node.find_child(token);
+      } else if (node.is_seq()) {
+        size_t index = 0;
+        const auto parsed = std::from_chars(token.data(), token.data() + token.size(), index);
+        if (parsed.ec != std::errc{} || parsed.ptr != token.data() + token.size() || index >= node.num_children()) {
+          return ryml::ConstNodeRef{};
+        }
+        node = node[index];
+      } else {
+        return ryml::ConstNodeRef{};
+      }
+    }
+    return node;
+  };
 
   const ryml::csubstr first_part  = parts.size() > 0 ? parts[0] : ryml::csubstr{};
   const ryml::csubstr second_part = parts.size() > 1 ? parts[1] : ryml::csubstr{};
@@ -1033,8 +924,8 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
     auto left_comp  = left_components.find_child(key);
     auto right_comp = right_components.find_child(key);
 
-    auto left_value  = pointer.empty() ? left_comp : left_comp[pointer];
-    auto right_value = pointer.empty() ? right_comp : right_comp[pointer];
+    auto left_value  = resolve_pointer(left_comp, pointer);
+    auto right_value = resolve_pointer(right_comp, pointer);
 
     if (!left_value.valid() && !right_value.valid()) {
       return { false, "" };
@@ -1060,12 +951,27 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
           if (!child.has_key()) {
             continue;
           }
-          ryml::csubstr component_name = child.key();
-          auto result                  = process_component(component_name, remaining_pointer);
+          auto result = process_component(child.key(), remaining_pointer);
           if (!result.error_message.empty()) {
             return std::unexpected{ std::move(result.error_message) };
           }
-          return result.changed;
+          if (result.changed) {
+            return true;
+          }
+        }
+
+        const auto left_components = left_root["components"];
+        for (const auto child: left_components.children()) {
+          if (!child.has_key() || right_components.has_child(child.key())) {
+            continue;
+          }
+          auto result = process_component(child.key(), remaining_pointer);
+          if (!result.error_message.empty()) {
+            return std::unexpected{ std::move(result.error_message) };
+          }
+          if (result.changed) {
+            return true;
+          }
         }
       } else {
         ryml::csubstr component_name = c4::to_csubstr(second_part);
@@ -1076,8 +982,8 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
         return result.changed;
       }
     } else {
-      auto left_value  = left_root[data_pointer];
-      auto right_value = right_root[data_pointer];
+      auto left_value  = resolve_pointer(left_root, data_pointer);
+      auto right_value = resolve_pointer(right_root, data_pointer);
       if (!left_value.valid() || !right_value.valid()) {
         return true;
       }
@@ -1089,29 +995,6 @@ std::expected<bool, std::string> has_data_dependency_changed(std::string data_pa
     return false;
   } catch (const std::exception &e) {
     return std::unexpected{ std::string{ "Failed to determine data dependency: " } + e.what() };
-  }
-}
-
-/// @brief Executes find_json_keys.
-
-void find_json_keys(ryml::ConstNodeRef j, const std::string &target_key, const std::string &current_path, ryml::NodeRef paths)
-{
-  if (j.is_map()) {
-
-    for (auto it: j.children()) {
-      std::string new_path = current_path.empty() ? ryml_string(it.key()) : current_path + "." + ryml_string(it.key());
-
-      if (ryml_string(it.key()) == target_key) {
-        paths.append_child() << new_path; // Store full path to the key
-      }
-
-      find_json_keys(it, target_key, new_path, paths);
-    }
-  } else if (j.is_seq()) {
-    for (size_t i = 0; i < j.num_children(); ++i) {
-      std::string new_path = current_path + "[" + std::to_string(i) + "]";
-      find_json_keys(j[i], target_key, new_path, paths);
-    }
   }
 }
 

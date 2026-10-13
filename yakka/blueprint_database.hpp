@@ -33,6 +33,9 @@ public:
 
   ryml::Tree database;
   std::multimap<c4::csubstr, std::shared_ptr<blueprint>> blueprints;
+
+private:
+  ryml::Tree loaded_blueprints;
 };
 
 } // namespace yakka

@@ -27,7 +27,9 @@ schema &schema::operator=(schema &&) noexcept = default;
 
 /// @brief Executes schema.
 
-schema::schema(const std::string &schema_yaml) : schema_data()
+schema::schema(const std::string &schema_yaml, std::string source) :
+  schema_data(),
+  schema_source(std::move(source))
 {
   if (schema_yaml.empty()) {
 
@@ -43,7 +45,9 @@ schema::schema(const std::string &schema_yaml) : schema_data()
 
 /// @brief Executes schema.
 
-schema::schema(const std::filesystem::path &schema_path) : schema_data()
+schema::schema(const std::filesystem::path &schema_path) :
+  schema_data(),
+  schema_source(schema_path.generic_string())
 {
   const auto loaded_schema = ryml_load_file(schema_path);
 
@@ -78,7 +82,7 @@ void schema::add_schema_data(ryml::ConstNodeRef schema_data)
 
 /// @brief Executes validate.
 
-bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id)
+bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id, const std::filesystem::path &data_path)
 {
   if (!data.valid()) {
 
@@ -124,7 +128,13 @@ bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id)
   } catch (const std::exception &e) {
     parsed_schema.reset();
     validator_updated = false;
-    spdlog::error("Schema validation failed for '{}': {}", ryml_string(id), e.what());
+    if (data_path.empty()) {
+      spdlog::error("Schema processing failed for schema '{}' while validating '{}': {}. The node path in this error refers to the schema definition.",
+                    schema_source, ryml_string(id), e.what());
+    } else {
+      spdlog::error("Schema processing failed for schema '{}' while validating '{}' from '{}': {}. The node path in this error refers to the schema definition.",
+                    schema_source, ryml_string(id), data_path.generic_string(), e.what());
+    }
     return false;
   }
 }
@@ -221,8 +231,8 @@ schema::merge_strategy schema::get_merge_strategy(const ryml::Pointer &path) con
 }
 
 yakka_schema_validator::yakka_schema_validator() : 
-  yakka_component_schema(yakka_component_schema_yaml), 
-  slcc_component_schema(slcc_schema_yaml)
+  yakka_component_schema(yakka_component_schema_yaml, "yakka_component_schema_yaml in yakka/yakka_schema.hpp"),
+  slcc_component_schema(slcc_schema_yaml, "slcc_schema_yaml in yakka/slcc_schema.hpp")
 
 {
 }
@@ -244,11 +254,11 @@ bool yakka_schema_validator::validate(yakka::component *component)
 
   switch (component->type) {
   case component::YAKKA_FILE:
-    return yakka_component_schema.validate(component->root, component->id);
+    return yakka_component_schema.validate(component->root, component->id, component->file_path);
 
   case component::SLCC_FILE: {
     const std::string component_name = component->file_path.filename().generic_string();
-    return slcc_component_schema.validate(component->root, c4::to_csubstr(component_name));
+    return slcc_component_schema.validate(component->root, c4::to_csubstr(component_name), component->file_path);
   }
 
   default:

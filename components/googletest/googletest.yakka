@@ -10,3 +10,12 @@ includes:
 sources:
   - main/googletest/src/gtest_main.cc
   - main/googletest/src/gtest-all.cc
+
+supports:
+  components:
+    xcode:
+      flags:
+        cpp:
+          global:
+            # gtest-printers.h casts char8_t to char32_t, which clang warns about under C++20+
+            - -Wno-character-conversion

@@ -69,6 +69,8 @@ yakka_status target_database::load(const std::filesystem::path file_path)
         const auto blueprint_target = blueprint_entry.has_child("target") ? blueprint_entry["target"].val() : c4::csubstr{};
         const auto parent_path      = blueprint_entry.has_child("parent_path") ? blueprint_entry["parent_path"].val() : c4::csubstr{};
         match->blueprint            = std::make_shared<blueprint>(blueprint_target, blueprint_entry, parent_path);
+        if (match->blueprint->regex.has_value() && match->blueprint->regex->empty())
+          match->blueprint->regex.reset();
 
         if (blueprint_entry.has_child("task_group"))
           match->blueprint->task_group = blueprint_entry["task_group"].val();

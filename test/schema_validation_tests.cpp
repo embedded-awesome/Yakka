@@ -44,6 +44,36 @@ protected:
 // Construction
 // ---------------------------------------------------------------------------
 
+TEST_F(SchemaValidationTest, DataChoicesAcceptPathsAndTypedOptions)
+{
+  yakka::schema s{ yakka::yakka_component_schema_yaml };
+  EXPECT_TRUE(check(s,
+    "name: platform\nchoices:\n  mode:\n    description: Mode\n"
+    "    data: /settings/mode\n    options: [first, 2, true, null, {key: value}, [a, b]]\n"
+    "    default: first\n"));
+  EXPECT_TRUE(check(s,
+    "name: platform\nchoices:\n  mode:\n    description: Mode\n    exclusive: false\n"
+    "    data: /settings/mode\n    options: [first, second]\n    default: [first, second]\n"));
+  EXPECT_FALSE(check(s,
+    "name: platform\nchoices:\n  mode:\n    description: Mode\n"
+    "    data: {path: /settings/mode}\n    options: [first]\n"));
+  EXPECT_FALSE(check(s,
+    "name: platform\nchoices:\n  mode:\n    description: Mode\n"
+    "    data: settings.mode\n    options: [first]\n"));
+  EXPECT_FALSE(check(s,
+    "name: platform\nchoices:\n  mode:\n    description: Mode\n"
+    "    data: /settings/mode\n    options: []\n"));
+  EXPECT_FALSE(check(s,
+    "name: platform\nchoices:\n  mode:\n    description: Mode\n"
+    "    data: /settings/mode\n"));
+  EXPECT_FALSE(check(s,
+    "name: platform\nchoices:\n  mode:\n    description: Mode\n"
+    "    options: [first, second]\n"));
+  EXPECT_TRUE(check(s,
+    "name: platform\nchoices:\n  mode:\n    description: Mode\n"
+    "    options: [{feature: first}, {component: driver}]\n    default: {feature: first}\n"));
+}
+
 TEST_F(SchemaValidationTest, EmptySchemaAcceptsAnything)
 {
   yakka::schema s{ std::string{} };

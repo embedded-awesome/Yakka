@@ -7,7 +7,7 @@ title: Yakka file
 
     features:
       type: object
-      description: Features provided and enabled by this component
+      description: Optional features enabled by selection, requirements, or a true condition
       additionalProperties:
         type: object
         properties:
@@ -64,6 +64,10 @@ title: Yakka file
               type: string
             group:
               type: string
+            requires:
+              type: array
+              items:
+                type: string
             depends:
               type: array
             process:
@@ -85,29 +89,57 @@ title: Yakka file
           properties:
             description:
               type: string
-            features:
-              type: array
-              items:
-                type: string
-            components:
-              type: array
-              items:
-                type: string
+            exclusive:
+              type: boolean
             data:
-              type: object
-            default:
-              type: object
-              oneOf:
-                - properties:
-                    feature:
-                      type: string
-                  required:
-                    - feature
-                - properties:
-                    component:
-                      type: string
-                  required:
-                    - component
+              type: string
+              pattern: "^/"
+            options:
+              type: array
+            default: {}
+          oneOf:
+            - required: [data, options]
+              properties:
+                options:
+                  minItems: 1
+            - not:
+                required: [data]
+              properties:
+                options:
+                  items:
+                    type: object
+                    oneOf:
+                      - properties:
+                          feature:
+                            type: string
+                          label:
+                            type: string
+                          description:
+                            type: string
+                        required: [feature]
+                      - properties:
+                          component:
+                            type: string
+                          label:
+                            type: string
+                          description:
+                            type: string
+                        required: [component]
+                default:
+                  oneOf:
+                    - type: object
+                      properties:
+                        feature:
+                          type: string
+                      required: [feature]
+                    - type: object
+                      properties:
+                        component:
+                          type: string
+                      required: [component]
+                    - type: array
+                      items:
+                        type: object
 
   required: 
     - name

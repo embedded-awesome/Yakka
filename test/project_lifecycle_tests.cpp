@@ -177,7 +177,8 @@ TEST_F(ProjectLifecycleTest, ComponentFeaturesEnableOnlyTrueConditions)
   yakka::project project(*workspace, "component_features");
   project.init_project(std::vector<std::string>{ "platform" });
   ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
-  EXPECT_TRUE(project.required_features.contains("always"));
+  EXPECT_FALSE(project.required_features.contains("always"));
+  EXPECT_FALSE(project.provided_features.contains("always"));
   EXPECT_TRUE(project.required_features.contains("enabled"));
   EXPECT_TRUE(project.provided_features.contains("enabled"));
   EXPECT_FALSE(project.required_features.contains("disabled"));
@@ -187,7 +188,7 @@ TEST_F(ProjectLifecycleTest, ComponentFeaturesEnableOnlyTrueConditions)
   EXPECT_EQ(project.project_summary["data"].num_children(), 0);
   EXPECT_FALSE(project.project_summary.has_child("project_name"));
   project.generate_project_summary();
-  EXPECT_EQ(project.project_summary["features"].num_children(), 2);
+  EXPECT_EQ(project.project_summary["features"].num_children(), 1);
 }
 
 TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsSeeSettledSupportedData)
@@ -216,6 +217,237 @@ TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsSeeSettledSupportedData)
   EXPECT_TRUE(project.required_features.contains("ready"));
 }
 
+TEST_F(ProjectLifecycleTest, OptionalFeatureContributesNothingUntilSelected)
+{
+  write_component("platform",
+    "features:\n"
+    "  optional:\n"
+    "    sources: [optional.cpp]\n"
+    "    includes:\n      global: [optional_include]\n"
+    "    flags:\n      c:\n        global: [-DOPTIONAL]\n"
+    "    requires:\n      components: [driver]\n      features: [driver_ready]\n");
+  write_component("driver", "features:\n  driver_ready: {}\n");
+  workspace->local_database.scan_for_components(test_dir);
+  for (const bool selected: { false, true }) {
+    SCOPED_TRACE(selected);
+    yakka::project project(*workspace);
+    project.init_project(selected ? std::vector<std::string>{ "platform", "+optional" } : std::vector<std::string>{ "platform" });
+    ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+    EXPECT_EQ(project.required_features.contains("optional"), selected);
+    EXPECT_EQ(project.provided_features.contains("optional"), selected);
+    EXPECT_EQ(project.required_components.contains("driver"), selected);
+    EXPECT_EQ(project.provided_features.contains("driver_ready"), selected);
+    const auto platform = project.project_summary["components"]["platform"];
+    EXPECT_EQ(platform.has_child("sources"), selected);
+    EXPECT_EQ(platform.has_child("includes"), selected);
+    EXPECT_EQ(platform.has_child("flags"), selected);
+    if (selected) {
+      EXPECT_EQ(platform["sources"].num_children(), 1);
+      EXPECT_EQ(platform["includes"]["global"][0].val(), "optional_include");
+      EXPECT_EQ(platform["flags"]["c"]["global"][0].val(), "-DOPTIONAL");
+      EXPECT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+      EXPECT_EQ(platform["sources"].num_children(), 1);
+    }
+  }
+}
+
+TEST_F(ProjectLifecycleTest, OtherComponentRequirementSelectsOnlyOneArchitecture)
+{
+  write_component("toolchain",
+    "features:\n"
+    "  ARMv7-M:\n    flags:\n      c:\n        global: [-march=armv7-m]\n"
+    "  ARMv8-M:\n    flags:\n      c:\n        global: [-march=armv8-m.main]\n"
+    "choices:\n  architecture:\n    description: Architecture\n"
+    "    options:\n      - feature: ARMv7-M\n      - feature: ARMv8-M\n");
+  write_component("device", "requires:\n  features: [ARMv8-M]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "toolchain", "device" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_TRUE(project.multiple_answer_choices.empty());
+  EXPECT_FALSE(project.required_features.contains("ARMv7-M"));
+  EXPECT_FALSE(project.provided_features.contains("ARMv7-M"));
+  EXPECT_TRUE(project.provided_features.contains("ARMv8-M"));
+  const auto flags = project.project_summary["components"]["toolchain"]["flags"]["c"]["global"];
+  ASSERT_EQ(flags.num_children(), 1);
+  EXPECT_EQ(flags[0].val(), "-march=armv8-m.main");
+}
+
+TEST_F(ProjectLifecycleTest, FeatureChoiceDefaultActivatesOptionalDeclaration)
+{
+  write_component("platform",
+    "features:\n  first:\n    sources: [first.cpp]\n  second: {}\n"
+    "choices:\n  mode:\n    description: Mode\n"
+    "    options:\n      - feature: first\n      - feature: second\n"
+    "    default:\n      feature: first\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.provided_features.contains("first"));
+  EXPECT_FALSE(project.required_features.contains("second"));
+  EXPECT_EQ(project.project_summary["components"]["platform"]["sources"][0].val(), "first.cpp");
+}
+
+TEST_F(ProjectLifecycleTest, TrueConditionAppliesFeaturePayloadAndLateRequirements)
+{
+  write_component("platform",
+    "features:\n"
+    "  automatic:\n"
+    "    condition: 'true'\n"
+    "    requires:\n      components: [driver]\n      features: [optional]\n"
+    "    sources: [automatic.cpp]\n"
+    "  optional:\n    sources: [optional.cpp]\n");
+  write_component("driver");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.required_components.contains("driver"));
+  EXPECT_TRUE(project.provided_features.contains("automatic"));
+  EXPECT_TRUE(project.provided_features.contains("optional"));
+  EXPECT_EQ(project.project_summary["components"]["platform"]["sources"].num_children(), 2);
+}
+
+TEST_F(ProjectLifecycleTest, ExplicitSelectionDoesNotNeedConditionInputs)
+{
+  write_component("platform",
+    "features:\n  optional:\n    condition: 'data.missing == true'\n    sources: [optional.cpp]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform", "+optional" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.provided_features.contains("optional"));
+  EXPECT_EQ(project.project_summary["components"]["platform"]["sources"][0].val(), "optional.cpp");
+}
+
+TEST_F(ProjectLifecycleTest, WarmBuildDoesNotRetainPreviouslySelectedOptionalFeature)
+{
+  write_component("platform",
+    "features:\n  optional:\n    requires:\n      components: [driver]\n"
+    "blueprints:\n  build:\n    process:\n      - echo: success\n");
+  write_component("driver");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::build_options options;
+  options.ignore_slc = true;
+  yakka::build_session session(*workspace, options);
+  const auto first = session.run({ { { "platform", "+optional", "build!" }, "optional_warm" } });
+  ASSERT_TRUE(first.front().success) << first.front().error;
+  const auto second = session.run({ { { "platform", "build!" }, "optional_warm" } });
+  ASSERT_TRUE(second.front().success) << second.front().error;
+  const auto summary = yakka::ryml_load_file(test_dir / "output/optional_warm" / yakka::project_summary_filename);
+  ASSERT_TRUE(summary.has_value());
+  EXPECT_EQ(summary->crootref()["current"]["features"].num_children(), 0);
+  EXPECT_FALSE(summary->crootref()["current"]["components"].has_child("driver"));
+}
+
+TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsCacheTemplatesAndInputVariables)
+{
+  write_component("platform",
+    "features:\n"
+    "  ready:\n"
+    "    condition: 'data.device.clock == 20 and data.device.clock > 0 and components.platform.name == \"platform\"'\n");
+  write_component("config", "device:\n  clock: 10\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace, "cached_conditions");
+  project.init_project();
+  ASSERT_TRUE(project.add_component("platform", project.component_flags));
+  ASSERT_TRUE(project.add_component("config", project.component_flags));
+
+  EXPECT_FALSE(project.evaluate_component_features());
+  ASSERT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
+  const auto key = std::make_pair(std::string("platform"), std::string("ready"));
+  ASSERT_TRUE(project.feature_conditions.contains(key));
+  const auto &condition = project.feature_conditions.at(key);
+  const auto *parsed = condition.parsed_template.get();
+  EXPECT_EQ(condition.input_variables, (std::set<std::string> { "data.device.clock", "components.platform.name" }));
+
+  for (const auto &component: project.components)
+    if (component->id == "config")
+      component->root["device"]["clock"] << 20;
+  ASSERT_TRUE(project.evaluate_component_features());
+  EXPECT_EQ(project.feature_conditions.at(key).parsed_template.get(), parsed);
+  EXPECT_TRUE(project.provided_features.contains("ready"));
+  EXPECT_EQ(project.project_summary["data"].num_children(), 0);
+}
+
+TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsRefreshInferredSubtreesWithoutDuplicates)
+{
+  for (const auto &requirements: { "", "requires:\n  data: [/device]\n", "requires:\n  data: [device]\n" }) {
+    SCOPED_TRACE(requirements);
+    write_component("platform",
+      std::string(requirements) + "device:\n"
+      "  clocks: [10]\n"
+      "features:\n"
+      "  ready:\n"
+      "    condition: 'length(data.device.clocks) == 2 and at(data.device.clocks, 1) == 20'\n");
+    write_component("config", "device:\n  clocks: [20]\n");
+    workspace->local_database.scan_for_components(test_dir);
+    yakka::project project(*workspace, "inferred_subtrees");
+    project.init_project();
+    ASSERT_TRUE(project.add_component("platform", project.component_flags));
+    EXPECT_FALSE(project.evaluate_component_features());
+    ASSERT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
+    EXPECT_FALSE(project.evaluate_component_features());
+    ASSERT_TRUE(project.add_component("config", project.component_flags));
+    ASSERT_TRUE(project.evaluate_component_features());
+    EXPECT_TRUE(project.provided_features.contains("ready"));
+  }
+}
+
+TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsReuseTemplatesWhenMissingDataArrives)
+{
+  write_component("platform",
+    "features:\n"
+    "  start:\n"
+    "    condition: 'true'\n"
+    "  ready:\n"
+    "    condition: 'data.device.clock == 20'\n");
+  write_component("config", "device:\n  clock: 20\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace, "missing_condition_input");
+  project.init_project();
+  ASSERT_TRUE(project.add_component("platform", project.component_flags));
+  ASSERT_TRUE(project.evaluate_component_features());
+  EXPECT_FALSE(project.provided_features.contains("ready"));
+  ASSERT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
+  const auto key = std::make_pair(std::string("platform"), std::string("ready"));
+  ASSERT_TRUE(project.feature_conditions.contains(key));
+  const auto *parsed = project.feature_conditions.at(key).parsed_template.get();
+
+  ASSERT_TRUE(project.add_component("config", project.component_flags));
+  ASSERT_TRUE(project.evaluate_component_features());
+  EXPECT_EQ(project.feature_conditions.at(key).parsed_template.get(), parsed);
+  EXPECT_TRUE(project.provided_features.contains("ready"));
+}
+
+TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsMergeInferredLeavesUsingSchema)
+{
+  write_component("platform",
+    "requires:\n"
+    "  components: [config]\n"
+    "device:\n"
+    "  clock: 10\n"
+    "data_schema:\n"
+    "  device:\n"
+    "    type: object\n"
+    "    properties:\n"
+    "      clock:\n"
+    "        type: integer\n"
+    "        merge: max\n"
+    "features:\n"
+    "  ready:\n"
+    "    condition: 'data.device.clock == 20'\n");
+  write_component("config", "device:\n  clock: 20\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace, "inferred_leaf_merge");
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.required_features.contains("ready"));
+}
+
 TEST_F(ProjectLifecycleTest, ComponentFeaturesRepeatResolutionWithFreshPartialData)
 {
   write_component("platform",
@@ -223,7 +455,8 @@ TEST_F(ProjectLifecycleTest, ComponentFeaturesRepeatResolutionWithFreshPartialDa
     "  data: [/items]\n"
     "items: [base]\n"
     "features:\n"
-    "  start: {}\n"
+    "  start:\n"
+    "    condition: 'true'\n"
     "  finish:\n"
     "    condition: 'data.config.ready == true'\n"
     "supports:\n"
@@ -236,7 +469,7 @@ TEST_F(ProjectLifecycleTest, ComponentFeaturesRepeatResolutionWithFreshPartialDa
     "        components: [driver]\n");
   write_component("config",
     "requires:\n"
-    "  data: [/config, /items]\n"
+    "  data: [/items]\n"
     "config:\n"
     "  ready: true\n"
     "items: [extra]\n"
@@ -338,14 +571,15 @@ TEST_F(ProjectLifecycleTest, ComponentFeatureSatisfiesAnExplicitRequirement)
   EXPECT_TRUE(project.unprovided_features.empty());
 }
 
-TEST_F(ProjectLifecycleTest, FalseComponentFeatureDoesNotSatisfyARequirement)
+TEST_F(ProjectLifecycleTest, ExplicitRequirementEnablesFeatureDespiteFalseCondition)
 {
   write_component("platform", "requires:\n  features: [ready]\nfeatures:\n  ready:\n    condition: 'false'\n");
   workspace->local_database.scan_for_components(test_dir);
   yakka::project project(*workspace, "false_requirement");
   project.init_project(std::vector<std::string>{ "platform" });
-  EXPECT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_HAS_UNRESOLVED_REQUIREMENTS);
-  EXPECT_FALSE(project.provided_features.contains("ready"));
+  EXPECT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.provided_features.contains("ready"));
+  EXPECT_TRUE(project.unprovided_features.empty());
 }
 
 TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsRejectInvalidExpressionsAndNonBooleans)
@@ -493,8 +727,7 @@ TEST_F(ProjectLifecycleTest, SaveSummaryWritesFile)
   project.generate_project_summary();
   EXPECT_NO_THROW(project.save_summary());
 
-  // The output directory for the project should exist.
-  EXPECT_TRUE(fs::exists(test_dir / "output" / "save_summary_test"));
+  EXPECT_TRUE(fs::exists(project.project_summary_file));
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +739,8 @@ TEST_F(ProjectLifecycleTest, ParseBlueprintsWithRealComponent)
   write_component("bpcomp",
     "blueprints:\n"
     "  compile!:\n"
-    "    - echo: compiled\n");
+    "    process:\n"
+    "      - echo: compiled\n");
 
   workspace->local_database.scan_for_components(test_dir);
   ASSERT_TRUE(workspace->local_database.save().has_value());
@@ -527,7 +761,8 @@ TEST_F(ProjectLifecycleTest, GenerateTargetDatabasePopulatesTargets)
   write_component("targetcomp",
     "blueprints:\n"
     "  link!:\n"
-    "    - echo: linked\n");
+    "    process:\n"
+    "      - echo: linked\n");
 
   workspace->local_database.scan_for_components(test_dir);
   ASSERT_TRUE(workspace->local_database.save().has_value());
@@ -671,6 +906,406 @@ TEST_F(ProjectLifecycleTest, BuildSessionContinuesAfterPreparationFailure)
   EXPECT_TRUE(results.back().success) << results.back().error;
 }
 
+TEST_F(ProjectLifecycleTest, BuildSessionReportsUnresolvedFeatureAndRequirementSource)
+{
+  write_component("device", "requires:\n  features: [ARMv8-M]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  const auto requests = yakka::expand_build_requests({ "device", "build!" });
+  ASSERT_TRUE(requests.has_value());
+  yakka::build_session session(*workspace);
+  const auto results = session.run(*requests);
+  ASSERT_EQ(results.size(), 1);
+  EXPECT_FALSE(results.front().success);
+  const auto &error = results.front().error;
+  EXPECT_NE(error.find("Unresolved feature 'ARMv8-M'"), std::string::npos) << error;
+  EXPECT_NE(error.find((test_dir / "device/device.yakka").generic_string()), std::string::npos) << error;
+  EXPECT_NE(error.find("/requires/features/0"), std::string::npos) << error;
+  EXPECT_NE(error.find("provides.features"), std::string::npos) << error;
+  EXPECT_EQ(error.find("state 6"), std::string::npos);
+}
+
+TEST_F(ProjectLifecycleTest, UnresolvedFeatureReportsSupportedRequirementAndCommandLine)
+{
+  write_component("device",
+    "provides:\n  features: [enable]\n"
+    "supports:\n  features:\n    enable:\n"
+    "      requires:\n        features: [{name: missing}]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "device", "+enable", "+missing" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_HAS_UNRESOLVED_REQUIREMENTS);
+  const auto error = project.evaluation_error();
+  EXPECT_NE(error.find("/supports/features/enable/requires/features/0"), std::string::npos) << error;
+  EXPECT_NE(error.find("selected on the command line"), std::string::npos) << error;
+}
+
+TEST_F(ProjectLifecycleTest, BuildSessionReportsExclusiveFeatureChoiceAndAllSources)
+{
+  write_component("toolchain",
+    "provides:\n  features: [ARMv7-M, ARMv8-M]\n"
+    "choices:\n  architecture:\n    description: MCU architecture\n"
+    "    options:\n      - feature: ARMv7-M\n      - feature: ARMv8-M\n");
+  write_component("device", "requires:\n  features: [ARMv8-M]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  const auto requests = yakka::expand_build_requests({ "toolchain", "device", "+ARMv7-M", "build!" });
+  ASSERT_TRUE(requests.has_value());
+  yakka::build_session session(*workspace);
+  const auto results = session.run(*requests);
+  ASSERT_EQ(results.size(), 1);
+  EXPECT_FALSE(results.front().success);
+  const auto &error = results.front().error;
+  EXPECT_NE(error.find("Choice 'architecture' (MCU architecture)"), std::string::npos) << error;
+  EXPECT_NE(error.find("is exclusive but has multiple selections"), std::string::npos) << error;
+  EXPECT_NE(error.find((test_dir / "toolchain/toolchain.yakka").generic_string()), std::string::npos) << error;
+  EXPECT_NE(error.find("/choices/architecture"), std::string::npos) << error;
+  EXPECT_NE(error.find("feature 'ARMv7-M'"), std::string::npos) << error;
+  EXPECT_NE(error.find("feature 'ARMv8-M'"), std::string::npos) << error;
+  EXPECT_NE(error.find((test_dir / "device/device.yakka").generic_string()), std::string::npos) << error;
+  EXPECT_NE(error.find("selected on the command line"), std::string::npos) << error;
+  EXPECT_NE(error.find("Keep exactly one option"), std::string::npos) << error;
+}
+
+TEST_F(ProjectLifecycleTest, ChoiceConflictReportsEnabledDeclarationsAndDefault)
+{
+  write_component("platform",
+    "features:\n  first:\n    condition: '\"second\" in features'\n"
+    "provides:\n  features: [second]\n"
+    "choices:\n  mode:\n    description: Mode\n"
+    "    options:\n      - feature: first\n      - feature: second\n"
+    "    default:\n      feature: second\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  ASSERT_EQ(project.multiple_answer_choices.size(), 1);
+  const auto error = project.evaluation_error();
+  EXPECT_NE(error.find("/features/first"), std::string::npos) << error;
+  EXPECT_NE(error.find("at /default"), std::string::npos) << error;
+  EXPECT_NE(error.find("/choices/mode"), std::string::npos) << error;
+  project.evaluate_choices();
+  EXPECT_EQ(project.multiple_answer_choices.size(), 1);
+}
+
+TEST_F(ProjectLifecycleTest, IncompleteChoiceReportsMixedOptionsAndFix)
+{
+  write_component("platform",
+    "choices:\n  mode:\n    description: Mode\n"
+    "    options:\n      - feature: first\n      - component: driver\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  ASSERT_EQ(project.incomplete_choices.size(), 1);
+  const auto error = project.evaluation_error();
+  EXPECT_NE(error.find("has no selection"), std::string::npos) << error;
+  EXPECT_NE(error.find("feature 'first'"), std::string::npos) << error;
+  EXPECT_NE(error.find("component 'driver'"), std::string::npos) << error;
+  EXPECT_NE(error.find("use +feature"), std::string::npos) << error;
+}
+
+TEST_F(ProjectLifecycleTest, MixedChoiceConflictReportsComponentRequirement)
+{
+  write_component("platform",
+    "requires:\n  components: [driver]\n  features: [first]\n"
+    "provides:\n  features: [first]\n"
+    "choices:\n  mode:\n    description: Mode\n    exclusive: true\n"
+    "    options:\n      - feature: first\n      - component: driver\n");
+  write_component("driver");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  ASSERT_EQ(project.multiple_answer_choices.size(), 1);
+  const auto error = project.evaluation_error();
+  EXPECT_NE(error.find("component 'driver'"), std::string::npos) << error;
+  EXPECT_NE(error.find("/requires/components/0"), std::string::npos) << error;
+}
+
+TEST_F(ProjectLifecycleTest, NonExclusiveChoiceAllowsMultipleSelectedOptions)
+{
+  write_component("platform",
+    "requires:\n  features: [first, second]\n"
+    "provides:\n  features: [first, second]\n"
+    "choices:\n  mode:\n    description: Mode\n    exclusive: false\n"
+    "    options:\n      - feature: first\n      - feature: second\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_TRUE(project.multiple_answer_choices.empty());
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceCollectsComponentValueWithoutExplicitRequirement)
+{
+  write_component("platform",
+    "logging:\n  level: debug\n"
+    "choices:\n  log_level:\n    description: Logging level\n"
+    "    data: /logging/level\n    options: [debug, info]\n    default: info\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_TRUE(project.multiple_answer_choices.empty());
+  project.generate_project_summary();
+  project.update_project_data();
+  EXPECT_EQ(project.project_summary["data"]["logging"]["level"].val(), "debug");
+  project.validate_schema();
+  EXPECT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceDefaultFeedsFeatureConditionsAndSurvivesRecollection)
+{
+  write_component("platform",
+    "choices:\n  log_level:\n    description: Logging level\n"
+    "    data: /logging/level\n    options: [debug, info]\n    default: info\n"
+    "features:\n  logging_enabled:\n    condition: 'data.logging.level == \"info\"'\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.required_features.contains("logging_enabled"));
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  for (int i = 0; i < 2; ++i) {
+    project.generate_project_summary();
+    project.update_project_data();
+    EXPECT_EQ(project.project_summary["data"]["logging"]["level"].val(), "info");
+  }
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceRequestOverridesDefaultAndIsPersistedAcrossWarmBuilds)
+{
+  write_component("platform",
+    "choices:\n  log_level:\n    description: Logging level\n"
+    "    data: /logging/level\n    options: [debug, info]\n    default: info\n"
+    "blueprints:\n  build:\n    process:\n      - echo: success\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::build_options options;
+  options.ignore_slc = true;
+  options.data = "logging: {level: debug}";
+  yakka::build_session session(*workspace, options);
+  const std::vector<yakka::build_request> requests = { { { "platform", "build!" }, "data_choice" } };
+  for (int i = 0; i < 2; ++i) {
+    const auto results = session.run(requests);
+    ASSERT_TRUE(results.front().success) << results.front().error;
+    auto saved = yakka::ryml_load_file(test_dir / "output" / "data_choice" / yakka::project_summary_filename);
+    ASSERT_TRUE(saved.has_value());
+    EXPECT_EQ(saved->crootref()["current"]["data"]["logging"]["level"].val(), "debug");
+  }
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceMissingValueReportsPathEvenForOneOption)
+{
+  write_component("platform",
+    "choices:\n  mode:\n    description: Mode\n"
+    "    data: /settings/mode\n    options: [only]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  ASSERT_EQ(project.incomplete_choices.size(), 1);
+  const auto error = project.evaluation_error();
+  EXPECT_NE(error.find("/settings/mode"), std::string::npos) << error;
+  EXPECT_NE(error.find("/choices/mode"), std::string::npos) << error;
+  EXPECT_NE(error.find("--data"), std::string::npos) << error;
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceRejectsUnknownValueInsteadOfApplyingDefault)
+{
+  write_component("platform",
+    "choices:\n  mode:\n    description: Mode\n"
+    "    data: /settings/mode\n    options: [first, second]\n    default: first\n"
+    "blueprints:\n  build:\n    process:\n      - echo: success\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::build_options options;
+  options.ignore_slc = true;
+  options.data = "settings: {mode: unknown}";
+  yakka::build_session session(*workspace, options);
+  const auto results = session.run({ { { "platform", "build!" }, "invalid_data_choice" } });
+  ASSERT_FALSE(results.front().success);
+  EXPECT_NE(results.front().error.find("invalid value"), std::string::npos) << results.front().error;
+  EXPECT_NE(results.front().error.find("/settings/mode"), std::string::npos) << results.front().error;
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceSupportsNonExclusiveArraysAndRejectsExclusiveConflicts)
+{
+  write_component("platform",
+    "settings:\n  mode: [first, second]\n"
+    "choices:\n  mode:\n    description: Mode\n"
+    "    data: /settings/mode\n    options: [first, second]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  ASSERT_EQ(project.multiple_answer_choices.size(), 1);
+  EXPECT_NE(project.evaluation_error().find("/settings/mode"), std::string::npos);
+  project.project_summary["choices"]["mode"]["exclusive"] << false;
+  project.evaluate_choices();
+  EXPECT_TRUE(project.multiple_answer_choices.empty());
+  EXPECT_TRUE(project.incomplete_choices.empty());
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceNonExclusiveDefaultArrayIsNotDuplicated)
+{
+  write_component("platform",
+    "choices:\n  mode:\n    description: Mode\n    exclusive: false\n"
+    "    data: /settings/mode\n    options: [first, second]\n    default: [first, second]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  for (int i = 0; i < 2; ++i) {
+    project.evaluate_choices();
+    EXPECT_TRUE(project.incomplete_choices.empty());
+    EXPECT_TRUE(project.multiple_answer_choices.empty());
+    EXPECT_EQ(project.project_summary["data"]["settings"]["mode"].num_children(), 2);
+  }
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceRejectsInvalidDefault)
+{
+  write_component("platform",
+    "choices:\n  mode:\n    description: Mode\n"
+    "    data: /settings/mode\n    options: [first, second]\n    default: unknown\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  EXPECT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_HAS_INVALID_COMPONENT);
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceRejectsMalformedDeclarations)
+{
+  for (const auto declaration: {
+         "data: {path: /mode}\n    options: [first]",
+         "data: mode\n    options: [first]",
+         "data: /mode\n    options: []",
+         "data: /mode",
+         "data: /mode\n    options: {first: true}" }) {
+    write_component("platform",
+      std::string("choices:\n  mode:\n    description: Mode\n    ") + declaration + "\n");
+    workspace->local_database.scan_for_components(test_dir);
+    yakka::project project(*workspace);
+    project.init_project(std::vector<std::string>{ "platform" });
+    EXPECT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_HAS_INVALID_COMPONENT);
+  }
+}
+
+TEST_F(ProjectLifecycleTest, SupportedDataChoiceDefaultsTypedValues)
+{
+  write_component("platform",
+    "requires:\n  features: [enable]\nprovides:\n  features: [enable]\n"
+    "supports:\n  features:\n    enable:\n      choices:\n"
+    "        number:\n          description: Number\n"
+    "          data: /settings/number\n          options: [2]\n          default: 2\n"
+    "        nothing:\n          description: Null\n"
+    "          data: /settings/nothing\n          options: [null]\n          default: null\n"
+    "        array:\n          description: Array\n"
+    "          data: /settings/array\n          options: [[a, b]]\n          default: [a, b]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_TRUE(project.multiple_answer_choices.empty());
+  const auto settings = project.project_summary["data"]["settings"];
+  EXPECT_EQ(settings["number"].val<int>().value(), 2);
+  EXPECT_TRUE(settings["nothing"].val_is_null());
+  EXPECT_EQ(settings["array"].num_children(), 2);
+}
+
+TEST_F(ProjectLifecycleTest, DataChoiceRequestArrayReplacesComponentSelections)
+{
+  write_component("platform",
+    "settings:\n  mode: [first, second]\n"
+    "choices:\n  mode:\n    description: Mode\n    exclusive: false\n"
+    "    data: /settings/mode\n    options: [first, second]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  auto request_data = project.project_data["request_data"];
+  request_data |= ryml::MAP;
+  ryml::parse_in_arena("settings: {mode: [second]}", request_data);
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_TRUE(project.multiple_answer_choices.empty());
+  const auto selection = project.project_summary["data"]["settings"]["mode"];
+  ASSERT_EQ(selection.num_children(), 1);
+  EXPECT_EQ(selection[0].val(), "second");
+}
+
+TEST_F(ProjectLifecycleTest, DataChoicePreservesScalarTypesAndMatchesObjectValues)
+{
+  write_component("platform",
+    "settings:\n  flag: true\n  object: {b: 2, a: 1}\n"
+    "choices:\n  flag:\n    description: Flag\n"
+    "    data: /settings/flag\n    options: [true, false]\n"
+    "  object:\n    description: Object\n"
+    "    data: /settings/object\n    options: [{a: 1, b: 2}]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
+  auto request_data = project.project_data["request_data"];
+  request_data |= ryml::MAP;
+  ryml::parse_in_arena("settings: {flag: 'true'}", request_data);
+  project.evaluate_choices();
+  EXPECT_EQ(project.current_state, yakka::project::state::PROJECT_HAS_INVALID_COMPONENT);
+  EXPECT_NE(project.evaluation_error().find("invalid value"), std::string::npos);
+}
+
+TEST_F(ProjectLifecycleTest, SupportedChoiceReportsOriginalYamlPath)
+{
+  write_component("platform",
+    "requires:\n  features: [enable, first, second]\n"
+    "provides:\n  features: [enable, first, second]\n"
+    "supports:\n  features:\n    enable:\n"
+    "      choices:\n        mode:\n          description: Mode\n"
+    "          options:\n            - feature: first\n            - feature: second\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  ASSERT_EQ(project.multiple_answer_choices.size(), 1);
+  const auto error = project.evaluation_error();
+  EXPECT_NE(error.find("/supports/features/enable/choices/mode"), std::string::npos) << error;
+}
+
+TEST_F(ProjectLifecycleTest, WarmBuildReportsChoiceSourcesFromFreshDefinitions)
+{
+  const std::string declarations =
+    "provides:\n  features: [first, second]\n"
+    "choices:\n  mode:\n    description: Mode\n"
+    "    options:\n      - feature: first\n      - feature: second\n";
+  write_component("platform", declarations + "blueprints:\n  build:\n    process:\n      - echo: success\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::build_options options;
+  options.ignore_slc = true;
+  yakka::build_session session(*workspace, options);
+  const std::vector<yakka::build_request> requests = { { { "platform", "+first", "build!" }, "warm_choices" } };
+  const auto first = session.run(requests);
+  ASSERT_TRUE(first.front().success) << first.front().error;
+  write_component("platform", declarations + "requires:\n  features: [second]\n");
+  const auto second = session.run(requests);
+  ASSERT_FALSE(second.front().success);
+  EXPECT_NE(second.front().error.find("is exclusive but has multiple selections"), std::string::npos) << second.front().error;
+  EXPECT_NE(second.front().error.find("/requires/features/0"), std::string::npos) << second.front().error;
+  EXPECT_NE(second.front().error.find("/choices/mode"), std::string::npos) << second.front().error;
+}
+
 TEST_F(ProjectLifecycleTest, BuildSessionRejectsConflictingOutputsBeforePreparation)
 {
   yakka::build_session session(*workspace);
@@ -791,9 +1426,11 @@ TEST_F(ProjectLifecycleTest, BuildSessionUsesOneSharedWorkerBudget)
     int completed = 0;
     int budget = 1;
     bool overlap = false;
+    std::vector<bool> include_project_names;
 
     void init(yakka::task_engine &engine) override
     {
+      include_project_names.push_back(engine.include_project_name_in_progress);
       engine.taskflow.emplace([this] {
         std::unique_lock lock(mutex);
         ++active;
@@ -826,9 +1463,19 @@ TEST_F(ProjectLifecycleTest, BuildSessionUsesOneSharedWorkerBudget)
       EXPECT_TRUE(result.success) << result.error;
     EXPECT_EQ(ui.completed, 3);
     EXPECT_EQ(ui.peak, budget);
+    EXPECT_EQ(ui.include_project_names, std::vector<bool>(3, true));
     if (budget > 1)
       EXPECT_TRUE(ui.overlap);
   }
+
+  const auto single_request = yakka::expand_build_requests({ "first", "build!" });
+  ASSERT_TRUE(single_request.has_value());
+  concurrency_ui ui;
+  yakka::build_session session(*workspace);
+  const auto single_result = session.run(*single_request, &ui);
+  ASSERT_EQ(single_result.size(), 1);
+  EXPECT_TRUE(single_result.front().success) << single_result.front().error;
+  EXPECT_EQ(ui.include_project_names, std::vector<bool>{ false });
 }
 
 TEST_F(ProjectLifecycleTest, BuildSessionRejectsSharedGeneratedFileClaims)

@@ -27,13 +27,11 @@ properties:
 
   features:
     type: object
-    description: Features provided and enabled by this component
-    additionalProperties:
-      type: object
-      properties:
-        condition:
-          type: string
-          minLength: 1
+    description: Optional features enabled by selection, requirements, or a true condition
+    properties:
+      condition:
+        type: string
+        minLength: 1
 
   requires:
     type: object
@@ -86,6 +84,10 @@ properties:
             type: string
           group:
             type: string
+          requires:
+            type: array
+            items:
+              type: string
           depends:
             type: array
           process:
@@ -109,46 +111,55 @@ properties:
             type: string
           exclusive:
             type: boolean
+          data:
+            type: string
+            pattern: "^/"
           options:
             type: array
-            items:
-              type: object
-              oneOf:
-                - properties:
-                    feature:
-                      type: string
-                    label:
-                      type: string
-                    description:
-                      type: string
-                  required:
-                    - feature
-                - properties:
-                    component:
-                      type: string
-                    label:
-                      type: string
-                    description:
-                      type: string
-                  required:
-                    - component
-          default:
-            oneOf:
-              - type: object
-                properties:
-                  feature:
-                    type: string
-                required:
-                  - feature
-              - type: object
-                properties:
-                  component:
-                    type: string
-                required:
-                  - component
-              - type: array
+          default: {}
+        oneOf:
+          - required: [data, options]
+            properties:
+              options:
+                minItems: 1
+          - not:
+              required: [data]
+            properties:
+              options:
                 items:
                   type: object
+                  oneOf:
+                    - properties:
+                        feature:
+                          type: string
+                        label:
+                          type: string
+                        description:
+                          type: string
+                      required: [feature]
+                    - properties:
+                        component:
+                          type: string
+                        label:
+                          type: string
+                        description:
+                          type: string
+                      required: [component]
+              default:
+                oneOf:
+                  - type: object
+                    properties:
+                      feature:
+                        type: string
+                    required: [feature]
+                  - type: object
+                    properties:
+                      component:
+                        type: string
+                    required: [component]
+                  - type: array
+                    items:
+                      type: object
 
 required: 
   - name
@@ -173,19 +184,20 @@ public:
   ~schema();
   schema(schema &&) noexcept;
   schema &operator=(schema &&) noexcept;
-  explicit schema(const std::string &schema_yaml);
+  explicit schema(const std::string &schema_yaml, std::string source = "in-memory schema");
   explicit schema(const std::filesystem::path &schema_path);
   
 
   void add_schema_data(ryml::ConstNodeRef schema_data);
   // bool validate(ryml::ConstNodeRef data, std::string id = "");
-  bool validate(ryml::ConstNodeRef data, ryml::csubstr id);
+  bool validate(ryml::ConstNodeRef data, ryml::csubstr id, const std::filesystem::path &data_path = {});
   ryml::ConstNodeRef operator[](const ryml::Pointer &path) const;
   ryml::ConstNodeRef operator[](const std::string &path) const;
   schema::merge_strategy get_merge_strategy(const ryml::Pointer &path) const;
 
 private:
   ryml::Tree schema_data;
+  std::string schema_source;
   /// Parsed form of schema_data, rebuilt lazily whenever validator_updated is false.
   std::unique_ptr<valijson::Schema> parsed_schema;
   bool validator_updated = false;
