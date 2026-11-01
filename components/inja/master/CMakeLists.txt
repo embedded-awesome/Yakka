@@ -38,6 +38,15 @@ target_include_directories(inja INTERFACE
 )
 target_compile_features(inja INTERFACE cxx_std_17)
 
+find_path(INJA_SODIUM_INCLUDE_DIR sodium/crypto_hash_sha256.h REQUIRED)
+find_library(INJA_SODIUM_LIBRARY sodium REQUIRED)
+find_path(INJA_XXHASH_INCLUDE_DIR xxhash.h
+  HINTS "${CMAKE_CURRENT_SOURCE_DIR}/../../rapidhash/v3/collisions/allcodecs"
+  REQUIRED
+)
+target_include_directories(inja INTERFACE ${INJA_SODIUM_INCLUDE_DIR} ${INJA_XXHASH_INCLUDE_DIR})
+target_link_libraries(inja INTERFACE ${INJA_SODIUM_LIBRARY})
+
 
 if(INJA_USE_EMBEDDED_JSON)
   find_package(nlohmann_json QUIET)
@@ -98,6 +107,8 @@ if(BUILD_TESTING AND INJA_BUILD_TESTS)
   add_library(single_inja INTERFACE)
   target_compile_features(single_inja INTERFACE cxx_std_17)
   target_include_directories(single_inja INTERFACE single_include)
+  target_include_directories(single_inja INTERFACE ${INJA_SODIUM_INCLUDE_DIR} ${INJA_XXHASH_INCLUDE_DIR})
+  target_link_libraries(single_inja INTERFACE ${INJA_SODIUM_LIBRARY})
 
   add_executable(single_inja_test test/test.cpp)
   target_link_libraries(single_inja_test PRIVATE single_inja)

@@ -8,6 +8,10 @@
 
 #include "test-files.cpp"
 #include "test-functions.cpp"
+#include "test-intersect.cpp"
+#include "test-keys.cpp"
+#include "test-startswith.cpp"
+#include "test-at.cpp"
 #include "test-renderer.cpp"
 #include "test-units.cpp"
 

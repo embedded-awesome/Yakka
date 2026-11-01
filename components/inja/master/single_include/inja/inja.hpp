@@ -954,6 +954,7 @@ public:
     PushBack,
     Erase,
     Unique,
+    Intersect,
     Merge,
     ToYaml,
     RemoveChild,
@@ -965,6 +966,7 @@ public:
     GroupBy,
     DictSort,
     Items,
+    Keys,
     List,
     Reverse,
     Slice,
@@ -1052,6 +1054,7 @@ private:
       {std::make_pair("push_back", 3), FunctionData {Operation::PushBack}},
       {std::make_pair("erase", 1), FunctionData {Operation::Erase}},
       {std::make_pair("unique", 1), FunctionData {Operation::Unique}},
+      {std::make_pair("intersect", 2), FunctionData {Operation::Intersect}},
       {std::make_pair("merge", 2), FunctionData {Operation::Merge}},
       {std::make_pair("to_yaml", 1), FunctionData {Operation::ToYaml}},
       {std::make_pair("remove_child", 2), FunctionData {Operation::RemoveChild}},
@@ -1076,6 +1079,7 @@ private:
         {std::make_pair("dictsort", 2), FunctionData {Operation::DictSort}},
         {std::make_pair("dictsort", 3), FunctionData {Operation::DictSort}},
         {std::make_pair("items", 1), FunctionData {Operation::Items}},
+        {std::make_pair("keys", 1), FunctionData {Operation::Keys}},
         {std::make_pair("list", 1), FunctionData {Operation::List}},
         {std::make_pair("reverse", 1), FunctionData {Operation::Reverse}},
         {std::make_pair("slice", 2), FunctionData {Operation::Slice}},
@@ -3136,6 +3140,37 @@ inline std::string htmlescape(const std::string& data) {
 
 namespace detail {
 
+inline Pointer data_path_to_pointer(const std::string& path) {
+  if (path.find('/') != std::string::npos) {
+    return Pointer(path.front() == '/' ? path : "/" + path);
+  }
+  return Pointer(DataNode::convert_dot_to_ptr(path));
+}
+
+inline ConstNodeRef resolve_at_path(ConstNodeRef value, std::string_view path) {
+  if (inja::string_view::starts_with(path, ":/")) {
+    path.remove_prefix(1);
+  }
+  const auto pointer = Pointer(path);
+  for (const auto token : pointer.tokens()) {
+    if (!value.valid()) {
+      return ConstNodeRef {};
+    }
+    if (value.is_map()) {
+      value = find_child_by_key(value, token);
+    } else if (value.is_seq()) {
+      const auto index = parse_uint(std::string_view(token.str, token.len));
+      if (!index || *index >= value.num_children()) {
+        return ConstNodeRef {};
+      }
+      value = value.child(static_cast<size_t>(*index));
+    } else {
+      return ConstNodeRef {};
+    }
+  }
+  return value;
+}
+
 inline std::string hash_input(ConstNodeRef value) {
   if (!value.valid()) {
     INJA_THROW(RenderError("hash function input is missing", SourceLocation {}));
@@ -3520,9 +3555,10 @@ class Renderer : public NodeVisitor {
     if (!value.valid() || node_is_null(value.node)) {
       return;
     }
-    if (value.node.has_children() && !value.node.is_val()) {
-      const auto emitted = ryml::as_json(*value.node.tree(), value.node.id());
-      *output_stream << emitted;
+    if (value.node.is_map() || value.node.is_seq()) {
+      ryml::Tree output_tree;
+      output_tree.duplicate_contents(value.node.tree(), value.node.id(), output_tree.root_id());
+      *output_stream << ryml::as_json(output_tree);
       return;
     }
     const std::string text = native_to_string(value);
@@ -3899,8 +3935,7 @@ class Renderer : public NodeVisitor {
         if (ptr_text.empty()) {
           data_eval_stack.emplace_back(ConstNodeRef());
         } else {
-          const auto ptr = Pointer(ptr_text);
-          data_eval_stack.emplace_back(resolve_pointer(additional_data, ptr));
+          data_eval_stack.emplace_back(detail::resolve_at_path(data_input, ptr_text));
         }
       } else {
         const auto args = get_arguments<2>(node);
@@ -3911,12 +3946,14 @@ class Renderer : public NodeVisitor {
         } else {
           const auto ptr_text = native_to_string(args[0]);
           if (!ptr_text.empty()) {
-            container = resolve_pointer(additional_data, Pointer(ptr_text));
+            container = detail::resolve_at_path(additional_data, ptr_text);
           }
         }
 
         if (!container.valid()) {
           data_eval_stack.emplace_back(ConstNodeRef());
+        } else if (const auto path = native_to_string(args[1]); inja::string_view::starts_with(path, ":/")) {
+          data_eval_stack.emplace_back(detail::resolve_at_path(container, path));
         } else if (container.is_map()) {
           const auto key = native_to_string(args[1]);
           data_eval_stack.emplace_back(find_child_by_key(container, to_csubstr(key)));
@@ -3960,12 +3997,16 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::Exists: {
       auto name = native_to_string(get_arguments<1>(node)[0]);
-      make_result(resolve_pointer(data_input, Pointer(DataNode::convert_dot_to_ptr(name))).valid());
+      make_result(resolve_pointer(data_input, detail::data_path_to_pointer(name)).valid());
     } break;
     case Op::ExistsInObject: {
       const auto args = get_arguments<2>(node);
       auto name = native_to_string(args[1]);
-      make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
+      if (name.find('/') != std::string::npos) {
+        make_result(resolve_pointer(args[0].node, detail::data_path_to_pointer(name)).valid());
+      } else {
+        make_result(find_child_by_key(args[0].node, to_csubstr(name)).valid());
+      }
     } break;
     case Op::Contains: {
       const auto args = get_arguments<2>(node);
@@ -4114,9 +4155,17 @@ class Renderer : public NodeVisitor {
     } break;
     case Op::StartsWith: {
       const auto args = get_arguments<2>(node);
-      const auto input = native_to_string(args[0]);
-      const auto prefix = native_to_string(args[1]);
-      make_result(inja::string_view::starts_with(input, prefix));
+      const auto is_string = [](const NativeNodeRef& value) {
+        return value.valid() && value.node.has_val() &&
+               (value.node.is_val_quoted() || value.kind() == NativeKind::String);
+      };
+      if (!is_string(args[0]) || !is_string(args[1])) {
+        make_result(false);
+        break;
+      }
+      const auto input = args[0].node.val();
+      const auto prefix = args[1].node.val();
+      make_result(inja::string_view::starts_with(std::string_view(input.str, input.len), std::string_view(prefix.str, prefix.len)));
     } break;
     case Op::Sha256sum: {
       const auto input = detail::hash_input(get_arguments<1>(node)[0].node);
@@ -4480,6 +4529,38 @@ class Renderer : public NodeVisitor {
       }
       data_eval_stack.emplace_back(filtered);
     } break;
+    case Op::Intersect: {
+      const auto args = get_arguments<2>(node);
+      if (!args[0].valid() || (!args[0].node.is_seq() && !args[0].node.is_val() && !args[0].node.is_keyval()) ||
+          !args[1].valid() || !args[1].node.is_seq()) {
+        INJA_THROW(RenderError("intersect() expects an array or scalar as the first argument and an array as the second",
+                               get_source_location(current_template->content, node.pos)));
+      }
+      const auto contains_value = [](ConstNodeRef sequence, ConstNodeRef value) {
+        for (const auto& child : sequence.children()) {
+          if (nodes_equal(NativeNodeRef(child), NativeNodeRef(value))) {
+            return true;
+          }
+        }
+        return false;
+      };
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      size_t last_append = NONE;
+      const auto append_if_shared = [&](ConstNodeRef value) {
+        if (contains_value(args[1].node, value) && !contains_value(result, value)) {
+          append_node(result, value, last_append);
+        }
+      };
+      if (args[0].node.is_seq()) {
+        for (const auto& value : args[0].node.children()) {
+          append_if_shared(value);
+        }
+      } else {
+        append_if_shared(args[0].node);
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
     case Op::Merge: {
       const auto args = get_arguments<2>(node);
       for (const auto& arg : args) {
@@ -4668,6 +4749,21 @@ class Renderer : public NodeVisitor {
             value.clear_key();
           }
         }
+      }
+      data_eval_stack.emplace_back(result);
+    } break;
+    case Op::Keys: {
+      const auto args = get_arguments<1>(node);
+      if (!args[0].valid() || !args[0].node.is_map()) {
+        INJA_THROW(RenderError("keys() expects a map",
+                               get_source_location(current_template->content, node.pos)));
+      }
+      auto result = tmp_sequence.append_child();
+      result |= ryml::SEQ;
+      for (const auto& item : args[0].node.children()) {
+        auto key = result.append_child();
+        key << item.key();
+        key |= ryml::VALQUO;
       }
       data_eval_stack.emplace_back(result);
     } break;

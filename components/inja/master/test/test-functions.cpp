@@ -203,6 +203,10 @@ TEST_CASE("functions") {
     CHECK(env.render("{{ exists(\"zipcode\") }}", data.rootref()) == "false");
     CHECK(env.render("{{ exists(name) }}", data.rootref()) == "false");
     CHECK(env.render("{{ exists(property) }}", data.rootref()) == "true");
+    CHECK(env.render("{{ exists(\"brother.name\") }}", data.rootref()) == "true");
+    CHECK(env.render("{{ exists(\"brother/name\") }}", data.rootref()) == "true");
+    CHECK(env.render("{{ exists(\"/brother/name\") }}", data.rootref()) == "true");
+    CHECK(env.render("{{ exists(\"/brother/mother\") }}", data.rootref()) == "false");
 
     // CHECK(env.render("{{ exists(\"keywords\") and length(keywords) > 0 }}", data) == "false");
   }
@@ -212,6 +216,9 @@ TEST_CASE("functions") {
     CHECK(env.render("{{ existsIn(brother, \"parents\") }}", data.rootref()) == "false");
     CHECK(env.render("{{ existsIn(brother, property) }}", data.rootref()) == "true");
     CHECK(env.render("{{ existsIn(brother, name) }}", data.rootref()) == "false");
+    CHECK(env.render("{{ existsIn(brother, \"daughters/0\") }}", data.rootref()) == "true");
+    CHECK(env.render("{{ existsIn(brother, \"/daughters/0\") }}", data.rootref()) == "true");
+    CHECK(env.render("{{ existsIn(brother, \"/daughters/2\") }}", data.rootref()) == "false");
     CHECK_THROWS_WITH(env.render("{{ existsIn(sister, \"lastname\") }}", data.rootref()), "[inja.exception.render_error] (at 1:13) variable 'sister' not found");
     CHECK_THROWS_WITH(env.render("{{ existsIn(brother, sister) }}", data.rootref()), "[inja.exception.render_error] (at 1:22) variable 'sister' not found");
   }

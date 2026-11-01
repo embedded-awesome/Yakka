@@ -224,12 +224,52 @@ Inside a macro, use `scope.global.<name>` to reference variables from the templa
 
 ### Functions
 
+This fork also provides the argument-only built-ins `dir`, `not_dir`,
+`parent_path`, `extension`, `quote`, `regex_escape`, `hex2dec`,
+`concatenate(args...)`, `find_json(value, key)`, `sha256sum`, `xxh64sum`, and
+`fnv1a_32`. They require no application callback registration and are available
+in both header layouts. `join` is a built-in too; it returns an empty string for
+an empty array and rejects non-array input.
+
+`intersect(left, right)` returns an array of distinct elements present in both
+arrays, preserving their order in `left` and using Inja's equality rules.
+The first argument may also be a scalar (including null), treated as a
+single-element array. The second argument must be an array; maps are not
+accepted as the first argument. Neither input is modified.
+For example, `{{ intersect([3, 1, 3, 2], [2, 3]) }}` renders `[3,2]`.
+`{{ intersect("uart", ["uart", "spi"]) }}` renders `["uart"]`; a scalar
+without a match returns `[]`.
+It can also be used as a filter: `{{ left | intersect(right) }}`.
+
+`keys(map)` returns the map's keys as an array of strings in iteration order,
+without modifying the map. An empty map returns `[]`; non-map arguments raise
+a render error. Filter syntax is supported: `{{ components | keys }}`.
+Use `{{ intersect(wanted_components, keys(components)) }}` to select component
+names present in the project summary.
+
+Hashes are lowercase hexadecimal strings: SHA-256 has 64 characters, XXH64
+(seed zero) has 16, and FNV-1a-32 has 8. Scalars use their raw text; containers
+use JSON serialization. `find_json` returns dotted map-key paths with bracketed
+array indices. Path functions perform lexical operations only; `extension`
+returns an empty string when there is no extension.
+
+The hashing built-ins require libsodium's SHA-256 headers/library and the
+xxHash header. The Yakka component declares these dependencies; CMake locates
+libsodium and xxHash (with the repository's bundled xxHash as a fallback).
+
 A few functions are implemented within the inja template syntax. They can be called with
 ```.cpp
 // Upper, lower and capitalize function, for string cases
 render("Hello {{ upper(neighbour) }}!", data); // "Hello PETER!"
 render("Hello {{ lower(neighbour) }}!", data); // "Hello peter!"
 render("Hello {{ capitalize(neighbour) }}!", data); // "Hello Peter!"
+
+// Case-sensitive prefix matching: startswith(input, prefix) returns a boolean
+render(R"({{ startswith("hello world", "hello") }})", data); // "true"
+render(R"({{ startswith("hello world", "world") }})", data); // "false"
+// An empty prefix matches any scalar string, including an empty string.
+// Returns false if either argument is not a scalar string (no implicit conversion).
+render(R"({{ startswith([1, 2], "") }})", data); // "false"
 
 // Range function, useful for loops
 render("{% for i in range(4) %}{{ loop.index1 }}{% endfor %}", data); // "1234"
@@ -273,6 +313,19 @@ render("Hello {{ default(colleague, \"my friend\") }}!", data); // "Hello my fri
 
 // Access an objects value dynamically
 render("{{ at(time, \"start\") }} to {{ time.end }}", data); // "16 to 22"
+
+// A ":/" prefix requests a nested path relative to the supplied object.
+render(R"({{ at(data, ":/toolchain/name") }})", data);
+// Dynamic paths and filter syntax work too: at(data, path), data | at(path).
+// Paths can traverse maps and array indices, e.g. ":/toolchain/targets/0".
+// A missing path returns an undefined value usable with default().
+// Ordinary keys (including dots or slashes) and numeric indices are unchanged.
+// The one-argument form evaluates its argument as a path in the main document.
+// Both "/toolchain/name" and ":/toolchain/name" are accepted.
+render(R"({{ at(":/toolchain/name") }})", data);
+// Dynamic paths work too: at(path) or path | at.
+// Template-local variables do not shadow the document being searched.
+// For template-local data, use at(local_object, key) or fetch("/local/path").
 
 // Check if a key exists in an object
 render("{{ exists(\"guests\") }}", data); // "true"
