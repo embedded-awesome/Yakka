@@ -20,3 +20,6 @@ sources:
 defines:
   local:
     - C4_NO_DEBUG_BREAK
+
+toolchain:
+  cpp_standard: c++17

@@ -1,5 +1,35 @@
 name: xcode toolchain
 
+toolchain:
+  name: xcode
+
+choices:
+  cpp_standard:
+    description: Select the C++ standard to use
+    data: '/toolchain/cpp_standard'
+    options:
+      - c++2c
+      - c++26
+      - c++23
+      - c++20
+      - c++17
+      - c++14
+      - c++11
+      - c++98
+    default: c++23
+
+  c_standard:
+    description: Select the C standard to use
+    data: '/toolchain/c_standard'
+    options:
+      - c23
+      - c18
+      - c17
+      - c11
+      - c99
+      - c90
+    default: c18
+
 flags:
   c:
     global:
@@ -13,7 +43,6 @@ flags:
     global:
       - --target=arm64-apple-darwin
       - -O3
-      - -std=c++23
       - -MD
       - -ffunction-sections
       - -fdata-sections
@@ -28,6 +57,32 @@ flags:
       - -lpthread
       - -dead_strip
       - -g
+
+data_schema:
+  toolchain:
+    properties:
+      cpp_standard:
+        merge_strategy: max
+        type: "string"
+        enum:
+          - c++2c
+          - c++26
+          - c++23
+          - c++20
+          - c++17
+          - c++14
+          - c++11
+          - c++98
+      c_standard:
+        merge_strategy: max
+        type: "string"
+        enum:
+          - c23
+          - c18
+          - c17
+          - c11
+          - c99
+          - c90
 
 tools:
   clang++: clang++
@@ -100,13 +155,23 @@ blueprints:
           - '/*/includes/global'
           - '/*/defines/global'
     process:
-      - inja: "{% for name,component in components %}
-          {% if existsIn(component, \"flags\") and existsIn(component.flags, $(1)) %}{% for flag in at(component.flags, $(1)).global %}{{flag}} {% endfor %}{%endif%}
-          {%- for include in component.includes.global %}-I{{component.directory}}/{{include}} {% endfor %}
-          {%- for define in component.defines.global %}-D{{define}} {% endfor %}
-          {%endfor%}
+      - inja: |-
+          {% for name,component in components -%}
+          {%   if existsIn(component, "flags") and existsIn(component.flags, $(1)) -%}
+          {%     for flag in at(component.flags, $(1)).global -%}
+          {{flag}}
+          {%     endfor -%}
+          {%   endif -%}
+          {%-   for include in component.includes.global -%}
+          -I{{component.directory}}/{{include}}
+          {%   endfor -%}
+          {%-   for define in component.defines.global -%}
+          -D{{render(define, component.directory)}}
+          {%   endfor -%}
+          {% endfor -%}
+          -std={% if $(1) == "cpp" %}{{ data.toolchain.cpp_standard }}{% else %}{{ data.toolchain.c_standard }}{% endif %}
           {%- for feature in features %}-D{{feature}}_FEATURE_REQUIRED {% endfor %}
-          -I{{project_output}}"
+          -I{{project_output}}
       - save: 
       
   compiler_option_files:
@@ -118,8 +183,10 @@ blueprints:
           - '/{{$(1)}}/defines/local'
     process:
       - create_directory: '{{$(0)}}'
-      - inja: "{% set component=at(components,$(1)) %}
-          {% if existsIn(component, \"flags\")%}{% for flag in at(component.flags, $(2)).local %}{{flag}} {% endfor %}{%endif%}
+      - inja: |
+          {% set component=at(components,$(1)) %}
+          {% if existsIn(component, "flags")%}{% for flag in at(component.flags, $(2)).local %}{{flag}} {% endfor %}{% endif %}
+          -std={% if $(2) == "cpp" %}{{ data.toolchain.cpp_standard }}{% else %}{{ data.toolchain.c_standard }}{% endif %}
           {% for include in component.includes.local %}-I{{component.directory}}/{{include}} {% endfor %}
-          {% for define in component.defines.local %}-D{{define}} {% endfor %}"
+          {% for define in component.defines.local %}-D{{define}} {% endfor %}
       - save:

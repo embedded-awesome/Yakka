@@ -35,6 +35,19 @@ exactly. With `regex`, the expression is rendered and matched against the **whol
 target, not a substring. Multiple blueprints can provide the same target.
 `$(0)` is the complete target; `$(1)` and later indices are regex captures.
 Dependency-only blueprints are useful as command/grouping targets.
+Exact blueprint keys use indexed lookup. Regex blueprints use the vendored PCRE2
+8-bit library, compiled once per blueprint, with full-target matching.
+Backreferences such as `(.+)/\1`, capture indices, and empty unmatched captures
+are supported. ECMAScript-style `\uNNNN` escapes and empty unmatched backreferences
+are retained; other syntax follows PCRE2 rather than `std::regex` ECMAScript.
+PCRE2 performs its own matching optimizations; JIT is not enabled.
+Invalid patterns and matching errors (including match-limit exhaustion) report
+errors rather than being treated as non-matches.
+
+Dependency rendering reuses an Inja environment and caches parsed templates for
+each blueprint database, not their rendered output. Captures, `curdir()`, the
+project summary, nested `render()` calls, and filesystem callbacks are evaluated
+for each match. Reloading the blueprint database clears the parsed-template cache.
 
 Data-producing targets must start with `:/data/`; targets under `:/components/`
 are rejected. Empty rendered target names are also rejected.
@@ -50,6 +63,38 @@ Dependencies may be:
 - A map with `data`, whose value is a pointer string or sequence of pointers.
   The colon prefix is added automatically.
 - A map with `dependency_file`, naming a rendered GCC-style `.d` file.
+- A map with `project`, whose value is a nonempty array of build arguments.
+  Each argument is rendered in the parent blueprint's context.
+- A template producing a `project` map, or a list containing project maps and
+  ordinary dependencies.
+
+```yaml
+depends:
+  - project: [link!, helper, '{{ data.toolchain }}']
+  - '{{ data.generated_dependency }}'
+```
+
+For example, `data.generated_dependency` can be
+`{project: [link!, another_helper, xcode]}`. Project arrays use the same component,
+`+feature`, command (with `!`), and matrix syntax as CLI build arguments. They are
+not shell command strings; each array entry is one argument.
+
+Sub-projects are evaluated independently in the same workspace and use the
+session's build options and worker budget. Their names and output directories
+are derived from their build arguments, just as for CLI projects. Shared requests
+are built once per session; conflicting output claims and recursive project
+dependencies are errors. All sub-project builds must finish successfully before
+the parent's task graph runs. A failed sub-project prevents parent processes from
+running, without blocking unrelated projects.
+
+Project dependencies are ordering prerequisites, not file timestamps. List any
+sub-project artifacts consumed by a file-producing blueprint as ordinary file
+dependencies as well, so artifact changes trigger rebuilding. Project dependency
+discovery and ordering are preserved on cached builds.
+
+Core Yakka parses and emits YAML with RapidYAML. Rendered filenames and project
+arguments retained by blueprint matches are copied into the blueprint database's
+tree arena; they do not reference temporary template output or parsing buffers.
 
 Data pointers use slash-separated paths, not the old dot notation:
 
@@ -86,6 +131,8 @@ tools:
 A tool entry may be a scalar command or a map with `command`. The optional
 `return_value_success` accepts an integer or sequence of integers. An accepted
 nonzero exit code is normalized to success; other codes stop execution.
+When a tool returns an unaccepted exit code, its captured stdout and stderr are
+included together in the error log.
 
 Blueprint-specific template callbacks:
 

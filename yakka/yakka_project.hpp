@@ -8,7 +8,6 @@
 #include "blueprint_database.hpp"
 #include "project_diff.hpp"
 #include "yakka_schema.hpp"
-//#include "yaml-cpp/yaml.h"
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 #include "inja.hpp"
@@ -31,6 +30,7 @@ namespace yakka {
 
 class project {
 public:
+  enum class summary_mode { evaluate, defer_evaluation };
   enum class state {
     PROJECT_HAS_UNKNOWN_COMPONENTS,
     PROJECT_HAS_REMOTE_COMPONENTS,
@@ -51,13 +51,13 @@ public:
   void set_project_directory(const std::string path);
   void init_project(std::vector<ryml::csubstr> components, std::vector<ryml::csubstr> features, std::unordered_set<ryml::csubstr> commands = {});
   void init_project(const std::string build_string);
-  void init_project(const std::vector<std::string> build_string_list);
-  void init_project();
+  void init_project(const std::vector<std::string> build_string_list, summary_mode mode = summary_mode::evaluate);
+  void init_project(summary_mode mode = summary_mode::evaluate);
   void process_build_string(const std::string build_string);
   void parse_project_string(const std::vector<std::string> &project_string);
   void process_requirements(std::shared_ptr<yakka::component> component, ryml::ConstNodeRef child_node);
   state evaluate_dependencies();
-  /// Evaluate component-provided features against partially collected project data.
+  /// Evaluate component features and conditional choices against partially collected project data.
   bool evaluate_component_features();
   bool add_component(std::string &component_name, component_database::flag flags);
   bool add_component(c4::csubstr component_name, component_database::flag flags);
@@ -83,6 +83,8 @@ public:
   void generate_target_database();
 
   void create_project_file();
+  /// Parse the optional project descriptor when evaluated state cannot be reused.
+  void load_project_file();
   void process_construction(indicators::ProgressBar &bar);
   void save_summary();
   void save_blueprints();
@@ -117,7 +119,13 @@ public:
   struct feature_condition {
     std::unique_ptr<inja::Template> parsed_template;
     std::set<std::string> input_variables;
+    // Set when the condition only tests string literals against 'features' with boolean operators. Such a
+    // condition can only change outcome when one of its literals becomes a feature.
+    bool features_only = false;
+    std::set<std::string> literals;
+    bool known_false = false;
   };
+  std::unordered_set<std::string> features_at_last_evaluation;
   std::map<std::pair<std::string, std::string>, feature_condition> feature_conditions;
   std::map<c4::csubstr, ryml::ConstNodeRef> feature_recommendations;
   std::unordered_set<c4::csubstr> additional_tools;
@@ -132,6 +140,7 @@ public:
   std::filesystem::path project_summary_file;
   std::filesystem::path project_file;
   fs::file_time_type project_summary_last_modified;
+  bool summary_loaded = false;
   std::vector<std::shared_ptr<yakka::component>> components;
   //yakka::component_database component_database;
   yakka::blueprint_database blueprint_database;
@@ -147,6 +156,7 @@ public:
   yakka::workspace &workspace;
 
   // Blueprint evaluation
+  template_file_inputs template_inputs;
   inja::Environment inja_environment;
   //std::multimap<std::string, std::shared_ptr<blueprint_match> > target_database;
   // std::multimap<std::string, construction_task> todo_list;
@@ -180,10 +190,14 @@ public:
   void create_config_file(const std::shared_ptr<yakka::component> component, ryml::ConstNodeRef config, const std::string &prefix, std::string instance_name);
 
 private:
+  yakka_status load_component(component &component, const fs::path &path, const fs::path &package_path = {}, ryml::NodeRef parent = {});
   std::map<std::string, std::set<std::string>> feature_sources;
   std::map<std::string, std::set<std::string>> component_sources;
   std::map<std::string, std::string> choice_sources;
   std::map<std::string, std::string> invalid_data_choices;
+  std::map<std::string, std::pair<std::shared_ptr<component>, ryml::ConstNodeRef>> pending_choices;
+  std::map<std::pair<std::string, std::string>, feature_condition> choice_conditions;
+  void register_choice(const std::shared_ptr<component> &component, ryml::ConstNodeRef choice, bool activated = false);
   void record_requirement_sources(const component &component, ryml::ConstNodeRef node);
   void collect_required_data(ryml::NodeRef data, const std::set<std::string> &input_variables = {});
 };

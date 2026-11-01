@@ -50,6 +50,34 @@ Each enabled declaration contributes its requirements, sources, includes, flags,
 and other build data to its component once, as well as activating matching
 `supports.features` rules.
 
+A feature declaration must be an object. Its optional `condition` must be a
+nonempty string; quote boolean or numeric-looking expressions in YAML.
+
+`provides.features` accepts a feature name or a list of names, not a map of
+feature settings. To advertise capabilities and apply flags only when a feature
+is selected, use:
+
+```yaml
+provides:
+  features: [cpp23, cpp20]
+supports:
+  features:
+    cpp23:
+      flags:
+        cpp:
+          global: [-std=c++23]
+    cpp20:
+      flags:
+        cpp:
+          global: [-std=c++20]
+```
+
+Alternatively, put those name-keyed declarations under top-level `features`;
+enabled declarations both provide the feature and apply their settings.
+Invalid `provides.features` values are rejected before dependency evaluation
+reads them. The diagnostic includes the component file, YAML path, and guidance
+on where to put feature-specific settings.
+
 A condition is an Inja
 expression without delimiters: Yakka wraps it in `{{` and `}}`, parses it once
 into a cached Inja template, and renders it against a separate evaluation context.
@@ -129,3 +157,64 @@ With `exclusive: false`, the path can contain an array of allowed selections, an
 Objects and arrays may themselves be allowed values; an exact match against an
 option is treated as one selection before considering an array as multiple
 selections.
+
+## Data merge strategies
+
+Use `merge_strategy` on a `data_schema` property to resolve values contributed by
+multiple components. The older `merge` spelling is also supported;
+`merge_strategy` takes precedence when both are present.
+
+Without an `enum`, `max` and `min` compare numbers. With an `enum`, its entries
+define a highest-to-lowest ranking: `max` selects the earliest entry and `min`
+selects the latest, independently of component order. This also applies to numeric
+enums; declaration order, not numeric magnitude, determines their ranking.
+Both values must belong to the enum; invalid comparisons log an error and leave
+the existing value unchanged.
+
+```yaml
+data_schema:
+  toolchain:
+    properties:
+      cpp_standard:
+        type: string
+        merge_strategy: max
+        enum: [c++26, c++23, c++20, c++17, c++14, c++11, c++98]
+```
+
+For example, contributions of `c++17` and `c++23` resolve to `c++23`. A data
+choice can separately provide the default when no component supplies a value;
+its default does not compete with contributed values.
+
+## Conditional choices
+
+Any choice can have an optional `condition`, using the same Inja expression syntax
+and evaluation context as component features:
+
+```yaml
+choices:
+  cpp_standard:
+    description: C++ language standard
+    condition: '"cpp" in features'
+    options:
+      - feature: cpp20
+      - feature: cpp23
+    default:
+      feature: cpp23
+```
+
+Without a condition, a choice participates as before. With a condition, it joins
+the project evaluation only when the expression evaluates to `true`. Until then,
+it is absent from the project summary's `choices`, does not select defaults, and
+cannot produce incomplete or conflicting selection errors. Inactive data choices
+also do not request their data paths or supply default data.
+
+Conditions work on feature/component choices and data choices, including choices
+introduced by enabled `features` declarations and matching `supports` rules.
+They must be nonempty strings producing `true` or `false`. Invalid expressions,
+missing inputs at the end of resolution, and non-boolean results fail evaluation
+with a diagnostic identifying the choice and its source.
+
+Inactive choices are rechecked as features, components, and data become available.
+Once activated, a choice remains active for the rest of that evaluation, even if
+its own default later makes its condition false. Builds reevaluate conditions
+against fresh project data, including command-line `--data`.

@@ -10,6 +10,9 @@
 namespace fs = std::filesystem;
 
 namespace yakka {
+// Bump when the serialized layout changes so stale caches are regenerated.
+inline constexpr int target_database_format = 2;
+
 class target_database {
 public:
   yakka_status load(const std::filesystem::path file_path);

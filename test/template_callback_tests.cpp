@@ -78,6 +78,66 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
+// Project Naming
+// ---------------------------------------------------------------------------
+
+TEST_F(TemplateCallbackTest, ProjectNameUsesCanonicalBuildName)
+{
+  EXPECT_EQ(render(R"({{ project_name(["link!", "app", "+debug", "board", "xcode", "+logging", "compile!"]) }})"),
+            "app-board-xcode+debug+logging");
+}
+
+TEST_F(TemplateCallbackTest, ProjectNamePreservesComponentAndFeatureOrder)
+{
+  EXPECT_EQ(render(R"({{ project_name(["board", "app", "+logging", "+debug"]) }})"),
+            "board-app+logging+debug");
+  EXPECT_EQ(render(R"({{ project_name(["+debug", "app", "app"]) }})"), "app-app+debug");
+}
+
+TEST_F(TemplateCallbackTest, ProjectNameSupportsDataArraysAndFilterSyntax)
+{
+  const auto data = ryml::parse_in_arena("segments: [link!, app, board, +debug]\nproject_name: parent\n");
+  EXPECT_EQ(render(R"({{ segments | project_name }}:{{ project_name }})", data.crootref()),
+            "app-board+debug:parent");
+}
+
+TEST_F(TemplateCallbackTest, ProjectNameHandlesEmptyAndCommandOnlyBuilds)
+{
+  EXPECT_EQ(render(R"({{ project_name([]) }})"), "");
+  EXPECT_EQ(render(R"({{ project_name(["link!", "compile!"]) }})"), "");
+  EXPECT_EQ(render(R"({{ project_name(["+debug", "+logging"]) }})"), "+debug+logging");
+  EXPECT_EQ(render(R"({{ project_name(["app"]) }})"), "app");
+}
+
+TEST_F(TemplateCallbackTest, ProjectNameAcceptsQuotedNumericAndBooleanComponentNames)
+{
+  EXPECT_EQ(render(R"({{ project_name(["123", "true", "null"]) }})"), "123-true-null");
+}
+
+TEST_F(TemplateCallbackTest, ProjectNameRejectsInvalidArgumentTypes)
+{
+  for (const auto input: { R"("app")", "null", "123", "true", "{}", "[null]", "[123]", "[true]", "[{}]", "[[]]" }) {
+    SCOPED_TRACE(input);
+    EXPECT_THROW(env.render(std::string("{{ project_name(") + input + ") }}", empty_data), std::invalid_argument);
+  }
+}
+
+TEST_F(TemplateCallbackTest, ProjectNameRejectsInvalidBuildSegments)
+{
+  for (const auto input: { R"([""])", R"(["../app"])", R"(["[board"])", R"(["app", "[a, b]"])" }) {
+    SCOPED_TRACE(input);
+    EXPECT_THROW(env.render(std::string("{{ project_name(") + input + ") }}", empty_data), std::invalid_argument);
+  }
+  EXPECT_EQ(render(R"({{ project_name(["app", "[board]"]) }})"), "app-board");
+}
+
+TEST_F(TemplateCallbackTest, ProjectNameRequiresOneArgument)
+{
+  EXPECT_THROW(env.parse(R"({{ project_name() }})"), inja::ParserError);
+  EXPECT_THROW(env.parse(R"({{ project_name(["app"], ["board"]) }})"), inja::ParserError);
+}
+
+// ---------------------------------------------------------------------------
 // A8-001 – Path Operations
 // ---------------------------------------------------------------------------
 

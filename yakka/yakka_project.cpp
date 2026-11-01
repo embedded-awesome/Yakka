@@ -6,6 +6,7 @@
 #include "yakka.hpp"
 #include "yakka_project.hpp"
 #include "yakka_schema.hpp"
+#include "file_check.hpp"
 #include "utilities.hpp"
 
 #include "spdlog/spdlog.h"
@@ -27,47 +28,111 @@ namespace yakka {
 using namespace std::chrono_literals;
 
 namespace {
-bool choice_values_equal(ryml::ConstNodeRef left, ryml::ConstNodeRef right)
-{
-  if (left.is_map() != right.is_map() || left.is_seq() != right.is_seq())
-    return false;
-  if (left.is_container()) {
-    if (left.num_children() != right.num_children())
-      return false;
-    size_t index = 0;
-    for (const auto child: left.children()) {
-      if (left.is_map()) {
-        if (!right.has_child(child.key()) || !choice_values_equal(child, right[child.key()]))
-          return false;
-      } else if (!choice_values_equal(child, right[index++])) {
-        return false;
-      }
-    }
-    return true;
-  }
-  ryml::Tree left_value, right_value;
-  left_value.duplicate_contents(left.tree(), left.id(), left_value.root_id());
-  right_value.duplicate_contents(right.tree(), right.id(), right_value.root_id());
-  return ryml::emitrs_json<std::string>(left_value) == ryml::emitrs_json<std::string>(right_value);
-}
-
 bool data_choice_allows(ryml::ConstNodeRef choice, ryml::ConstNodeRef value)
 {
   for (const auto option: choice["options"].children())
-    if (choice_values_equal(option, value))
+    if (node_values_equal(option, value))
       return true;
   return false;
 }
 
 class condition_input_visitor : public inja::StatisticsVisitor {
+  using Op = inja::FunctionStorage::Operation;
+
   void visit(const inja::DataNode &node) override
   {
     input_variables.insert(node.name);
   }
 
+  void visit(const inja::LiteralNode &node) override
+  {
+    const auto text = node.text;
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"')
+      literals.insert(std::string(text.substr(1, text.size() - 2)));
+  }
+
+  void visit(const inja::FunctionNode &node) override
+  {
+    switch (node.operation) {
+      case Op::Not:
+      case Op::And:
+      case Op::Or:
+      case Op::In:
+        break;
+      default:
+        boolean_membership_only = false;
+    }
+    for (const auto &argument: node.arguments)
+      argument->accept(*this);
+  }
+
 public:
   std::set<std::string> input_variables;
+  std::set<std::string> literals;
+  bool boolean_membership_only = true;
+
+  bool features_only() const
+  {
+    return boolean_membership_only && input_variables.size() == 1 && input_variables.contains("features");
+  }
 };
+
+// Evaluates a condition that only combines '"X" in features' tests with and/or/not, using set lookups instead of
+// rendering. Returns nullopt for any construct it does not recognise so the caller can fall back to inja.
+static std::optional<bool> evaluate_membership(const inja::AstNode &node, const std::unordered_set<std::string> &features)
+{
+  using Op = inja::FunctionStorage::Operation;
+  if (const auto *block = dynamic_cast<const inja::BlockNode *>(&node)) {
+    if (block->nodes.size() != 1)
+      return std::nullopt;
+    return evaluate_membership(*block->nodes.front(), features);
+  }
+  if (const auto *list = dynamic_cast<const inja::ExpressionListNode *>(&node))
+    return list->root ? evaluate_membership(*list->root, features) : std::nullopt;
+  if (const auto *literal = dynamic_cast<const inja::LiteralNode *>(&node)) {
+    if (literal->text == "true")
+      return true;
+    if (literal->text == "false")
+      return false;
+    return std::nullopt;
+  }
+  const auto *function = dynamic_cast<const inja::FunctionNode *>(&node);
+  if (!function)
+    return std::nullopt;
+  const auto &args = function->arguments;
+  switch (function->operation) {
+    case Op::Not: {
+      if (args.size() != 1)
+        return std::nullopt;
+      auto v = evaluate_membership(*args[0], features);
+      return v ? std::optional<bool>(!*v) : std::nullopt;
+    }
+    case Op::And:
+    case Op::Or: {
+      if (args.size() != 2)
+        return std::nullopt;
+      auto a = evaluate_membership(*args[0], features);
+      auto b = evaluate_membership(*args[1], features);
+      if (!a || !b)
+        return std::nullopt;
+      return function->operation == Op::And ? (*a && *b) : (*a || *b);
+    }
+    case Op::In: {
+      if (args.size() != 2)
+        return std::nullopt;
+      const auto *literal = dynamic_cast<const inja::LiteralNode *>(args[0].get());
+      const auto *data    = dynamic_cast<const inja::DataNode *>(args[1].get());
+      if (!literal || !data || data->name != "features")
+        return std::nullopt;
+      const auto text = literal->text;
+      if (text.size() < 2 || text.front() != '"' || text.back() != '"' || text.find('\\') != std::string_view::npos)
+        return std::nullopt;
+      return features.contains(std::string(text.substr(1, text.size() - 2)));
+    }
+    default:
+      return std::nullopt;
+  }
+}
 
 std::string source_location(const component &component, ryml::ConstNodeRef node)
 {
@@ -132,7 +197,7 @@ void add_tool_entry(ryml::ConstNodeRef child, ryml::NodeRef project_summary, inj
   spdlog::error("Tool '{}' in component '{}' is missing a 'command' entry", ryml_string(child.key()), component_path.string());
 }
 
-/// @brief Records the source file timestamp and content hash so the next run can detect changes cheaply.
+/// @brief Records source metadata using the compiled file-check policy.
 void record_component_file_state(ryml::NodeRef component_node, const std::filesystem::path &component_path)
 {
   std::error_code error;
@@ -140,9 +205,12 @@ void record_component_file_state(ryml::NodeRef component_node, const std::filesy
   if (!error)
     component_node["yakka_file_timestamp"] << static_cast<int64_t>(last_modified.time_since_epoch().count());
 
-  const auto hash = project_diff::hash_file(component_path);
-  if (hash)
+  if constexpr (!use_timestamp_file_checks) {
+    const auto hash = project_diff::hash_file(component_path);
+    if (!hash)
+      throw std::runtime_error("Cannot hash component: " + component_path.generic_string());
     component_node["yakka_file_hash"] << project_diff::to_hex(*hash);
+  }
 }
 } // namespace
 
@@ -172,7 +240,7 @@ project::project(yakka::workspace &workspace, const std::string project_name) : 
   template_contributions = project_data.rootref().append_child() << ryml::key("template_contributions");
   template_contributions |= ryml::MAP;
 
-  add_common_template_commands(inja_environment);
+  add_common_template_commands(inja_environment, &template_inputs);
 }
 
 project::~project()
@@ -214,12 +282,12 @@ void project::process_build_string(const std::string word)
 
 /// @brief Executes init_project.
 
-void project::init_project(const std::vector<std::string> build_string_list)
+void project::init_project(const std::vector<std::string> build_string_list, summary_mode mode)
 {
   for (const auto &build_string: build_string_list)
 
     process_build_string(build_string);
-  init_project();
+  init_project(mode);
 }
 
 /// @brief Executes init_project.
@@ -256,7 +324,7 @@ void project::init_project(std::vector<ryml::csubstr> components, std::vector<ry
 
 /// @brief Executes init_project.
 
-void project::init_project()
+void project::init_project(summary_mode mode)
 {
   if (project_name.empty()) {
 
@@ -276,10 +344,13 @@ void project::init_project()
   if (fs::exists(project_summary_file)) {
     project_summary_last_modified = fs::last_write_time(project_summary_file);
     auto file_content             = yakka::get_file_contents<std::string>(project_summary_file);
-    if (file_content) {
-      ryml::parse_in_arena(ryml::to_csubstr(*file_content), project_data.rootref());
-      project_summary = project_data["current"];
-    }
+    if (!file_content)
+      throw std::runtime_error("Failed to read project summary: " + project_summary_file.generic_string());
+    ryml::parse_in_arena(ryml::to_csubstr(*file_content), project_data.rootref());
+    project_summary = project_data.rootref().find_child("current");
+    if (!project_summary.valid() || !project_summary.is_map())
+      throw std::runtime_error("Invalid project summary: " + project_summary_file.generic_string());
+    summary_loaded = true;
     // auto result                   = ryml_load_file(project_summary_file);
     // if (!result) {
     //   spdlog::error("Failed to load project summary file: {}", project_summary_file.generic_string());
@@ -287,8 +358,10 @@ void project::init_project()
     // }
     // project_summary = result.value().rootref();
 
-    diff.capture_baseline(project_summary);
-    detect_changed_components();
+    if (mode == summary_mode::evaluate) {
+      diff.capture_baseline(project_summary);
+      detect_changed_components();
+    }
   } else {
     fs::create_directories(output_path);
 
@@ -302,7 +375,12 @@ void project::init_project()
     project_summary["data"] |= ryml::MAP;
   }
 
-  // Check if there is a project file
+  if (mode == summary_mode::evaluate)
+    load_project_file();
+}
+
+void project::load_project_file()
+{
   if (fs::exists(project_file)) {
     auto node = ryml_load_file(project_file);
     if (!node) {
@@ -387,7 +465,7 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
   // Process provided features
   if (child_node.contains(_provides_features_pointer)) {
     auto child_node_provides = child_node["provides"]["features"];
-    if (child_node_provides.has_val()) {
+    if (child_node_provides.has_val() && !child_node_provides.val_is_null()) {
       const auto feature = child_node_provides.val();
       if (component->type == yakka::component::SLCC_FILE || component->type == yakka::component::SLCP_FILE)
         slc_provided.insert(feature);
@@ -405,17 +483,8 @@ void project::process_requirements(std::shared_ptr<yakka::component> component, 
 
   // Process choices
   if (child_node.contains("choices"))
-    for (const auto choice: child_node["choices"].children()) {
-      const auto choice_name = choice.key();
-      if (!project_summary["choices"].has_child(choice_name)) {
-        unprocessed_choices.insert(choice_name);
-        choice_sources[ryml_string(choice_name)] = source_location(*component, choice);
-        auto choices = project_summary["choices"];
-        const auto after = choices.num_children() > 0 ? choices.last_child().id() : ryml::NONE;
-        choices.tree()->duplicate(choice.tree(), choice.id(), choices.id(), after);
-        project_summary["choices"][choice_name]["parent"] << component->id;
-      }
-    }
+    for (const auto choice: child_node["choices"].children())
+      register_choice(component, choice);
 
   // Process supported components
   if (child_node.contains(_supports_components_pointer)) {
@@ -495,6 +564,50 @@ bool project::add_component(std::string &component_name, component_database::fla
   return add_component(c4::to_csubstr(component_name), flags);
 }
 
+yakka_status project::load_component(component &loaded, const fs::path &path, const fs::path &package_path, ryml::NodeRef parent)
+{
+  auto sources = project_summary["component_source_cache"];
+  sources |= ryml::MAP;
+  const auto key    = fs::absolute(path).lexically_normal().generic_string();
+  auto cached       = sources.find_child(ryml::to_csubstr(key));
+  const auto format = ryml::to_csubstr(__DATE__ " " __TIME__);
+  if (cached.valid() && cached.is_map() && cached.has_child("format") && cached["format"].val() == format && cached.has_child("path") && cached["path"].val() == ryml::to_csubstr(path.generic_string()) && cached.has_child("package")
+      && cached["package"].val() == ryml::to_csubstr(package_path.generic_string()) && cached.has_child("source") && cached["source"].is_map() && cached["source"].has_child("id") && cached.has_child("version")
+      && cached.has_child("file_check") && file_check_matches(cached["file_check"], path)) {
+    if (!parent.valid()) {
+      loaded.tree.rootref() |= ryml::MAP;
+      parent = loaded.tree.rootref();
+    }
+    merge_nodes(parent, cached["source"]);
+    loaded.root           = parent;
+    loaded.id             = loaded.root["id"].val();
+    loaded.file_path      = path;
+    loaded.package_path   = package_path;
+    loaded.component_path = path.has_parent_path() ? path.parent_path() : fs::path(".");
+    loaded.type           = component::YAKKA_FILE;
+    loaded.version        = semver::version::parse(cached["version"].val<std::string>().value());
+    spdlog::info("Reusing parsed component '{}'", path.generic_string());
+    return yakka_status::SUCCESS;
+  }
+
+  const auto status = loaded.parse_file(path, package_path, parent);
+  if (status != yakka_status::SUCCESS || loaded.type != component::YAKKA_FILE)
+    return status;
+  if (!cached.valid()) {
+    cached = sources.append_child();
+    cached.set_key_serialized(key);
+  }
+  cached.clear_children();
+  cached |= ryml::MAP;
+  cached["format"] << format;
+  cached["path"] << path.generic_string();
+  cached["package"] << package_path.generic_string();
+  cached["version"] << loaded.version.str();
+  record_file_check(cached["file_check"], path);
+  merge_nodes(cached["source"], loaded.root);
+  return status;
+}
+
 /// @brief Executes add_component.
 
 bool project::add_component(c4::csubstr component_name, component_database::flag flags)
@@ -527,7 +640,7 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
   std::shared_ptr<yakka::component> new_component = std::make_shared<yakka::component>();
   auto new_component_node                         = project_summary["components"].append_child() << ryml::key(component_id);
   new_component_node |= ryml::MAP;
-  if (new_component->parse_file(component_path, package_path, new_component_node) == yakka::yakka_status::SUCCESS) {
+  if (load_component(*new_component, component_path, package_path, new_component_node) == yakka::yakka_status::SUCCESS) {
     components.push_back(new_component);
     record_component_file_state(new_component_node, component_path);
   } else {
@@ -610,27 +723,19 @@ bool project::add_component(c4::csubstr component_name, component_database::flag
     }
 
   // Add all the provided features into the unprocessed list
-  if (new_component->root.contains(_provides_features_pointer))
-    for (const auto &f: new_component->root["provides"]["features"]) {
-      // unprocessed_features.insert(f.val());
-      provided_features.insert(f.val());
-    }
+  if (new_component->root.contains(_provides_features_pointer)) {
+    const auto provided = new_component->root["provides"]["features"];
+    if (provided.has_val() && !provided.val_is_null())
+      provided_features.insert(provided.val());
+    else if (provided.is_seq())
+      for (const auto &f: provided)
+        provided_features.insert(f.val());
+  }
 
   // Add all the component choices to the global choice list
   if (new_component->root.contains("choices"))
-    for (auto choice: new_component->root["choices"].children()) {
-      const auto choice_name = choice.key();
-      if (!project_summary["choices"].contains(choice_name)) {
-        unprocessed_choices.insert(choice_name);
-        choice_sources[ryml_string(choice_name)] = source_location(*new_component, choice);
-        choice.duplicate(project_summary["choices"], project_summary["choices"].last_child());
-        // auto new_choice = project_summary["choices"].append_child();
-        // new_choice |= ryml::MAP;
-        // new_choice.set_key_serialized(choice_name);
-        // new_choice.set_val_serialized(choice.val());
-        project_summary["choices"][choice_name]["parent"] << new_component->id;
-      }
-    }
+    for (const auto choice: new_component->root["choices"].children())
+      register_choice(new_component, choice);
 
   if (new_component->root.contains(_replaces_components_pointer)) {
     const auto &replaced = new_component->root["replaces"]["components"].val();
@@ -703,6 +808,24 @@ bool project::add_feature(c4::csubstr &feature_name)
     }
 
   return true;
+}
+
+void project::register_choice(const std::shared_ptr<component> &component, ryml::ConstNodeRef choice, bool activated)
+{
+  const auto name = choice.key();
+  if (project_summary["choices"].has_child(name))
+    return;
+  const auto source = source_location(*component, choice);
+  if (choice.has_child("condition") && !activated) {
+    pending_choices.insert_or_assign(source, std::make_pair(component, choice));
+    return;
+  }
+  unprocessed_choices.insert(name);
+  choice_sources[ryml_string(name)] = source;
+  auto choices = project_summary["choices"];
+  const auto after = choices.num_children() > 0 ? choices.last_child().id() : ryml::NONE;
+  choices.tree()->duplicate(choice.tree(), choice.id(), choices.id(), after);
+  project_summary["choices"][name]["parent"] << component->id;
 }
 
 /// @brief Executes process_choice.
@@ -859,6 +982,9 @@ project::state project::evaluate_dependencies()
       unprovided_features.clear();
       activated_component_features.clear();
       feature_conditions.clear();
+      pending_choices.clear();
+      choice_conditions.clear();
+      features_at_last_evaluation.clear();
       feature_recommendations.clear();
       feature_sources.clear();
       component_sources.clear();
@@ -1024,28 +1150,60 @@ bool project::evaluate_component_features()
   for (const auto &c: components)
     if (c->type == component::YAKKA_FILE && c->root.has_child("features"))
       has_features = true;
-  if (!has_features)
+  if (!has_features && pending_choices.empty())
     return false;
 
-  ryml::Tree evaluation_data;
-  auto context = evaluation_data.rootref();
-  context |= ryml::MAP;
-  context["project_name"] << project_name;
-  context["project_file"] << project_file.string();
-  context["project_output"] << output_path.generic_string();
-  context["host"] |= ryml::MAP;
-  context["host"]["name"] << host_os_string;
-  workspace.summary["configuration"].duplicate(context, context.last_child());
-  project_summary["choices"].duplicate(context, context.last_child());
-  context["components"] |= ryml::MAP;
-  for (const auto &c: components)
-    c->root.duplicate(context["components"], context["components"].last_child());
-  context["features"] |= ryml::SEQ;
-  for (const auto &f: required_features)
-    context["features"].append_child() << f;
-
   std::vector<std::pair<c4::csubstr, c4::csubstr>> enabled;
+  std::vector<std::pair<std::shared_ptr<component>, ryml::ConstNodeRef>> enabled_choices;
   std::vector<std::string> errors;
+
+  // Features added since the previous evaluation; conditions that only test feature membership are re-rendered
+  // only when one of the features they mention has been added.
+  std::unordered_set<std::string> added_features;
+  for (const auto &f: required_features) {
+    auto name = ryml_string(f);
+    if (!features_at_last_evaluation.contains(name))
+      added_features.insert(std::move(name));
+  }
+
+  struct candidate {
+    std::shared_ptr<yakka::component> component;
+    ryml::ConstNodeRef declaration;
+    feature_condition *condition;
+    bool is_choice = false;
+  };
+  std::vector<candidate> candidates;
+  bool needs_components = false;
+  const auto prepare_condition = [&](const std::shared_ptr<component> &c, ryml::ConstNodeRef declaration,
+                                     auto &cache, const std::string &name, bool is_choice) {
+    const auto condition = declaration["condition"];
+    if (!condition.has_val() || condition.val_is_null())
+      throw std::runtime_error("condition must be a string expression");
+    const auto key = std::make_pair(ryml_string(c->id), name);
+    const auto expression = "{{" + ryml_string(condition.val()) + "}}";
+    auto cached = cache.find(key);
+    if (cached == cache.end() || cached->second.parsed_template->content != expression) {
+      // Keep the source at a stable address: AST literals hold views into it.
+      auto parsed = std::unique_ptr<inja::Template>(new inja::Template(inja_environment.parse(expression)));
+      condition_input_visitor visitor;
+      parsed->root.accept(visitor);
+      const bool features_only = visitor.features_only();
+      feature_condition entry { std::move(parsed), std::move(visitor.input_variables) };
+      entry.features_only = features_only;
+      entry.literals = std::move(visitor.literals);
+      cached = cache.insert_or_assign(key, std::move(entry)).first;
+    }
+    auto &entry = cached->second;
+    if (entry.features_only && entry.known_false
+        && std::none_of(entry.literals.begin(), entry.literals.end(), [&](const std::string &l) {
+             return added_features.contains(l);
+           }))
+      return;
+    for (const auto &v: entry.input_variables)
+      if (v == "components" || v.starts_with("components."))
+        needs_components = true;
+    candidates.push_back({ c, declaration, &entry, is_choice });
+  };
   for (const auto &c: components) {
     if (c->type != component::YAKKA_FILE || !c->root.has_child("features"))
       continue;
@@ -1061,44 +1219,102 @@ bool project::evaluate_component_features()
       try {
         if (!feature.is_map())
           throw std::runtime_error("feature declaration must be an object");
-        const bool selected = required_features.contains(feature.key());
-        if (!selected && !feature.has_child("condition"))
+        if (required_features.contains(feature.key())) {
+          enabled.push_back(identity);
           continue;
-        if (!selected && feature.has_child("condition")) {
-          const auto condition = feature["condition"];
-          if (!condition.has_val() || condition.val_is_null())
-            throw std::runtime_error("condition must be a string expression");
-          const auto key = std::make_pair(ryml_string(c->id), ryml_string(feature.key()));
-          const auto expression = "{{" + ryml_string(condition.val()) + "}}";
-          auto cached = feature_conditions.find(key);
-          if (cached == feature_conditions.end() || cached->second.parsed_template->content != expression) {
-            // Keep the source at a stable address: AST literals hold views into it.
-            auto parsed = std::unique_ptr<inja::Template>(new inja::Template(inja_environment.parse(expression)));
-            condition_input_visitor visitor;
-            parsed->root.accept(visitor);
-            cached = feature_conditions.insert_or_assign(key, feature_condition { std::move(parsed), std::move(visitor.input_variables) }).first;
-          }
-          collect_required_data(context["data"], cached->second.input_variables);
-          const auto result = inja_environment.render(*cached->second.parsed_template, context);
-          if (result == "false")
-            continue;
-          if (result != "true")
-            throw std::runtime_error("condition must evaluate to true or false, got '" + result + "'");
         }
-        enabled.push_back(identity);
+        if (!feature.has_child("condition"))
+          continue;
+        prepare_condition(c, feature, feature_conditions, ryml_string(feature.key()), false);
       } catch (const std::exception &e) {
         errors.push_back("Component '" + ryml_string(c->id) + "', feature '" + ryml_string(feature.key()) + "': " + e.what());
       }
     }
   }
 
-  // A newly enabled feature may supply data needed by another condition in the next pass.
-  if (enabled.empty() && !errors.empty()) {
+  for (const auto &[source, declaration]: pending_choices) {
+    const auto &[c, choice] = declaration;
+    if (project_summary["choices"].has_child(choice.key()))
+      continue;
+    try {
+      prepare_condition(c, choice, choice_conditions, source, true);
+    } catch (const std::exception &e) {
+      errors.push_back("Choice '" + ryml_string(choice.key()) + "' in " + source + ": " + e.what());
+    }
+  }
+
+  features_at_last_evaluation.clear();
+  for (const auto &f: required_features)
+    features_at_last_evaluation.insert(ryml_string(f));
+
+  if (!candidates.empty()) {
+    ryml::Tree evaluation_data;
+    auto context = evaluation_data.rootref();
+    context |= ryml::MAP;
+    context["project_name"] << project_name;
+    context["project_file"] << project_file.string();
+    context["project_output"] << output_path.generic_string();
+    context["host"] |= ryml::MAP;
+    context["host"]["name"] << host_os_string;
+    workspace.summary["configuration"].duplicate(context, context.last_child());
+    project_summary["choices"].duplicate(context, context.last_child());
+    context["components"] |= ryml::MAP;
+    if (needs_components)
+      for (const auto &c: components)
+        c->root.duplicate(context["components"], context["components"].last_child());
+    context["features"] |= ryml::SEQ;
+    for (const auto &f: required_features)
+      context["features"].append_child() << f;
+
+    for (auto &[c, declaration, entry, is_choice]: candidates) {
+      const auto enable = [&] {
+        if (is_choice)
+          enabled_choices.emplace_back(c, declaration);
+        else
+          enabled.emplace_back(c->id, declaration.key());
+      };
+      try {
+        if (entry->features_only) {
+          if (const auto result = evaluate_membership(entry->parsed_template->root, features_at_last_evaluation)) {
+            if (*result)
+              enable();
+            else
+              entry->known_false = true;
+            continue;
+          }
+        }
+        bool needs_data = false;
+        for (const auto &v: entry->input_variables)
+          if (v == "data" || v.starts_with("data."))
+            needs_data = true;
+        if (needs_data)
+          collect_required_data(context["data"], entry->input_variables);
+        const auto result = inja_environment.render(*entry->parsed_template, context);
+        if (result == "false") {
+          entry->known_false = true;
+          continue;
+        }
+        if (result != "true")
+          throw std::runtime_error("condition must evaluate to true or false, got '" + result + "'");
+        enable();
+      } catch (const std::exception &e) {
+        if (is_choice)
+          errors.push_back("Choice '" + ryml_string(declaration.key()) + "' in " + source_location(*c, declaration) + ": " + e.what());
+        else
+          errors.push_back("Component '" + ryml_string(c->id) + "', feature '" + ryml_string(declaration.key()) + "': " + e.what());
+      }
+    }
+  }
+
+  // Newly enabled features or choices may supply inputs needed by another condition in the next pass.
+  if (enabled.empty() && enabled_choices.empty() && !errors.empty()) {
     for (const auto &error: errors)
-      spdlog::error("Feature condition error: {}", error);
+      spdlog::error("Feature/choice condition error: {}", error);
     current_state = state::PROJECT_HAS_INVALID_COMPONENT;
     return false;
   }
+  for (const auto &[c, choice]: enabled_choices)
+    register_choice(c, choice, true);
   for (auto &[component_id, feature]: enabled) {
     const bool selected = required_features.contains(feature);
     if (!selected)
@@ -1113,7 +1329,7 @@ bool project::evaluate_component_features()
       if (c->id == component_id)
         process_requirements(c, c->root["features"][feature]);
   }
-  return !enabled.empty();
+  return !enabled.empty() || !enabled_choices.empty();
 }
 
 /// @brief Executes evaluate_choices.
@@ -1511,7 +1727,8 @@ void project::collect_required_data(ryml::NodeRef data, const std::set<std::stri
         // Pointer seeds borrow their final key; the requested paths are temporary.
         if (!pointer.empty())
           data.at(pointer).set_key_serialized(pointer[pointer.size() - 1]);
-        json_node_merge(pointer, data.at(pointer), component_node);
+        auto destination = data.at(pointer);
+        destination.tree()->duplicate_contents(component_node.tree(), component_node.id(), destination.id());
       } else {
         json_node_merge(pointer, data.at(pointer), component_node, &data_schema);
       }
@@ -1978,7 +2195,7 @@ void project::add_additional_tool(const std::filesystem::path component_path)
   // Load component
 
   auto tool_component = std::make_shared<component>();
-  auto result         = tool_component->parse_file(component_path);
+  auto result         = load_component(*tool_component, component_path);
   if (result != yakka_status::SUCCESS)
     return;
 

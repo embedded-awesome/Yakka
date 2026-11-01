@@ -1,7 +1,6 @@
 #pragma once
 
 #include "yakka_component.hpp"
-#include "yaml-cpp/yaml.h"
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 // #include <ryml/json-schema.hpp>
@@ -20,6 +19,24 @@ namespace yakka {
 const std::string yakka_component_schema_yaml = R"(
 title: Yakka file
 type: object
+definitions:
+  provides:
+    type: object
+    properties:
+      features:
+        type: [string, array, 'null']
+        minLength: 1
+        items:
+          type: string
+          minLength: 1
+  choice_conditions:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        condition:
+          type: string
+          minLength: 1
 properties:
   name:
     description: Name
@@ -28,10 +45,16 @@ properties:
   features:
     type: object
     description: Optional features enabled by selection, requirements, or a true condition
-    properties:
-      condition:
-        type: string
-        minLength: 1
+    additionalProperties:
+      type: object
+      properties:
+        provides:
+          $ref: '#/definitions/provides'
+        choices:
+          $ref: '#/definitions/choice_conditions'
+        condition:
+          type: string
+          minLength: 1
 
   requires:
     type: object
@@ -52,6 +75,9 @@ properties:
         items:
           type: [string, object]
 
+  provides:
+    $ref: '#/definitions/provides'
+
   supports:
     type: object
     description: Supporting relationships
@@ -62,12 +88,22 @@ properties:
         patternProperties:
           '.*':
             type: object
+            properties:
+              provides:
+                $ref: '#/definitions/provides'
+              choices:
+                $ref: '#/definitions/choice_conditions'
       components:
         type: object
         description: Collection of components
         patternProperties:
           '.*':
             type: object
+            properties:
+              provides:
+                $ref: '#/definitions/provides'
+              choices:
+                $ref: '#/definitions/choice_conditions'
 
   blueprints:
     type: object
@@ -109,6 +145,9 @@ properties:
         properties:
           description:
             type: string
+          condition:
+            type: string
+            minLength: 1
           exclusive:
             type: boolean
           data:
@@ -170,8 +209,8 @@ class schema {
 public:
   enum class merge_strategy {
     Default,   // Default behavior (convert multipel scalar values to arrays, merge objects and arrays)
-    Max,       // choose the larger numeric value
-    Min,       // choose the smaller numeric value
+    Max,       // choose the larger number or earliest enum entry
+    Min,       // choose the smaller number or latest enum entry
     Append,    // append values (e.g., arrays or strings)
     Abort,     // stop and signal an error on conflict
     Sort,      // sort arrays after merging

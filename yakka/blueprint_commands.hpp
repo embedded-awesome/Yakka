@@ -13,6 +13,9 @@
 
 namespace yakka {
 
+/// When true, 'save' leaves files whose content is unchanged untouched so their timestamps survive (restat semantics).
+inline bool save_preserves_unchanged_files = false;
+
 typedef std::function<yakka::process_return(std::string, ryml::ConstNodeRef, std::string, ryml::ConstNodeRef, ryml::NodeRef, inja::Environment &)> blueprint_command;
 
 extern const std::map<const std::string, const blueprint_command> blueprint_commands;

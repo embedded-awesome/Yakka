@@ -1,9 +1,9 @@
 #pragma once
 
-#include "yaml-cpp/yaml.h"
 #include "inja.hpp"
 #include "pugixml.hpp"
 #include "yakka_schema.hpp"
+#include "file_check.hpp"
 // #include "rapidyaml_pointer.hpp"
 // #include "pointer.hpp"
 
@@ -41,13 +41,15 @@ void ryml_node_merge(ryml::ConstNodeRef source, ryml::NodeRef target, const sche
 // void json_node_merge(const std::vector<std::string> &path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema* schema = nullptr);
 void json_node_merge(ryml::Pointer path, ryml::NodeRef merge_target, ryml::ConstNodeRef node, const schema* schema = nullptr);
 void merge_nodes(ryml::NodeRef dst, ryml::ConstNodeRef src);
+/// Compare YAML values recursively, ignoring map order and preserving scalar types.
+bool node_values_equal(ryml::ConstNodeRef left, ryml::ConstNodeRef right);
 
 std::pair<std::string, int> exec(const std::string &command_text, const std::string &arg_text);
 int exec(const std::string &command_text, const std::string &arg_text, std::function<void(std::string &)> function);
-bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2);
-YAML::Node yaml_path(const YAML::Node &node, std::string path);
 
 bool ryml_has_child(ryml::ConstNodeRef node, c4::csubstr key);
+/// Parse one YAML document into owned arena storage, throwing std::invalid_argument on invalid input.
+ryml::Tree ryml_parse_yaml(c4::csubstr text);
 std::expected<ryml::Tree, std::error_code> ryml_load_file(const std::filesystem::path &path);
 void ryml_save_file(const std::filesystem::path &path, ryml::ConstNodeRef node);
 void write_file_if_changed(const std::filesystem::path &path, std::string_view content);
@@ -76,7 +78,8 @@ void xml_to_json(const pugi::xml_node& node, ryml::NodeRef& target);
 
 std::expected<bool, std::string> has_data_dependency_changed(std::string data_path, ryml::ConstNodeRef left, ryml::ConstNodeRef right) noexcept;
 
-void add_common_template_commands(inja::Environment &inja_env);
+/// Register template callbacks, optionally recording filesystem inputs used during evaluation.
+void add_common_template_commands(inja::Environment &inja_env, template_file_inputs *inputs = nullptr);
 ryml::NodeRef aggregate_blueprint_data(inja::Environment &env, ryml::ConstNodeRef summary,
                                       c4::csubstr path, ryml::NodeRef output);
 

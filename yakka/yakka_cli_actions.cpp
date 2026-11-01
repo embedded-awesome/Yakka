@@ -5,6 +5,10 @@
 
 #include "yakka_cli_actions.hpp"
 #include "utilities.hpp"
+#include "project_diff.hpp"
+#include <chrono>
+#include <set>
+#include <stdexcept>
 #include <indicators/dynamic_progress.hpp>
 #include <indicators/progress_bar.hpp>
 
@@ -209,6 +213,128 @@ int serve_action(workspace &workspace, const cxxopts::ParseResult &result)
   bool server_running = false;
   yakka::start_config_server(workspace, server_running);
   return 0;
+}
+
+int benchmark_action(workspace &, const cxxopts::ParseResult &result)
+{
+  const auto arguments = result.unmatched();
+  if (arguments.size() != 1 || arguments.front().empty()) {
+    spdlog::error("Usage: yakka benchmark <project-name>");
+    return 1;
+  }
+
+  try {
+    const fs::path project_name = arguments.front();
+    if (project_name.has_parent_path() || project_name == "." || project_name == "..")
+      throw std::invalid_argument("Expected a project name, not a path");
+    const auto output_path = fs::path("output") / project_name;
+    const auto contents = get_file_contents<std::string>(output_path / "target_database.json");
+    if (!contents)
+      throw std::runtime_error("Cannot load saved target database. Build the project before benchmarking");
+    const auto database = ryml_parse_yaml(c4::to_csubstr(*contents));
+    const auto root = database.crootref();
+    const auto invalid_database = []() {
+      throw std::invalid_argument("Cannot load saved target database: invalid target/dependency structure");
+    };
+    if (!root.is_map() || !root.has_child("targets") || !root["targets"].is_seq())
+      invalid_database();
+
+    std::set<fs::path> candidates;
+    std::set<fs::path> blueprint_targets;
+    const auto add_candidate = [&](ryml::csubstr name) {
+      if (!name.empty() && name.front() != data_dependency_identifier)
+        candidates.insert(fs::absolute(fs::path(ryml_string(name))).lexically_normal());
+    };
+    for (const auto entry: root["targets"].children()) {
+      if (!entry.is_map() || !entry.has_child("target") || !entry["target"].has_val() ||
+          entry["target"].val_is_null() || entry["target"].val().empty() ||
+          !entry.has_child("matches") || !entry["matches"].is_seq())
+        invalid_database();
+      const auto target = entry["target"].val();
+      const auto matches = entry["matches"];
+      add_candidate(target);
+      if (matches.num_children() != 0)
+        blueprint_targets.insert(fs::absolute(fs::path(ryml_string(target))).lexically_normal());
+      for (const auto match: matches.children()) {
+        if (!match.is_map() || !match.has_child("dependencies") || !match["dependencies"].is_seq())
+          invalid_database();
+        for (const auto dependency: match["dependencies"].children()) {
+          if (!dependency.is_val() || dependency.val_is_null() || dependency.val().empty())
+            invalid_database();
+          add_candidate(dependency.val());
+        }
+      }
+    }
+
+    // A first build can create compiler dependency files after the target database was saved.
+    blueprint_database compiler_dependencies;
+    for (const auto &entry: fs::recursive_directory_iterator(output_path)) {
+      if (!entry.is_regular_file() || entry.path().extension() != ".d")
+        continue;
+      candidates.insert(fs::absolute(entry.path()).lexically_normal());
+      for (const auto dependency: compiler_dependencies.parse_gcc_dependency_file(entry.path().string()))
+        add_candidate(dependency);
+    }
+
+    struct file_state {
+      fs::path path;
+      fs::file_time_type timestamp;
+      uint64_t hash;
+    };
+    std::vector<file_state> files;
+    size_t skipped_targets = 0;
+    for (const auto &path: candidates) {
+      if (!fs::exists(path)) {
+        if (blueprint_targets.contains(path)) {
+          ++skipped_targets;
+          continue;
+        }
+        throw std::runtime_error("Missing file dependency: " + path.string());
+      }
+      if (!fs::is_regular_file(path)) {
+        ++skipped_targets;
+        continue;
+      }
+      const auto timestamp = fs::last_write_time(path);
+      const auto hash = project_diff::hash_file(path);
+      if (!hash)
+        throw std::runtime_error("Cannot read file dependency: " + path.string());
+      files.push_back({ path, timestamp, *hash });
+    }
+    if (files.empty())
+      throw std::runtime_error("No file dependencies found in the saved project");
+
+    size_t timestamp_changes = 0;
+    const auto timestamp_start = std::chrono::steady_clock::now();
+    for (const auto &file: files)
+      timestamp_changes += fs::last_write_time(file.path) != file.timestamp;
+    const auto timestamp_elapsed = std::chrono::steady_clock::now() - timestamp_start;
+
+    size_t hash_changes = 0;
+    const auto hash_start = std::chrono::steady_clock::now();
+    for (const auto &file: files) {
+      const auto hash = project_diff::hash_file(file.path);
+      if (!hash)
+        throw std::runtime_error("Cannot read file dependency: " + file.path.string());
+      hash_changes += *hash != file.hash;
+    }
+    const auto hash_elapsed = std::chrono::steady_clock::now() - hash_start;
+
+    const auto print_result = [&](const char *label, auto elapsed, size_t changes) {
+      const double milliseconds = std::chrono::duration<double, std::milli>(elapsed).count();
+      std::cout << fmt::format("{}: {} comparisons, {:.3f} ms total, {:.3f} us/file, {} changed\n",
+                               label, files.size(), milliseconds, milliseconds * 1000.0 / files.size(), changes);
+    };
+    std::cout << "Dependency benchmark: " << project_name.string() << "\n"
+              << "Files: " << files.size() << " (unique paths; skipped non-file targets: " << skipped_targets << ")\n"
+              << "One warm-cache pass per method; baseline capture and dependency discovery excluded.\n";
+    print_result("Timestamp", timestamp_elapsed, timestamp_changes);
+    print_result("Hash (rapidhash, full file read)", hash_elapsed, hash_changes);
+    return 0;
+  } catch (const std::exception &error) {
+    spdlog::error("Dependency benchmark failed: {}", error.what());
+    return 1;
+  }
 }
 
 // clang-format off

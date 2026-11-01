@@ -1,5 +1,5 @@
 #include "build_request.hpp"
-#include <yaml-cpp/yaml.h>
+#include "utilities.hpp"
 #include <algorithm>
 #include <cctype>
 #include <map>
@@ -79,19 +79,19 @@ std::expected<std::vector<build_request>, std::string> expand_build_requests(
     }
     if (array.back() != ']')
       return std::unexpected("Unclosed build alternatives: " + array);
+    if (array.find('[', 1) != std::string::npos || array.find(']') != array.size() - 1)
+      return std::unexpected("Nested or concatenated build alternatives: " + array);
 
     std::vector<std::string> alternatives;
     try {
-      const auto documents = YAML::LoadAll(array);
-      if (documents.size() != 1)
-        return std::unexpected("Build alternatives must contain exactly one sequence: " + array);
-      const auto sequence = documents.front();
-      if (!sequence.IsSequence() || sequence.size() == 0)
+      const auto document = ryml_parse_yaml(c4::to_csubstr(array));
+      const auto sequence = document.crootref();
+      if (!sequence.is_seq() || sequence.num_children() == 0)
         return std::unexpected("Build alternatives must be a nonempty sequence: " + array);
-      for (const auto &element: sequence) {
-        if (!element.IsScalar())
+      for (const auto &element: sequence.children()) {
+        if (!element.is_val() || element.val_is_null())
           return std::unexpected("Build alternatives must contain only components or +features: " + array);
-        auto selection = element.Scalar();
+        auto selection = ryml_string(element.val());
         if (selection.empty() || selection == "+" || selection.back() == '!' ||
             selection.find_first_of("[]") != std::string::npos ||
             std::any_of(selection.begin(), selection.end(), [](unsigned char character) { return std::isspace(character); }))
@@ -99,7 +99,7 @@ std::expected<std::vector<build_request>, std::string> expand_build_requests(
         if (std::find(alternatives.begin(), alternatives.end(), selection) == alternatives.end())
           alternatives.push_back(std::move(selection));
       }
-    } catch (const YAML::Exception &error) {
+    } catch (const std::invalid_argument &error) {
       return std::unexpected("Invalid build alternatives: " + std::string(error.what()));
     }
     if (alternatives.size() > maximum_variants / variants.size())

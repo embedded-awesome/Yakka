@@ -119,7 +119,7 @@ run_test A1-003 "Invalid action name prints Must provide guidance" \
 # "Must provide an action or a command", proving it entered the command branch)
 run_test_absent A1-004 "Blueprint command with ! enters command path (not action path)" \
   "$YAKKA" link! __nonexistent_a1004__ \
-  "Must provide an action or a command" 0
+  "Must provide an action or a command" 1
 
 echo ""
 
@@ -396,9 +396,328 @@ fi
 # A9-003: Missing component name produces actionable error on console
 run_test A9-003 "Missing component produces actionable diagnostic" \
   "$YAKKA" link! __totally_missing_comp_a9003__ \
-  "Missing|missing|unknown|Error|error|cannot|Cannot" 0
+  "Missing|missing|unknown|Error|error|cannot|Cannot" 1
+
+echo ""
+echo "=== A10: Multi-Project Builds ==="
+
+mkdir -p "$WORKDIR/matrix"
+cd "$WORKDIR/matrix" || exit 1
+cat > app.yakka <<'YAKKA'
+name: matrix application
+provides:
+  features: [debug, release, test]
+blueprints:
+  build:
+    depends: ['{{project_output}}/result.txt']
+  '{{project_output}}/result.txt':
+    process:
+      - inja: '{{project_name}}'
+      - save:
+YAKKA
+printf 'name: platform one\n' > p1.yakka
+printf 'name: platform two\n' > p2.yakka
+
+run_test A10-001 "Quoted component/feature matrices build six projects" \
+  "$YAKKA" build! app '[p1, p2]' '[+debug, +release, +test]' --jobs 2 --no-slcc \
+  'app-p2\+test: success' 0
+
+matrix_count=$(find output -name result.txt | wc -l | tr -d ' ')
+if [ "$matrix_count" -eq 6 ]; then
+  echo "PASS A10-002: Six separate matrix artifacts exist"
+  inc_pass
+else
+  echo "FAIL A10-002: Expected six artifacts, found $matrix_count"
+  inc_fail
+fi
+
+run_test A10-003 "Project-name override prefixes selected alternatives" \
+  "$YAKKA" build! app '[p1, p2]' --project-name custom --jobs 1 --no-slcc \
+  'custom-p2: success' 0
+
+run_test A10-004 "Independent matrix project succeeds after missing component" \
+  "$YAKKA" build! app '[missing, p1]' --project-name partial --no-slcc \
+  'partial-p1: success' 1
+
+run_test A10-005 "Malformed matrix is rejected before output creation" \
+  "$YAKKA" build! app '[]' --project-name invalid --no-slcc \
+  'nonempty sequence' 1
+if [ ! -d output/invalid ]; then
+  echo "PASS A10-006: Invalid matrix created no project output"
+  inc_pass
+else
+  echo "FAIL A10-006: Invalid matrix created output"
+  inc_fail
+fi
+
+run_test A10-007 "Zero shared worker budget is rejected" \
+  "$YAKKA" build! app p1 --jobs 0 --no-slcc \
+  'jobs must be greater than zero' 1
+
+run_test A10-008 "Single-project invocation retains its generated name" \
+  "$YAKKA" build! app p1 --jobs 1 --no-slcc \
+  'app-p1: success' 0
+
+run_test A10-009 "Fetch failure does not prevent an independent project" \
+  "$YAKKA" build! app '[missing, p1]' --project-name fetch_failure --fetch --no-slcc \
+  'fetch_failure-p1: success' 1
+
+run_test A10-010 "Unresolved feature fails only its own variant" \
+  "$YAKKA" build! app '[+unavailable, +debug]' --project-name feature_failure --no-slcc \
+  'feature_failure\+debug: success' 1
 
 rm -rf "$LOG_DIR"
+
+echo ""
+echo "=== A11: Ninja Engine ==="
+
+mkdir -p "$WORKDIR/ninja"
+cd "$WORKDIR/ninja" || exit 1
+cat > app.yakka <<'YAKKA'
+name: ninja application
+blueprints:
+  build:
+    depends:
+      - '{{project_output}}/out.txt'
+      - '{{project_output}}/size.txt'
+  '{{project_output}}/config.txt':
+    process:
+      - inja: 'project={{project_name}}'
+      - save:
+  '{{project_output}}/out.txt':
+    depends: ['{{project_output}}/config.txt', 'input.txt']
+    process:
+      - execute: 'cat {{project_output}}/config.txt input.txt > {{project_output}}/out.txt'
+  '{{project_output}}/size.txt':
+    depends: ['{{project_output}}/out.txt']
+    process:
+      - execute: 'wc -c < {{project_output}}/out.txt'
+      - save:
+YAKKA
+printf 'first\n' > input.txt
+
+run_test A11-001 "First build generates build.ninja and succeeds" \
+  "$YAKKA" build! app --no-slcc --engine ninja \
+  'app: success' 0
+
+if [ -f output/app/build.ninja ] && grep -q 'first' output/app/out.txt && [ -s output/app/size.txt ]; then
+  echo "PASS A11-002: Manifest and outputs exist"
+  inc_pass
+else
+  echo "FAIL A11-002: Missing build.ninja or outputs"
+  inc_fail
+fi
+
+if grep -q -- '--ninja-exec' output/app/build.ninja && grep -q '^build output/app/build.ninja | .*config.txt: yakka_regenerate' output/app/build.ninja; then
+  echo "PASS A11-003: Generate-time, native and exec-blueprint edges are emitted"
+  inc_pass
+else
+  echo "FAIL A11-003: Unexpected manifest contents"
+  inc_fail
+fi
+
+run_test A11-004 "Unchanged project is a Ninja no-op" \
+  "$YAKKA" build! app --no-slcc --engine ninja \
+  'no work to do' 0
+
+printf 'second\n' > input.txt
+run_test A11-005 "Changed input rebuilds dependents" \
+  "$YAKKA" build! app --no-slcc --engine ninja \
+  'out.txt' 0
+if grep -q 'second' output/app/out.txt && [ "$(tr -d ' \n' < output/app/size.txt)" = "$(wc -c < output/app/out.txt | tr -d ' ')" ]; then
+  echo "PASS A11-006: Native and exec-blueprint outputs were refreshed"
+  inc_pass
+else
+  echo "FAIL A11-006: Outputs were not refreshed"
+  inc_fail
+fi
+
+printf '# comment\n' >> app.yakka
+run_test A11-007 "Editing a .yakka file regenerates without rebuilding" \
+  "$YAKKA" build! app --no-slcc --engine ninja \
+  'no work to do' 0
+
+sed -i.bak 's/project={{project_name}}/name={{project_name}}/' app.yakka
+run_test A11-008 "Template change regenerates and rebuilds dependents" \
+  "$YAKKA" build! app --no-slcc --engine ninja \
+  'out.txt' 0
+if grep -q 'name=app' output/app/out.txt; then
+  echo "PASS A11-009: Generated file change propagated"
+  inc_pass
+else
+  echo "FAIL A11-009: Generated file change did not propagate"
+  inc_fail
+fi
+
+run_test A11-010 "The 'legacy' alias selects the taskflow engine" \
+  "$YAKKA" build! app --no-slcc --engine legacy \
+  'app: success' 0
+
+mkdir -p "$WORKDIR/ninja_parallel"
+cd "$WORKDIR/ninja_parallel" || exit 1
+cat > app.yakka <<YAKKA
+name: parallel application
+blueprints:
+  build:
+    depends: ['{{project_output}}/slow.txt']
+  '{{project_output}}/slow.txt':
+    process:
+      - execute: 'echo s >> $WORKDIR/ninja_parallel/trace; sleep 0.5; echo e >> $WORKDIR/ninja_parallel/trace; touch {{\$(0)}}'
+YAKKA
+printf 'name: platform one\n' > p1.yakka
+printf 'name: platform two\n' > p2.yakka
+peak_concurrency() { awk '/s/{c++; if(c>m)m=c} /e/{c--} END{print m+0}' trace; }
+
+run_test A11-011 "Multi-project Ninja builds run concurrently" \
+  "$YAKKA" build! app '[p1, p2]' --jobs 2 --no-slcc --engine ninja \
+  'app-p2: success' 0
+if [ "$(peak_concurrency)" -eq 2 ]; then
+  echo "PASS A11-012: Projects shared the job budget concurrently"
+  inc_pass
+else
+  echo "FAIL A11-012: Expected 2 concurrent commands, saw $(peak_concurrency)"
+  inc_fail
+fi
+
+rm -rf output trace
+run_test A11-013 "Multi-project Ninja builds respect --jobs 1" \
+  "$YAKKA" build! app '[p1, p2]' --jobs 1 --no-slcc --engine ninja \
+  'app-p2: success' 0
+if [ "$(peak_concurrency)" -eq 1 ]; then
+  echo "PASS A11-014: Shared job budget serialised the projects"
+  inc_pass
+else
+  echo "FAIL A11-014: Expected 1 concurrent command, saw $(peak_concurrency)"
+  inc_fail
+fi
+
+run_test A11-015 "Unchanged multi-project build is a no-op" \
+  "$YAKKA" build! app '[p1, p2]' --jobs 2 --no-slcc --engine ninja \
+  'app-p1: no work to do' 0
+
+mkdir -p "$WORKDIR/ninja_projects"
+cd "$WORKDIR/ninja_projects" || exit 1
+cat > helper.yakka <<'YAKKA'
+name: helper library
+blueprints:
+  libbuild:
+    depends: ['{{project_output}}/lib.txt']
+  '{{project_output}}/lib.txt':
+    depends: ['helper_input.txt']
+    process:
+      - execute: 'cp helper_input.txt {{project_output}}/lib.txt'
+YAKKA
+cat > parent.yakka <<'YAKKA'
+name: parent application
+blueprints:
+  build:
+    depends: ['{{project_output}}/app.txt']
+  '{{project_output}}/app.txt':
+    depends:
+      - project: [libbuild!, helper]
+      - output/helper/lib.txt
+      - ':/project_name'
+    process:
+      - execute: 'cat output/helper/lib.txt'
+      - save:
+YAKKA
+printf 'v1\n' > helper_input.txt
+
+run_test A11-016 "Project dependencies build with the Ninja engine" \
+  "$YAKKA" build! parent --no-slcc --engine ninja \
+  'parent: success' 0
+if [ -f output/helper/build.ninja ] && grep -q '^yakka_projects = helper$' output/parent/build.ninja && grep -q 'v1' output/parent/app.txt; then
+  echo "PASS A11-017: Sub-project manifest generated and built before the parent"
+  inc_pass
+else
+  echo "FAIL A11-017: Missing sub-project manifest or parent output"
+  inc_fail
+fi
+
+run_test A11-018 "Unchanged project with dependencies is a no-op" \
+  "$YAKKA" build! parent --no-slcc --engine ninja \
+  'parent: no work to do' 0
+
+printf 'v2\n' > helper_input.txt
+run_test A11-019 "Sub-project change rebuilds the parent" \
+  "$YAKKA" build! parent --no-slcc --engine ninja \
+  'parent: success' 0
+if grep -q 'v2' output/parent/app.txt; then
+  echo "PASS A11-020: Parent consumed the rebuilt sub-project artifact"
+  inc_pass
+else
+  echo "FAIL A11-020: Parent did not consume the rebuilt sub-project artifact"
+  inc_fail
+fi
+
+rm helper_input.txt
+run_test A11-021 "Failed sub-project stops the parent" \
+  "$YAKKA" build! parent --no-slcc --engine ninja \
+  "project dependency 'helper' failed" 1
+
+echo ""
+
+# -----------------------------------------------------------------------------
+# A12: Taskflow (default) engine incremental builds and no-op fast path
+# -----------------------------------------------------------------------------
+echo "--- A12: Taskflow engine (default) ---"
+
+mkdir -p "$WORKDIR/legacy_projects"
+cd "$WORKDIR/legacy_projects" || exit 1
+cp "$WORKDIR/ninja_projects/helper.yakka" "$WORKDIR/ninja_projects/parent.yakka" .
+printf 'v1\n' > helper_input.txt
+
+run_test A12-001 "Project dependencies build with the default taskflow engine" \
+  "$YAKKA" build! parent --no-slcc \
+  'parent: success' 0
+if [ -f output/parent/todolist.json ] && [ ! -f output/parent/build.ninja ]; then
+  echo "PASS A12-002: Default engine is taskflow"
+  inc_pass
+else
+  echo "FAIL A12-002: Default engine did not use taskflow"
+  inc_fail
+fi
+if python3 -c 'import json,sys; [json.load(open(f)) for f in sys.argv[1:]]' output/parent/todolist.json output/helper/todolist.json 2>/dev/null; then
+  echo "PASS A12-003: todolist.json is strict JSON"
+  inc_pass
+else
+  echo "FAIL A12-003: todolist.json is not strict JSON"
+  inc_fail
+fi
+
+# Stats are only trusted once they are older than the racy-write window
+sleep 3
+run_test A12-004 "Unchanged taskflow build succeeds and records the fast path" \
+  "$YAKKA" build! parent --no-slcc \
+  'parent: success' 0
+rm -f yakka.log
+run_test A12-005 "Unchanged taskflow build uses the fast path" \
+  "$YAKKA" build! parent --no-slcc \
+  'parent: success' 0
+if [ ! -f yakka.log ]; then
+  echo "PASS A12-006: Fast path skipped loading the workspace"
+  inc_pass
+else
+  echo "FAIL A12-006: Fast path was not used"
+  inc_fail
+fi
+
+printf 'v2\n' > helper_input.txt
+run_test A12-007 "Taskflow sub-project change rebuilds the parent" \
+  "$YAKKA" build! parent --no-slcc \
+  'parent: success' 0
+if grep -q 'v2' output/parent/app.txt; then
+  echo "PASS A12-008: Taskflow parent consumed the rebuilt sub-project artifact"
+  inc_pass
+else
+  echo "FAIL A12-008: Taskflow parent did not consume the rebuilt sub-project artifact"
+  inc_fail
+fi
+
+rm helper_input.txt
+run_test A12-009 "Taskflow failed sub-project stops the parent" \
+  "$YAKKA" build! parent --no-slcc \
+  "parent: failed" 1
 
 echo ""
 

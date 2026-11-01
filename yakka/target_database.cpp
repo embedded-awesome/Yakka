@@ -41,6 +41,8 @@ yakka_status target_database::load(const std::filesystem::path file_path)
   database = std::move(loaded_database.value());
 
   const auto root = database.rootref();
+  if (!root.has_child("format") || root["format"].val<int>().value_or(0) != target_database_format)
+    return yakka_status::LOAD_FAILED;
   if (!root.has_child("targets") || !root["targets"].is_seq())
     return yakka_status::LOAD_FAILED;
 
@@ -59,9 +61,22 @@ yakka_status target_database::load(const std::filesystem::path file_path)
           match->dependencies.push_back(dependency_entry.val());
       }
 
+      if (match_entry.has_child("dependency_files") && match_entry["dependency_files"].is_seq()) {
+        for (const auto &dependency_file_entry: match_entry["dependency_files"].children())
+          match->dependency_files.push_back(dependency_file_entry.val());
+      }
+
       if (match_entry.has_child("regex_matches") && match_entry["regex_matches"].is_seq()) {
         for (const auto &regex_match_entry: match_entry["regex_matches"].children())
           match->regex_matches.push_back(regex_match_entry.val());
+      }
+      if (match_entry.has_child("projects") && match_entry["projects"].is_seq()) {
+        for (const auto arguments: match_entry["projects"].children()) {
+          std::vector<c4::csubstr> project_arguments;
+          for (const auto argument: arguments.children())
+            project_arguments.push_back(argument.val());
+          match->project_dependencies.push_back(std::move(project_arguments));
+        }
       }
 
       if (match_entry.has_child("blueprint") && match_entry["blueprint"].is_map()) {
@@ -89,6 +104,9 @@ yakka_status target_database::load(const std::filesystem::path file_path)
             const auto dependency_type = blueprint_dependency_entry.has_child("type") ? blueprint_dependency_entry["type"].val<int>().value_or(blueprint::dependency::DEFAULT_DEPENDENCY) : blueprint::dependency::DEFAULT_DEPENDENCY;
             dependency.type = static_cast<blueprint::dependency::dependency_type>(dependency_type);
             dependency.name = blueprint_dependency_entry.has_child("name") ? blueprint_dependency_entry["name"].val() : c4::csubstr{};
+            if (blueprint_dependency_entry.has_child("arguments"))
+              for (const auto argument: blueprint_dependency_entry["arguments"].children())
+                dependency.arguments.push_back(argument.val());
             match->blueprint->dependencies.push_back(dependency);
           }
         }
@@ -111,13 +129,18 @@ yakka_status target_database::save(const std::filesystem::path file_path)
   auto root = output.rootref();
   root |= ryml::MAP;
 
+  root["format"] << target_database_format;
+  const auto write_string = [](ryml::NodeRef node, c4::csubstr value) {
+    node << value;
+    node |= ryml::VALQUO;
+  };
   auto targets_node = root.append_child() << ryml::Key("targets");
   targets_node |= ryml::SEQ;
 
   for (const auto &entry: targets) {
     auto target_entry = targets_node.append_child();
     target_entry |= ryml::MAP;
-    target_entry["target"] << entry.first;
+    write_string(target_entry["target"], entry.first);
 
     auto matches_node = target_entry.append_child() << ryml::Key("matches");
     matches_node |= ryml::SEQ;
@@ -129,20 +152,33 @@ yakka_status target_database::save(const std::filesystem::path file_path)
       auto dependencies_node = match_node.append_child() << ryml::Key("dependencies");
       dependencies_node |= ryml::SEQ;
       for (const auto &dependency: match->dependencies)
-        dependencies_node.append_child() << dependency;
+        write_string(dependencies_node.append_child(), dependency);
+
+      match_node["projects"] |= ryml::SEQ;
+      for (const auto &arguments: match->project_dependencies) {
+        auto project_node = match_node["projects"].append_child();
+        project_node |= ryml::SEQ;
+        for (const auto &argument: arguments)
+          write_string(project_node.append_child(), argument);
+      }
+
+      auto dependency_files_node = match_node.append_child() << ryml::Key("dependency_files");
+      dependency_files_node |= ryml::SEQ;
+      for (const auto &dependency_file: match->dependency_files)
+        write_string(dependency_files_node.append_child(), dependency_file);
 
       auto regex_matches_node = match_node.append_child() << ryml::Key("regex_matches");
       regex_matches_node |= ryml::SEQ;
       for (const auto &regex_match: match->regex_matches)
-        regex_matches_node.append_child() << regex_match;
+        write_string(regex_matches_node.append_child(), regex_match);
 
       if (match->blueprint) {
         auto blueprint_node = match_node.append_child() << ryml::Key("blueprint");
         blueprint_node |= ryml::MAP;
-        blueprint_node["target"] << match->blueprint->target;
-        blueprint_node["regex"] << match->blueprint->regex.value_or(c4::csubstr{});
-        blueprint_node["parent_path"] << match->blueprint->parent_path;
-        blueprint_node["task_group"] << match->blueprint->task_group;
+        write_string(blueprint_node["target"], match->blueprint->target);
+        write_string(blueprint_node["regex"], match->blueprint->regex.value_or(c4::csubstr{}));
+        write_string(blueprint_node["parent_path"], match->blueprint->parent_path);
+        write_string(blueprint_node["task_group"], match->blueprint->task_group);
 
         if (match->blueprint->process.valid()) {
           auto process_node = blueprint_node.append_child() << ryml::Key("process");
@@ -152,7 +188,7 @@ yakka_status target_database::save(const std::filesystem::path file_path)
         auto requirements_node = blueprint_node.append_child() << ryml::Key("requirements");
         requirements_node |= ryml::SEQ;
         for (const auto &requirement: match->blueprint->requirements)
-          requirements_node.append_child() << requirement;
+          write_string(requirements_node.append_child(), requirement);
 
         auto blueprint_dependencies_node = blueprint_node.append_child() << ryml::Key("dependencies");
         blueprint_dependencies_node |= ryml::SEQ;
@@ -160,7 +196,12 @@ yakka_status target_database::save(const std::filesystem::path file_path)
           auto dependency_node = blueprint_dependencies_node.append_child();
           dependency_node |= ryml::MAP;
           dependency_node["type"] << dependency.type;
-          dependency_node["name"] << dependency.name;
+          write_string(dependency_node["name"], dependency.name);
+          if (dependency.type == blueprint::dependency::PROJECT_DEPENDENCY) {
+            dependency_node["arguments"] |= ryml::SEQ;
+            for (const auto &argument: dependency.arguments)
+              write_string(dependency_node["arguments"].append_child(), argument);
+          }
         }
       }
     }

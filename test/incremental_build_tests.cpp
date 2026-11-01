@@ -17,6 +17,8 @@
 #include <gtest/gtest.h>
 
 #include "project_diff.hpp"
+#include "file_check.hpp"
+#include "legacy_fast_path.hpp"
 #include "task_engine.hpp"
 #include "yakka_project.hpp"
 #include "yakka_workspace.hpp"
@@ -499,7 +501,7 @@ TEST_F(IncrementalProjectStateTest, UnchangedProjectReusesCachedState)
   EXPECT_FALSE(second->diff.has_data_changed(ryml::to_csubstr(":/components/app/flags/c/local")));
 }
 
-TEST_F(IncrementalProjectStateTest, TouchedComponentWithIdenticalContentIsNotModified)
+TEST_F(IncrementalProjectStateTest, TouchedComponentRespectsCompiledFileCheckPolicy)
 {
   write_component("app",
                   "sources:\n"
@@ -513,8 +515,113 @@ TEST_F(IncrementalProjectStateTest, TouchedComponentWithIdenticalContentIsNotMod
   auto second = run_project();
 
   ASSERT_TRUE(second->diff.had_previous_state);
-  EXPECT_TRUE(second->diff.components_modified.empty()) << "Content hashing must absorb a pure timestamp change";
-  EXPECT_TRUE(second->diff.empty());
+  EXPECT_EQ(second->diff.components_modified.empty(), !yakka::use_timestamp_file_checks);
+  EXPECT_EQ(second->diff.empty(), !yakka::use_timestamp_file_checks);
+}
+
+TEST_F(IncrementalProjectStateTest, FingerprintsTrackExistencePolicyAndContent)
+{
+  const auto file = test_dir / "input.txt";
+  ryml::Tree state;
+  yakka::record_file_check(state.rootref(), file);
+  EXPECT_TRUE(yakka::file_check_matches(state.crootref(), file));
+  std::ofstream(file) << "first";
+  EXPECT_FALSE(yakka::file_check_matches(state.crootref(), file));
+  yakka::record_file_check(state.rootref(), file);
+  EXPECT_TRUE(yakka::file_check_matches(state.crootref(), file));
+  const auto timestamp = fs::last_write_time(file);
+  std::ofstream(file) << "other";
+  fs::last_write_time(file, timestamp);
+  EXPECT_EQ(yakka::file_check_matches(state.crootref(), file), yakka::use_timestamp_file_checks);
+  state.rootref()["policy"] << "incompatible";
+  EXPECT_FALSE(yakka::file_check_matches(state.crootref(), file));
+  yakka::record_file_check(state.rootref(), file);
+  fs::remove(file);
+  EXPECT_FALSE(yakka::file_check_matches(state.crootref(), file));
+}
+
+TEST_F(IncrementalProjectStateTest, SettledStatSkipsHashingAndChangesAreStillCaught)
+{
+  if (yakka::use_timestamp_file_checks)
+    GTEST_SKIP() << "Stat fingerprints only apply to hash checks";
+  const auto file = test_dir / "stat.txt";
+  std::ofstream(file) << "first";
+  ryml::Tree state;
+  yakka::record_file_check(state.rootref(), file);
+  // Just written, so the stat cannot be trusted yet
+  EXPECT_FALSE(yakka::file_check_settled(state.crootref()));
+  EXPECT_FALSE(yakka::recorded_file_stat(state.crootref()).has_value());
+  EXPECT_EQ(yakka::check_file(state.crootref(), file), yakka::file_check_state::refresh);
+
+  // A matching stat is trusted without reading the file, even with a hash that does not match the content
+  const auto stat = yakka::stat_file(file);
+  ASSERT_TRUE(stat.has_value());
+  auto root = state.rootref();
+  root["hash"] << "0123456789abcdef";
+  root["mtime"] << stat->mtime;
+  root["ctime"] << stat->ctime;
+  root["size"] << stat->size;
+  root["inode"] << stat->inode;
+  EXPECT_TRUE(yakka::file_check_settled(state.crootref()));
+  EXPECT_EQ(yakka::check_file(state.crootref(), file), yakka::file_check_state::unchanged);
+
+  // Restoring the modification time after a same-size rewrite still changes the inode change time
+  const auto timestamp = fs::last_write_time(file);
+  std::ofstream(file) << "other";
+  fs::last_write_time(file, timestamp);
+  EXPECT_EQ(yakka::check_file(state.crootref(), file), yakka::file_check_state::changed);
+
+  // Same content with a different stat is unchanged but asks to be recorded again
+  yakka::record_file_check(state.rootref(), file);
+  root["mtime"] << stat->mtime - 1;
+  root["ctime"] << stat->ctime - 1;
+  root["size"] << stat->size;
+  root["inode"] << stat->inode;
+  EXPECT_EQ(yakka::check_file(state.crootref(), file), yakka::file_check_state::refresh);
+
+  fs::remove(file);
+  yakka::record_file_check(state.rootref(), file);
+  EXPECT_TRUE(yakka::file_check_settled(state.crootref()));
+  EXPECT_EQ(yakka::check_file(state.crootref(), file), yakka::file_check_state::unchanged);
+}
+
+TEST_F(IncrementalProjectStateTest, LegacyFastRecordDetectsChangedFilesAndGlobs)
+{
+  const auto file    = test_dir / "input.c";
+  const auto missing = test_dir / "missing.h";
+  std::ofstream(file) << "int x;";
+  yakka::legacy_fast_record record;
+  record.projects = { "app" };
+  record.files.push_back({ file.generic_string(), yakka::stat_file(file) });
+  record.files.push_back({ missing.generic_string(), std::nullopt });
+  record.globs.push_back({ { (test_dir / "*.c").generic_string() }, { file.generic_string() } });
+  const auto record_path = test_dir / "fast" / "record";
+  ASSERT_TRUE(yakka::write_legacy_fast_record(record_path, record));
+  EXPECT_TRUE(yakka::is_legacy_fast_record(record_path));
+
+  const auto loaded = yakka::read_legacy_fast_record(record_path);
+  ASSERT_TRUE(loaded.has_value());
+  EXPECT_EQ(loaded->projects, record.projects);
+  ASSERT_EQ(loaded->files.size(), 2u);
+  EXPECT_EQ(loaded->files[0].stat, record.files[0].stat);
+  EXPECT_FALSE(loaded->files[1].stat.has_value());
+  EXPECT_TRUE(yakka::legacy_fast_record_current(*loaded));
+
+  std::ofstream(test_dir / "other.c") << "int y;";
+  EXPECT_FALSE(yakka::legacy_fast_record_current(*loaded));
+  fs::remove(test_dir / "other.c");
+  EXPECT_TRUE(yakka::legacy_fast_record_current(*loaded));
+
+  std::ofstream(missing) << "#pragma once";
+  EXPECT_FALSE(yakka::legacy_fast_record_current(*loaded));
+  fs::remove(missing);
+
+  std::ofstream(file) << "int x; int z;";
+  EXPECT_FALSE(yakka::legacy_fast_record_current(*loaded));
+
+  std::ofstream(record_path, std::ios::trunc) << "name\tmanifest\t1\t\t";
+  EXPECT_FALSE(yakka::is_legacy_fast_record(record_path));
+  EXPECT_FALSE(yakka::read_legacy_fast_record(record_path).has_value());
 }
 
 TEST_F(IncrementalProjectStateTest, EditedComponentDataInvalidatesItsOwnLocalFlags)

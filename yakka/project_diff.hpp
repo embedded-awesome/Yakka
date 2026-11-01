@@ -34,6 +34,9 @@ public:
   /// Snapshot a summary loaded from a previous run. Must be called before the summary is modified.
   void capture_baseline(ryml::ConstNodeRef summary);
 
+  /// Accept a validated cached summary without constructing subtree hash snapshots.
+  void use_cached_summary();
+
   /// Compare each baseline component's source file against the recorded timestamp and hash.
   void detect_component_changes(std::filesystem::file_time_type summary_last_modified);
 
@@ -95,6 +98,7 @@ private:
   snapshot baseline;
   snapshot current;
   bool has_current = false;
+  bool summary_reused = false;
 };
 
 } // namespace yakka

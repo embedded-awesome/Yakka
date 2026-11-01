@@ -78,7 +78,7 @@ Declares hard dependencies. The build fails if these cannot be resolved.
 ```yaml
 requires:
   components:
-    - yaml-cpp
+    - rapidyaml
     - spdlog
   features:
     - cpp23

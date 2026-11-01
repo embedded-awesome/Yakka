@@ -14,14 +14,17 @@
 #include "build_request.hpp"
 #include "build_session.hpp"
 #include "task_engine.hpp"
+#include "file_check.hpp"
 #include "yakka_project.hpp"
 #include "yakka_workspace.hpp"
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/null_sink.h"
+#include "spdlog/sinks/ostream_sink.h"
 #include <filesystem>
 #include <fstream>
 #include <condition_variable>
 #include <mutex>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -191,6 +194,30 @@ TEST_F(ProjectLifecycleTest, ComponentFeaturesEnableOnlyTrueConditions)
   EXPECT_EQ(project.project_summary["features"].num_children(), 1);
 }
 
+TEST_F(ProjectLifecycleTest, InvalidProvidedFeatureMapFailsWithoutAborting)
+{
+  write_component("platform", "provides:\n  features:\n    cpp23:\n      flags:\n        cpp:\n          global: [-std=c++23]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace, "invalid_provider");
+  project.init_project(std::vector<std::string>{ "platform" });
+  EXPECT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_HAS_INVALID_COMPONENT);
+}
+
+TEST_F(ProjectLifecycleTest, ProvidedFeatureNamesDoNotSelectFeatures)
+{
+  for (const auto &value: {"[cpp23, cpp20]", "cpp23", "[]", "null"}) {
+    SCOPED_TRACE(value);
+    write_component("platform", std::string("provides:\n  features: ") + value + "\n");
+    workspace->local_database.scan_for_components(test_dir);
+    yakka::project project(*workspace, "valid_provider");
+    project.init_project(std::vector<std::string>{ "platform" });
+    ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+    EXPECT_EQ(project.provided_features.contains("cpp23"), std::string(value).find("cpp23") != std::string::npos);
+    EXPECT_TRUE(project.required_features.empty());
+    EXPECT_FALSE(project.provided_features.contains(""));
+  }
+}
+
 TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsSeeSettledSupportedData)
 {
   write_component("platform",
@@ -291,6 +318,214 @@ TEST_F(ProjectLifecycleTest, FeatureChoiceDefaultActivatesOptionalDeclaration)
   EXPECT_EQ(project.project_summary["components"]["platform"]["sources"][0].val(), "first.cpp");
 }
 
+TEST_F(ProjectLifecycleTest, ConditionalChoicesIgnoreInactiveDefaultsAndConflicts)
+{
+  write_component("platform",
+    "requires:\n  features: [first, second]\nprovides:\n  features: [first, second]\n"
+    "choices:\n"
+    "  inactive_default:\n    description: Default\n    condition: 'false'\n"
+    "    options: [{component: missing}, {component: other}]\n    default: {component: missing}\n"
+    "  inactive_conflict:\n    description: Conflict\n    condition: 'false'\n"
+    "    options: [{feature: first}, {feature: second}]\n"
+    "  inactive_incomplete:\n    description: Incomplete\n    condition: 'false'\n"
+    "    options: [{component: missing}, {component: other}]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_EQ(project.project_summary["choices"].num_children(), 0);
+  EXPECT_TRUE(project.unknown_components.empty());
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_TRUE(project.multiple_answer_choices.empty());
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalChoicesApplyDefaultsAndEnforceSelections)
+{
+  write_component("platform",
+    "features:\n  first: {}\n  second: {}\n"
+    "choices:\n"
+    "  active:\n    description: Active\n    condition: 'true'\n"
+    "    options: [{feature: first}, {feature: second}]\n    default: {feature: first}\n"
+    "  incomplete:\n    description: Incomplete\n    condition: 'true'\n"
+    "    options: [{component: driver}, {component: other}]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.required_features.contains("first"));
+  EXPECT_FALSE(project.required_features.contains("second"));
+  project.evaluate_choices();
+  ASSERT_EQ(project.incomplete_choices.size(), 1);
+  EXPECT_EQ(project.incomplete_choices.front().second, "incomplete");
+  EXPECT_TRUE(project.multiple_answer_choices.empty());
+  project.validate_schema();
+  EXPECT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalChoicesRecheckFeaturesAndLateComponentData)
+{
+  write_component("platform",
+    "features:\n  enable:\n    condition: 'true'\n    requires:\n      components: [config]\n"
+    "choices:\n"
+    "  feature_gate:\n    description: Feature gate\n    condition: '\"enable\" in features'\n"
+    "    options: [{component: driver}, {component: other}]\n    default: {component: driver}\n"
+    "  data_gate:\n    description: Data gate\n"
+    "    condition: 'data.settings.enabled and components.config.name == \"config\"'\n"
+    "    data: /settings/mode\n    options: [first, second]\n    default: first\n");
+  write_component("config", "settings:\n  enabled: true\n");
+  write_component("driver");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.required_components.contains("driver"));
+  ASSERT_TRUE(project.project_summary["choices"].has_child("data_gate"));
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_EQ(project.project_summary["data"]["settings"]["mode"].val(), "first");
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalDataChoicesDoNotCollectOrDefaultInactivePaths)
+{
+  write_component("platform",
+    "settings:\n  existing: second\n"
+    "choices:\n"
+    "  inactive_existing:\n    description: Existing\n    condition: 'false'\n"
+    "    data: /settings/existing\n    options: [first, second]\n"
+    "  inactive_default:\n    description: Default\n    condition: 'false'\n"
+    "    data: /settings/defaulted\n    options: [first, second]\n    default: first\n"
+    "  inactive_missing:\n    description: Missing\n    condition: 'false'\n"
+    "    data: /settings/missing\n    options: [first]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_EQ(project.project_summary["data"].num_children(), 0);
+  EXPECT_TRUE(project.incomplete_choices.empty());
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalDataChoiceDefaultsFeedFeatureConditions)
+{
+  write_component("platform",
+    "choices:\n  mode:\n    description: Mode\n    condition: 'host.name == \""
+      + std::string(yakka::host_os_string) + "\"'\n"
+    "    data: /settings/mode\n    options: [first, second]\n    default: first\n"
+    "features:\n  first:\n    condition: 'data.settings.mode == \"first\"'\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.required_features.contains("first"));
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_EQ(project.project_summary["data"]["settings"]["mode"].val(), "first");
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalChoicesInFeatureAndSupportRules)
+{
+  write_component("platform",
+    "requires:\n  components: [driver]\n  features: [enable]\n"
+    "features:\n  enable:\n    choices:\n      feature_choice:\n"
+    "        description: Feature choice\n        condition: 'true'\n"
+    "        data: /settings/feature\n        options: [first, second]\n        default: first\n"
+    "supports:\n  features:\n    enable:\n      choices:\n        support_choice:\n"
+    "          description: Support choice\n          condition: 'false'\n"
+    "          options: [{component: missing}, {component: other}]\n          default: {component: missing}\n"
+    "  components:\n    driver:\n      choices:\n        component_choice:\n"
+    "          description: Component choice\n          condition: '\"enable\" in features'\n"
+    "          data: /settings/component\n          options: [first, second]\n          default: second\n");
+  write_component("driver");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_EQ(project.project_summary["choices"].num_children(), 2);
+  EXPECT_FALSE(project.project_summary["choices"].has_child("support_choice"));
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+  EXPECT_EQ(project.project_summary["data"]["settings"]["feature"].val(), "first");
+  EXPECT_EQ(project.project_summary["data"]["settings"]["component"].val(), "second");
+  project.validate_schema();
+  EXPECT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalChoicesRemainActiveAfterTheirConditionChanges)
+{
+  write_component("platform",
+    "features:\n  enable: {}\n  other: {}\n"
+    "choices:\n  mode:\n    description: Mode\n    condition: 'not (\"enable\" in features)'\n"
+    "    options: [{feature: enable}, {feature: other}]\n    default: {feature: enable}\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_TRUE(project.required_features.contains("enable"));
+  EXPECT_TRUE(project.project_summary["choices"].has_child("mode"));
+  EXPECT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalChoicesRejectInvalidExpressions)
+{
+  for (const auto expression: {"'1'", "'\"text\"'", "'data.missing'", "'true and'"}) {
+    SCOPED_TRACE(expression);
+    write_component("platform",
+      std::string("choices:\n  mode:\n    description: Mode\n    condition: ") + expression +
+      "\n    options: [{component: driver}, {component: other}]\n");
+    workspace->local_database.scan_for_components(test_dir);
+    yakka::project project(*workspace);
+    project.init_project(std::vector<std::string>{ "platform" });
+    EXPECT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_HAS_INVALID_COMPONENT);
+  }
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalChoicesDiscardReplacedDeclarations)
+{
+  write_component("platform", "requires:\n  components: [original, replacement]\n");
+  write_component("original",
+    "choices:\n  old_mode:\n    description: Old\n    condition: 'true'\n"
+    "    options: [{component: missing}, {component: other}]\n    default: {component: missing}\n");
+  write_component("replacement",
+    "replaces:\n  components: original\n"
+    "choices:\n  new_mode:\n    description: New\n    condition: 'true'\n"
+    "    data: /settings/mode\n    options: [first, second]\n    default: second\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace);
+  project.init_project(std::vector<std::string>{ "platform" });
+  ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+  EXPECT_FALSE(project.project_summary["choices"].has_child("old_mode"));
+  EXPECT_TRUE(project.project_summary["choices"].has_child("new_mode"));
+  EXPECT_TRUE(project.unknown_components.empty());
+  project.evaluate_choices();
+  EXPECT_TRUE(project.incomplete_choices.empty());
+}
+
+TEST_F(ProjectLifecycleTest, ConditionalChoicesReevaluateRequestDataAcrossBuilds)
+{
+  write_component("platform",
+    "choices:\n  mode:\n    description: Mode\n    condition: 'data.settings.enabled'\n"
+    "    data: /settings/mode\n    options: [first, second]\n    default: first\n"
+    "blueprints:\n  build:\n    process:\n      - echo: success\n");
+  workspace->local_database.scan_for_components(test_dir);
+  for (const bool enabled: {true, false, true}) {
+    SCOPED_TRACE(enabled);
+    yakka::build_options options;
+    options.ignore_slc = true;
+    options.data = std::string("settings: {enabled: ") + (enabled ? "true" : "false") + "}";
+    yakka::build_session session(*workspace, options);
+    const auto results = session.run({ { { "platform", "build!" }, "conditional_choice" } });
+    ASSERT_TRUE(results.front().success) << results.front().error;
+    auto saved = yakka::ryml_load_file(test_dir / "output" / "conditional_choice" / yakka::project_summary_filename);
+    ASSERT_TRUE(saved.has_value());
+    const auto current = saved->crootref()["current"];
+    EXPECT_EQ(current["choices"].has_child("mode"), enabled);
+    EXPECT_EQ(current["data"]["settings"].has_child("mode"), enabled);
+  }
+}
+
 TEST_F(ProjectLifecycleTest, TrueConditionAppliesFeaturePayloadAndLateRequirements)
 {
   write_component("platform",
@@ -371,6 +606,42 @@ TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsCacheTemplatesAndInputVar
   EXPECT_EQ(project.feature_conditions.at(key).parsed_template.get(), parsed);
   EXPECT_TRUE(project.provided_features.contains("ready"));
   EXPECT_EQ(project.project_summary["data"].num_children(), 0);
+}
+
+TEST_F(ProjectLifecycleTest, ComponentFeatureMembershipConditionsReevaluateWhenReferencedFeaturesArrive)
+{
+  write_component("platform",
+    "features:\n"
+    "  both:\n"
+    "    condition: '\"alpha\" in features and \"beta\" in features'\n"
+    "  either:\n"
+    "    condition: '\"gamma\" in features or \"beta\" in features'\n"
+    "  without:\n"
+    "    condition: 'not (\"delta\" in features)'\n"
+    "  chained:\n"
+    "    condition: '\"both\" in features and not (\"without\" in features)'\n");
+  workspace->local_database.scan_for_components(test_dir);
+  yakka::project project(*workspace, "membership_conditions");
+  project.init_project();
+  ASSERT_TRUE(project.add_component("platform", project.component_flags));
+
+  ASSERT_TRUE(project.evaluate_component_features());
+  EXPECT_TRUE(project.provided_features.contains("without"));
+  EXPECT_FALSE(project.provided_features.contains("both"));
+  EXPECT_FALSE(project.provided_features.contains("either"));
+  ASSERT_TRUE(project.feature_conditions.at({ "platform", "both" }).features_only);
+
+  c4::csubstr alpha = "alpha", beta = "beta";
+  project.add_feature(alpha);
+  EXPECT_FALSE(project.evaluate_component_features());
+  EXPECT_FALSE(project.provided_features.contains("both"));
+
+  project.add_feature(beta);
+  ASSERT_TRUE(project.evaluate_component_features());
+  EXPECT_TRUE(project.provided_features.contains("both"));
+  EXPECT_TRUE(project.provided_features.contains("either"));
+  EXPECT_FALSE(project.evaluate_component_features());
+  EXPECT_FALSE(project.provided_features.contains("chained"));
 }
 
 TEST_F(ProjectLifecycleTest, ComponentFeatureConditionsRefreshInferredSubtreesWithoutDuplicates)
@@ -1060,6 +1331,37 @@ TEST_F(ProjectLifecycleTest, DataChoiceCollectsComponentValueWithoutExplicitRequ
   EXPECT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
 }
 
+TEST_F(ProjectLifecycleTest, DataChoiceMergesRankedEnumValuesBeforeApplyingDefaults)
+{
+  write_component("platform",
+    "choices:\n  cpp_standard:\n    description: C++ standard\n"
+    "    data: /toolchain/cpp_standard\n    options: [c++23, c++20, c++17, c++98]\n    default: c++20\n"
+    "data_schema:\n  toolchain:\n    properties:\n      cpp_standard:\n"
+    "        type: string\n        enum: [c++23, c++20, c++17, c++98]\n        merge_strategy: max\n");
+  write_component("app", "toolchain:\n  cpp_standard: c++23\n");
+  write_component("library", "toolchain:\n  cpp_standard: c++17\n");
+  workspace->local_database.scan_for_components(test_dir);
+  for (const auto &names: { std::vector<std::string>{"platform", "app", "library"},
+                           std::vector<std::string>{"platform", "library", "app"},
+                           std::vector<std::string>{"platform", "library"},
+                           std::vector<std::string>{"platform"} }) {
+    yakka::project project(*workspace);
+    project.init_project(names);
+    ASSERT_EQ(project.evaluate_dependencies(), yakka::project::state::PROJECT_VALID);
+    project.evaluate_choices();
+    EXPECT_TRUE(project.incomplete_choices.empty());
+    EXPECT_TRUE(project.multiple_answer_choices.empty());
+    for (int i = 0; i < 2; ++i) {
+      project.generate_project_summary();
+      project.update_project_data();
+      const auto expected = names.size() == 3 ? "c++23" : names.size() == 2 ? "c++17" : "c++20";
+      EXPECT_EQ(project.project_summary["data"]["toolchain"]["cpp_standard"].val(), expected);
+      project.validate_schema();
+      EXPECT_EQ(project.current_state, yakka::project::state::PROJECT_VALID);
+    }
+  }
+}
+
 TEST_F(ProjectLifecycleTest, DataChoiceDefaultFeedsFeatureConditionsAndSurvivesRecollection)
 {
   write_component("platform",
@@ -1320,6 +1622,202 @@ TEST_F(ProjectLifecycleTest, BuildSessionRejectsZeroWorkerBudget)
   EXPECT_THROW(yakka::build_session(*workspace, options), std::invalid_argument);
 }
 
+TEST_F(ProjectLifecycleTest, BuildSessionRunsProjectDependenciesBeforeParentOnColdAndWarmBuilds)
+{
+  const auto child_output = (test_dir / "output" / "helper" / "result.txt").generic_string();
+  write_component("helper",
+    "blueprints:\n"
+    "  build:\n"
+    "    depends: ['{{project_output}}/result.txt']\n"
+    "  '{{project_output}}/result.txt':\n"
+    "    process: [{inja: child}, {save: ''}]\n");
+  write_component("parent",
+    "blueprints:\n"
+    "  build:\n"
+    "    depends:\n"
+    "      - project: [build!, helper]\n"
+    "      - '{{ \"{project: [build!, helper]}\" }}'\n"
+    "    process:\n"
+    "      - verify: '" + child_output + "'\n"
+    "      - cat: '" + child_output + "'\n"
+    "      - save: '{{project_output}}/parent.txt'\n");
+  workspace->local_database.scan_for_components(test_dir);
+  const auto requests = yakka::expand_build_requests({ "parent", "build!" });
+  ASSERT_TRUE(requests);
+  yakka::build_options options;
+  options.jobs = 1;
+  yakka::build_session session(*workspace, options);
+  for (int run = 0; run < 2; ++run) {
+    const auto results = session.run(*requests);
+    ASSERT_EQ(results.size(), 1u);
+    ASSERT_TRUE(results.front().success) << results.front().error;
+    std::ifstream output(test_dir / "output" / "parent" / "parent.txt");
+    std::string text;
+    std::getline(output, text);
+    EXPECT_EQ(text, "child");
+    ASSERT_TRUE(fs::remove(child_output));
+  }
+}
+
+TEST_F(ProjectLifecycleTest, BuildSessionProjectDependenciesTreatStandalonePlusArgumentsAsFeatures)
+{
+  write_component("helper",
+    "features:\n"
+    "  debug: {}\n"
+    "  logging: {}\n"
+    "blueprints:\n"
+    "  build:\n"
+    "    process:\n"
+    "      - inja: '{{ features | sort | join(\",\") }}'\n"
+    "      - save: '{{project_output}}/features.txt'\n");
+  write_component("parent",
+    "blueprints:\n"
+    "  build:\n"
+    "    depends:\n"
+    "      - project: [build!, helper, +debug, '{{ \"+logging\" }}']\n"
+    "      - '{{ \"{project: [build!, helper, +logging]}\" }}'\n");
+  workspace->local_database.scan_for_components(test_dir);
+  const auto requests = yakka::expand_build_requests({ "parent", "build!" });
+  ASSERT_TRUE(requests);
+  yakka::build_session session(*workspace);
+  for (int run = 0; run < 2; ++run) {
+    const auto results = session.run(*requests);
+    ASSERT_EQ(results.size(), 1u);
+    ASSERT_TRUE(results.front().success) << results.front().error;
+    for (const auto &name: {"helper+debug+logging", "helper+logging"}) {
+      const auto summary = yakka::ryml_load_file(test_dir / "output" / name / yakka::project_summary_filename);
+      ASSERT_TRUE(summary);
+      const auto root = summary->crootref();
+      ASSERT_TRUE(root.has_child("components"));
+      ASSERT_EQ(root["components"].num_children(), 1u);
+      EXPECT_TRUE(root["components"].has_child("helper"));
+      ASSERT_TRUE(root.has_child("features"));
+      EXPECT_EQ(root["features"].num_children(), std::string(name) == "helper+logging" ? 1u : 2u);
+      std::ifstream output(test_dir / "output" / name / "features.txt");
+      std::string text;
+      std::getline(output, text);
+      EXPECT_EQ(text, std::string(name) == "helper+logging" ? "logging" : "debug,logging");
+    }
+  }
+}
+
+TEST_F(ProjectLifecycleTest, BuildSessionBlocksParentOnProjectDependencyFailure)
+{
+  for (const auto &child: { "missing", "failed" }) {
+    write_component("failed", "blueprints:\n  build:\n    process: [{nonexistent_tool: failure}]\n");
+    write_component("parent",
+      "blueprints:\n"
+      "  build:\n"
+      "    depends: [{project: [build!, " + std::string(child) + "]}]\n"
+      "    process: [{inja: forbidden}, {save: '{{project_output}}/parent.txt'}]\n");
+    write_component("independent", "blueprints:\n  build:\n    process: [{echo: success}]\n");
+    workspace->local_database.scan_for_components(test_dir);
+    yakka::build_session session(*workspace);
+    const auto requests = yakka::expand_build_requests({ "[parent, independent]", "build!" });
+    ASSERT_TRUE(requests);
+    const auto results = session.run(*requests);
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_FALSE(results[0].success);
+    EXPECT_NE(results[0].error.find("Project dependency"), std::string::npos) << results[0].error;
+    EXPECT_TRUE(results[1].success) << results[1].error;
+    EXPECT_FALSE(fs::exists(test_dir / "output" / "parent" / "parent.txt"));
+  }
+}
+
+TEST_F(ProjectLifecycleTest, BuildSessionTracksArtifactsCreatedByProjectDependencies)
+{
+  const auto child_output = (test_dir / "output" / "helper" / "result.txt").generic_string();
+  auto write_helper = [&](const std::string &text) {
+    write_component("helper",
+      "blueprints:\n"
+      "  build:\n"
+      "    depends: ['{{project_output}}/result.txt']\n"
+      "  '{{project_output}}/result.txt':\n"
+      "    process: [{inja: " + text + "}, {save: ''}]\n");
+  };
+  write_component("parent",
+    "blueprints:\n"
+    "  build:\n"
+    "    depends: ['{{project_output}}/parent.txt']\n"
+    "  '{{project_output}}/parent.txt':\n"
+    "    depends:\n"
+    "      - project: [build!, helper]\n"
+    "      - '" + child_output + "'\n"
+    "    process:\n"
+    "      - cat: '" + child_output + "'\n"
+    "      - save:\n");
+  const auto requests = yakka::expand_build_requests({ "parent", "build!" });
+  ASSERT_TRUE(requests);
+  yakka::build_session session(*workspace);
+  for (const auto &text: { "first", "second" }) {
+    write_helper(text);
+    workspace->local_database.scan_for_components(test_dir);
+    const auto results = session.run(*requests);
+    ASSERT_TRUE(results.front().success) << results.front().error;
+    std::ifstream output(test_dir / "output" / "parent" / "parent.txt");
+    std::string actual;
+    std::getline(output, actual);
+    EXPECT_EQ(actual, text);
+    ASSERT_TRUE(fs::remove(child_output));
+  }
+}
+
+TEST_F(ProjectLifecycleTest, BuildSessionRejectsRecursiveProjectDependencies)
+{
+  write_component("first", "blueprints:\n  build:\n    depends: [{project: [build!, second]}]\n");
+  write_component("second", "blueprints:\n  build:\n    depends: [{project: [build!, first]}]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  const auto requests = yakka::expand_build_requests({ "build!", "first" });
+  ASSERT_TRUE(requests);
+  yakka::build_session session(*workspace);
+  const auto results = session.run(*requests);
+  ASSERT_EQ(results.size(), 1u);
+  EXPECT_FALSE(results.front().success);
+  EXPECT_NE(results.front().error.find("Circular project dependency"), std::string::npos) << results.front().error;
+}
+
+TEST_F(ProjectLifecycleTest, BuildSessionSharesNestedProjectDependenciesAndExpandsMatrices)
+{
+  struct project_ui : yakka::task_engine_ui {
+    std::vector<std::string> projects;
+    void init(yakka::task_engine &engine) override { projects.push_back(engine.project_name); }
+    void update(yakka::task_engine &) override {}
+    void finish(yakka::task_engine &) override {}
+  } ui;
+  write_component("leaf", "blueprints:\n  build:\n    process: [{echo: leaf}]\n");
+  write_component("helper", "blueprints:\n  build:\n    depends: [{project: [build!, leaf]}]\n");
+  for (const auto &parent: { "first", "second" })
+    write_component(parent, "blueprints:\n  build:\n    depends: [{project: [build!, '[helper, leaf]']}]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  const auto requests = yakka::expand_build_requests({ "build!", "[first, second]" });
+  ASSERT_TRUE(requests);
+  yakka::build_options options;
+  options.jobs = 1;
+  yakka::build_session session(*workspace, options);
+  const auto results = session.run(*requests, &ui);
+  ASSERT_EQ(results.size(), 2u);
+  for (const auto &result: results)
+    EXPECT_TRUE(result.success) << result.error;
+  EXPECT_EQ(ui.projects, (std::vector<std::string>{"leaf", "helper", "first", "second"}));
+}
+
+TEST_F(ProjectLifecycleTest, BuildSessionRejectsConflictingProjectDependencyOutput)
+{
+  write_component("helper", "blueprints:\n  first:\n    process: [{echo: first}]\n  second:\n    process: [{echo: second}]\n");
+  write_component("parent",
+    "blueprints:\n  build:\n    depends:\n"
+    "      - project: [first!, helper]\n"
+    "      - project: [second!, helper]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  const auto requests = yakka::expand_build_requests({ "build!", "parent" });
+  ASSERT_TRUE(requests);
+  yakka::build_session session(*workspace);
+  const auto results = session.run(*requests);
+  ASSERT_EQ(results.size(), 1u);
+  EXPECT_FALSE(results.front().success);
+  EXPECT_NE(results.front().error.find("Conflicting project output"), std::string::npos) << results.front().error;
+}
+
 TEST_F(ProjectLifecycleTest, BuildSessionReportsTaskFailureAndPreservesIndependentSuccess)
 {
   write_component("failed", "blueprints:\n  build:\n    process:\n      - nonexistent_tool: failure\n");
@@ -1371,18 +1869,442 @@ TEST_F(ProjectLifecycleTest, BuildSessionPreservesWarmArtifactsAndRebuildsDelete
   EXPECT_TRUE(fs::exists(artifact));
 }
 
-TEST_F(ProjectLifecycleTest, BuildSessionTracksInjectedDataAcrossWarmBuilds)
+class CachedBuildTest : public ProjectLifecycleTest {
+protected:
+  struct graph_ui : yakka::task_engine_ui {
+    size_t task_count = 0;
+    void init(yakka::task_engine &engine) override
+    {
+      task_count = engine.taskflow.num_tasks();
+    }
+    void update(yakka::task_engine &) override
+    {
+    }
+    void finish(yakka::task_engine &) override
+    {
+    }
+  } ui;
+
+  void SetUp() override
+  {
+    ProjectLifecycleTest::SetUp();
+    previous_logger = spdlog::default_logger();
+    auto sink       = std::make_shared<spdlog::sinks::ostream_sink_mt>(logs);
+    auto logger     = std::make_shared<spdlog::logger>("cached_build_test", sink);
+    logger->set_pattern("%v");
+    spdlog::set_default_logger(logger);
+    write_build_component("first");
+    workspace->local_database.scan_for_components(test_dir);
+  }
+
+  void TearDown() override
+  {
+    spdlog::set_default_logger(previous_logger);
+    ProjectLifecycleTest::TearDown();
+  }
+
+  void write_build_component(const std::string &message)
+  {
+    write_component("cached",
+                    "message: " + message
+                      + "\n"
+                        "blueprints:\n"
+                        "  build:\n"
+                        "    depends: ['{{project_output}}/result.txt']\n"
+                        "  '{{project_output}}/result.txt':\n"
+                        "    depends:\n"
+                        "      - data: ':/components/cached/message'\n"
+                        "    process:\n"
+                        "      - inja: '{{components.cached.message}}'\n"
+                        "      - save:\n");
+  }
+
+  bool run_build(std::vector<std::string> arguments = { "cached", "build!" })
+  {
+    logs.str("");
+    const auto requests = yakka::expand_build_requests(arguments, "cached");
+    if (!requests)
+      return false;
+    yakka::build_session session(*workspace);
+    const auto results = session.run(*requests, &ui);
+    if (!results.front().success)
+      ADD_FAILURE() << results.front().error << "\n" << logs.str();
+    return results.front().success;
+  }
+
+  fs::path output(const std::string &name) const
+  {
+    return test_dir / "output" / "cached" / name;
+  }
+
+  std::string contents(const fs::path &path) const
+  {
+    std::ifstream input(path);
+    return std::string(std::istreambuf_iterator<char>(input), {});
+  }
+
+  std::ostringstream logs;
+  std::shared_ptr<spdlog::logger> previous_logger;
+};
+
+TEST_F(CachedBuildTest, UnchangedBuildSkipsParsingEvaluationAndTaskObjects)
 {
-  write_component("data_build",
+  ASSERT_TRUE(run_build());
+  std::map<std::string, fs::file_time_type> timestamps;
+  for (const auto &name: { yakka::project_summary_filename, std::string("blueprints.json"), std::string("target_database.json"), std::string("taskflow.json"), std::string("todolist.json"), std::string("result.txt") })
+    timestamps[name] = fs::last_write_time(output(name));
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(ui.task_count, 0u) << logs.str();
+  EXPECT_NE(logs.str().find("Cached summary reused: true"), std::string::npos);
+  EXPECT_EQ(logs.str().find("Parsing '"), std::string::npos);
+  EXPECT_EQ(logs.str().find("dependency evaluation:"), std::string::npos);
+  for (const auto &[name, timestamp]: timestamps)
+    EXPECT_EQ(fs::last_write_time(output(name)), timestamp) << name;
+}
+
+TEST_F(CachedBuildTest, EditedComponentReusesUnchangedParsedComponents)
+{
+  write_component("helper", "supports:\n  components:\n    cached:\n      extra: [one]\n");
+  workspace->local_database.scan_for_components(test_dir);
+  ASSERT_TRUE(run_build({ "cached", "helper", "build!" }));
+  const auto helper = test_dir / "helper" / "helper.yakka";
+  write_build_component("second");
+  const auto changed = test_dir / "cached" / "cached.yakka";
+  fs::last_write_time(changed, fs::last_write_time(changed) + std::chrono::seconds(2));
+  ASSERT_TRUE(run_build({ "cached", "helper", "build!" }));
+  EXPECT_EQ(contents(output("result.txt")), "second");
+  EXPECT_EQ(logs.str().find("Parsing '" + helper.generic_string() + "'"), std::string::npos);
+  EXPECT_NE(logs.str().find("Reusing parsed component '" + helper.generic_string() + "'"), std::string::npos);
+  const auto summary = yakka::ryml_load_file(output(yakka::project_summary_filename));
+  ASSERT_TRUE(summary);
+  EXPECT_EQ(summary->crootref()["current"]["components"]["helper"]["extra"].num_children(), 1u);
+}
+
+TEST_F(CachedBuildTest, CompiledPolicyControlsTimestampPreservingComponentEdits)
+{
+  ASSERT_TRUE(run_build());
+  const auto file      = test_dir / "cached" / "cached.yakka";
+  const auto timestamp = fs::last_write_time(file);
+  write_build_component("other");
+  fs::last_write_time(file, timestamp);
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(contents(output("result.txt")), yakka::use_timestamp_file_checks ? "first" : "other");
+}
+
+TEST_F(CachedBuildTest, CompiledPolicyControlsTouchOnlyChanges)
+{
+  ASSERT_TRUE(run_build());
+  const auto file = test_dir / "cached" / "cached.yakka";
+  fs::last_write_time(file, fs::last_write_time(file) + std::chrono::seconds(2));
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(logs.str().find("Parsing '") == std::string::npos, !yakka::use_timestamp_file_checks);
+  if constexpr (!yakka::use_timestamp_file_checks)
+    EXPECT_EQ(ui.task_count, 0u);
+}
+
+TEST_F(CachedBuildTest, RestoresChangedSourceChainsEvenWithOlderTimestamps)
+{
+  const auto source = test_dir / "input.txt";
+  std::ofstream(source) << "first";
+  write_component("cached",
+                  "blueprints:\n"
+                  "  build:\n"
+                  "    depends: ['{{project_output}}/result.txt']\n"
+                  "  '{{project_output}}/result.txt':\n"
+                  "    depends: ['"
+                    + source.generic_string()
+                    + "']\n"
+                      "    process:\n"
+                      "      - cat: '"
+                    + source.generic_string()
+                    + "'\n"
+                      "      - save:\n");
+  ASSERT_TRUE(run_build());
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(ui.task_count, 0u);
+  const auto timestamp = fs::last_write_time(source);
+  std::ofstream(source) << "other";
+  fs::last_write_time(source, timestamp - std::chrono::seconds(2));
+  ASSERT_TRUE(run_build());
+  EXPECT_GT(ui.task_count, 0u);
+  EXPECT_EQ(contents(output("result.txt")), "other");
+  EXPECT_NE(logs.str().find("Cached summary reused: true"), std::string::npos);
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(ui.task_count, 0u);
+}
+
+TEST_F(CachedBuildTest, HashModeDetectsTimestampPreservingSourceEdits)
+{
+  if constexpr (yakka::use_timestamp_file_checks)
+    GTEST_SKIP() << "Timestamp-preserving edits require the hash policy";
+  const auto source = test_dir / "input.txt";
+  std::ofstream(source) << "first";
+  write_component("cached",
+                  "blueprints:\n"
+                  "  build:\n"
+                  "    depends: ['{{project_output}}/result.txt']\n"
+                  "  '{{project_output}}/result.txt':\n"
+                  "    depends: ['"
+                    + source.generic_string()
+                    + "']\n"
+                      "    process:\n"
+                      "      - cat: '"
+                    + source.generic_string()
+                    + "'\n"
+                      "      - save:\n");
+  ASSERT_TRUE(run_build());
+  const auto timestamp = fs::last_write_time(source);
+  std::ofstream(source) << "other";
+  fs::last_write_time(source, timestamp);
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(contents(output("result.txt")), "other");
+}
+
+TEST_F(CachedBuildTest, RegeneratedGraphsStillCheckFileFingerprints)
+{
+  const auto source = test_dir / "input.txt";
+  std::ofstream(source) << "first";
+  const auto descriptor = "blueprints:\n"
+                          "  build:\n"
+                          "    depends: ['{{project_output}}/result.txt']\n"
+                          "  '{{project_output}}/result.txt':\n"
+                          "    depends: ['"
+                          + source.generic_string()
+                          + "']\n"
+                            "    process:\n"
+                            "      - cat: '"
+                          + source.generic_string()
+                          + "'\n"
+                            "      - save:\n";
+  write_component("cached", descriptor);
+  ASSERT_TRUE(run_build());
+  const auto timestamp = fs::last_write_time(source);
+  std::ofstream(source) << "other";
+  fs::last_write_time(source, timestamp - std::chrono::seconds(2));
+  write_component("cached", descriptor + "# invalidate the descriptor cache\n");
+  const auto component_file = test_dir / "cached" / "cached.yakka";
+  fs::last_write_time(component_file, fs::last_write_time(component_file) + std::chrono::seconds(2));
+  ASSERT_TRUE(run_build());
+  EXPECT_NE(logs.str().find("Cached summary reused: false"), std::string::npos);
+  EXPECT_EQ(contents(output("result.txt")), "other");
+}
+
+TEST_F(CachedBuildTest, MissingMetadataAndCachesAreRegenerated)
+{
+  ASSERT_TRUE(run_build());
+  auto summary = yakka::ryml_load_file(output(yakka::project_summary_filename));
+  ASSERT_TRUE(summary);
+  summary->rootref()["current"].remove_child("input_cache");
+  yakka::ryml_save_file(output(yakka::project_summary_filename), summary->rootref());
+  ASSERT_TRUE(run_build());
+  EXPECT_NE(logs.str().find("Cached summary reused: false"), std::string::npos);
+  fs::remove(output("target_database.json"));
+  ASSERT_TRUE(run_build());
+  EXPECT_TRUE(fs::exists(output("target_database.json")));
+  fs::remove(output("todolist.json"));
+  ASSERT_TRUE(run_build());
+  EXPECT_GT(ui.task_count, 0u);
+}
+
+TEST_F(CachedBuildTest, IncompleteTodolistCannotBeAcceptedAsANoop)
+{
+  ASSERT_TRUE(run_build());
+  auto todo = yakka::ryml_load_file(output("todolist.json"));
+  ASSERT_TRUE(todo);
+  todo->rootref()["items"].clear_children();
+  yakka::ryml_save_file(output("todolist.json"), todo->crootref());
+  ASSERT_TRUE(run_build());
+  EXPECT_GT(ui.task_count, 0u);
+  EXPECT_NE(logs.str().find("is missing command"), std::string::npos);
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(ui.task_count, 0u);
+}
+
+TEST_F(CachedBuildTest, MissingSourceFailsInsteadOfBecomingANoop)
+{
+  const auto source = test_dir / "input.txt";
+  std::ofstream(source) << "first";
+  write_component("cached",
+                  "blueprints:\n"
+                  "  build:\n"
+                  "    depends: ['{{project_output}}/result.txt']\n"
+                  "  '{{project_output}}/result.txt':\n"
+                  "    depends: ['"
+                    + source.generic_string()
+                    + "']\n"
+                      "    process:\n"
+                      "      - cat: '"
+                    + source.generic_string()
+                    + "'\n"
+                      "      - save:\n");
+  ASSERT_TRUE(run_build());
+  fs::remove(source);
+  const auto requests = yakka::expand_build_requests({ "cached", "build!" }, "cached");
+  ASSERT_TRUE(requests);
+  yakka::build_session session(*workspace);
+  EXPECT_FALSE(session.run(*requests).front().success);
+}
+
+TEST_F(CachedBuildTest, CommandsWithActionsStillRunOnWarmBuilds)
+{
+  write_component("cached", "blueprints:\n  build:\n    process:\n      - echo: always-run\n");
+  ASSERT_TRUE(run_build());
+  ASSERT_TRUE(run_build());
+  EXPECT_NE(logs.str().find("Cached summary reused: true"), std::string::npos);
+  EXPECT_GT(ui.task_count, 0u);
+}
+
+TEST_F(CachedBuildTest, FailedOutputTasksAreRetriedEvenWhenFingerprintsMatch)
+{
+  const auto source = test_dir / "input.txt";
+  const auto permission = test_dir / "allow";
+  std::ofstream(source) << "first";
+  std::ofstream(permission) << "allowed";
+  write_component("cached",
     "blueprints:\n"
     "  build:\n"
     "    depends: ['{{project_output}}/result.txt']\n"
     "  '{{project_output}}/result.txt':\n"
-    "    depends:\n"
-    "      - data: ':/data/value'\n"
+    "    depends: ['" + source.generic_string() + "']\n"
     "    process:\n"
-    "      - inja: '{{data.value}}'\n"
+    "      - verify: '" + permission.generic_string() + "'\n"
+    "      - cat: '" + source.generic_string() + "'\n"
     "      - save:\n");
+  ASSERT_TRUE(run_build());
+  const auto timestamp = fs::last_write_time(source);
+  std::ofstream(source) << "other";
+  fs::last_write_time(source, timestamp + std::chrono::seconds(2));
+  fs::remove(permission);
+  const auto requests = yakka::expand_build_requests({ "cached", "build!" }, "cached");
+  ASSERT_TRUE(requests);
+  yakka::build_session session(*workspace);
+  EXPECT_FALSE(session.run(*requests).front().success);
+  EXPECT_EQ(contents(output("result.txt")), "first");
+  std::ofstream(permission) << "allowed";
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(contents(output("result.txt")), "other");
+}
+
+TEST_F(CachedBuildTest, ChangedCompilerDependencyFilesRefreshTheGraph)
+{
+  const auto dependency_file = test_dir / "result.d";
+  const auto first_header    = test_dir / "first.h";
+  const auto second_header   = test_dir / "second.h";
+  std::ofstream(first_header) << "first";
+  std::ofstream(second_header) << "other";
+  std::ofstream(dependency_file) << "result: " << first_header.generic_string() << "\n";
+  write_component("cached",
+                  "blueprints:\n"
+                  "  build:\n"
+                  "    depends: ['{{project_output}}/result.txt']\n"
+                  "  '{{project_output}}/result.txt':\n"
+                  "    depends:\n"
+                  "      - dependency_file: '"
+                    + dependency_file.generic_string()
+                    + "'\n"
+                      "    process:\n"
+                      "      - inja: result\n"
+                      "      - save:\n");
+  ASSERT_TRUE(run_build());
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(ui.task_count, 0u);
+  const auto timestamp = fs::last_write_time(dependency_file);
+  std::ofstream(dependency_file) << "result: " << second_header.generic_string() << "\n";
+  fs::last_write_time(dependency_file, timestamp - std::chrono::seconds(2));
+  ASSERT_TRUE(run_build());
+  EXPECT_NE(logs.str().find("Cached summary reused: false"), std::string::npos);
+  EXPECT_NE(contents(output("target_database.json")).find(second_header.generic_string()), std::string::npos);
+  EXPECT_EQ(contents(output("target_database.json")).find(first_header.generic_string()), std::string::npos);
+}
+
+TEST_F(CachedBuildTest, FileDependentConditionsTrackMissingAndCreatedInputs)
+{
+  const auto flag      = test_dir / "enabled";
+  const auto component = contents(test_dir / "cached" / "cached.yakka");
+  write_component("cached",
+                  component.substr(component.find('\n') + 1)
+                    + "features:\n"
+                      "  enabled:\n"
+                      "    condition: 'file_exists(\""
+                    + flag.generic_string()
+                    + "\") == 1'\n"
+                      "    message: other\n");
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(contents(output("result.txt")), "first");
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(ui.task_count, 0u);
+  std::ofstream(flag) << "enabled";
+  ASSERT_TRUE(run_build());
+  EXPECT_NE(logs.str().find("Cached summary reused: false"), std::string::npos);
+  EXPECT_EQ(contents(output("result.txt")), "other");
+  fs::remove(flag);
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(contents(output("result.txt")), "first");
+}
+
+TEST_F(CachedBuildTest, FileReadConditionsTrackContentChanges)
+{
+  const auto flag = test_dir / "enabled";
+  std::ofstream(flag) << "no";
+  const auto component = contents(test_dir / "cached" / "cached.yakka");
+  write_component("cached",
+                  component.substr(component.find('\n') + 1)
+                    + "features:\n"
+                      "  enabled:\n"
+                      "    condition: 'read_file(\""
+                    + flag.generic_string()
+                    + "\") == \"yes\"'\n"
+                      "    message: other\n");
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(contents(output("result.txt")), "first");
+  const auto timestamp = fs::last_write_time(flag);
+  std::ofstream(flag) << "yes";
+  fs::last_write_time(flag, timestamp - std::chrono::seconds(2));
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(contents(output("result.txt")), "other");
+}
+
+TEST_F(CachedBuildTest, GlobAdditionsAndRemovalsRefreshDependencies)
+{
+  const auto first_header  = test_dir / "first.h";
+  const auto second_header = test_dir / "second.h";
+  std::ofstream(first_header) << "first";
+  write_component("cached",
+                  "blueprints:\n"
+                  "  build:\n"
+                  "    depends: ['{{project_output}}/result.txt']\n"
+                  "  '{{project_output}}/result.txt':\n"
+                  "    depends:\n"
+                  "      - '{{ glob(\""
+                    + test_dir.generic_string()
+                    + "/*.h\") }}'\n"
+                      "    process:\n"
+                      "      - inja: result\n"
+                      "      - save:\n");
+  ASSERT_TRUE(run_build());
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(ui.task_count, 0u);
+  std::ofstream(second_header) << "other";
+  ASSERT_TRUE(run_build());
+  EXPECT_NE(logs.str().find("Cached template glob changed"), std::string::npos);
+  EXPECT_NE(contents(output("target_database.json")).find(second_header.generic_string()), std::string::npos);
+  fs::remove(first_header);
+  ASSERT_TRUE(run_build());
+  EXPECT_EQ(contents(output("target_database.json")).find(first_header.generic_string()), std::string::npos);
+}
+
+TEST_F(ProjectLifecycleTest, BuildSessionTracksInjectedDataAcrossWarmBuilds)
+{
+  write_component("data_build",
+                  "blueprints:\n"
+                  "  build:\n"
+                  "    depends: ['{{project_output}}/result.txt']\n"
+                  "  '{{project_output}}/result.txt':\n"
+                  "    depends:\n"
+                  "      - data: ':/data/value'\n"
+                  "    process:\n"
+                  "      - inja: '{{data.value}}'\n"
+                  "      - save:\n");
   workspace->local_database.scan_for_components(test_dir);
   const auto requests = yakka::expand_build_requests({ "data_build", "build!" });
   ASSERT_TRUE(requests.has_value());

@@ -11,10 +11,24 @@ The Yakka project uses the Inja template engine (a modern C++ template engine) w
 - Loops using `{% for item in items %}` 
 - Conditionals using `{% if condition %}`
 - Includes using `{% include "template.txt" %}`
+- `exists(path)` checks whether a value exists in the template data. Paths may use dots (for example, `"component.sources"`) or slash separators (for example, `"/component/sources"`); `existsIn(object, path)` supports slash-separated nested paths relative to the object.
 
 ## Yakka-Specific Extensions
 
 ### Added Functions
+
+#### Project Naming
+- `project_name(segments)`: Returns Yakka's canonical project name for an array
+  of build argument strings. Components are joined with `-`, followed by
+  `+features`; order within each group is preserved. Blueprint commands ending
+  in `!` do not contribute to the name. For example,
+  `{{ project_name(["link!", "app", "+debug", "board", "xcode"]) }}`
+  returns `app-board-xcode+debug`. Filter syntax is also supported:
+  `{{ segments | project_name }}`. This computes the default name, without
+  applying a CLI project-name override, and does not change the `project_name`
+  template variable. An empty array or command-only array returns an empty
+  string. Non-array inputs, non-string elements, invalid build arguments or
+  project names, and alternatives expanding to multiple projects raise an error.
 
 #### String Manipulation
 - `snake_case(str)`: Converts string to snake_case format
@@ -31,7 +45,21 @@ The Yakka project uses the Inja template engine (a modern C++ template engine) w
 - `raw_type(type)`: Gets raw type name without qualifiers
 
 #### Collection Operations
+- `keys(map)`: Returns an array of key strings in the map's iteration order.
+  An empty map returns `[]`; non-map arguments raise a render error. The map
+  is not modified. Also supports `{{ components | keys }}`. To select component
+  names present in the summary, use
+  `{{ intersect(wanted_components, keys(components)) }}`.
 - `join(array, delimiter)`: Joins array elements with specified delimiter
+- `intersect(left, right)`: Returns distinct elements present in both arrays,
+  preserving their order in `left` and using Inja's equality rules. Neither input
+  is modified. A scalar first argument (including null) is treated as a
+  single-element array; a map first argument or a non-array second argument
+  raises a render error. For example,
+  `{{ intersect([3, 1, 3, 2], [2, 3]) }}` returns `[3,2]`.
+  `{{ intersect("uart", ["uart", "spi"]) }}` returns `["uart"]`; a scalar
+  without a match returns `[]`.
+  Filter syntax is also supported: `{{ left | intersect(right) }}`.
 - `concat(str1, str2)`: Concatenates two strings
 
 #### Path Operations
@@ -89,7 +117,7 @@ Yakka callbacks, in both the modular and single-header versions:
 
 - Paths: `dir`, `not_dir`, `parent_path`, `extension`
 - Strings/conversion: `quote`, `regex_escape`, `hex2dec`, `concatenate(args...)`
-- Collections: `join(array, delimiter)`, `find_json(value, key)`
+- Collections: `join(array, delimiter)`, `intersect(left, right)`, `keys(map)`, `find_json(value, key)`
 - Hashing: `sha256sum`, `xxh64sum`, `fnv1a_32`
 
 Hash functions return lowercase hexadecimal strings of 64, 16, and 8 characters,

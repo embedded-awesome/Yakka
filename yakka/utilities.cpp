@@ -5,6 +5,7 @@
 
 #include "yakka_project.hpp"
 #include "utilities.hpp"
+#include "build_request.hpp"
 #include "subprocess.hpp"
 #include "spdlog/spdlog.h"
 
@@ -17,6 +18,7 @@
 #include <ryml_std.hpp>
 #include <concepts>
 #include <string_view>
+#include <stdexcept>
 #include <expected>
 #include <fstream>
 #include <string>
@@ -118,65 +120,20 @@ int exec(const std::string &command_text, const std::string &arg_text, std::func
   return -1;
 }
 
-/// @brief Executes yaml_diff.
-
-bool yaml_diff(const YAML::Node &node1, const YAML::Node &node2)
+ryml::Tree ryml_parse_yaml(c4::csubstr text)
 {
-  std::vector<std::pair<const YAML::Node &, const YAML::Node &>> compare_list;
-
-  compare_list.push_back({ node1, node2 });
-  for (size_t i = 0; i < compare_list.size(); ++i) {
-    const YAML::Node &left  = compare_list[i].first;
-    const YAML::Node &right = compare_list[i].second;
-
-    if (left.Type() != right.Type())
-      return true;
-
-    switch (left.Type()) {
-      case YAML::NodeType::Scalar:
-        if (left.Scalar() != right.Scalar())
-          return true;
-        break;
-
-      case YAML::NodeType::Sequence:
-        // Verify the sequences have the same length
-        if (left.size() != right.size())
-          return true;
-        for (size_t a = 0; a < left.size(); ++a)
-          compare_list.push_back({ left[a], right[a] });
-        break;
-
-      case YAML::NodeType::Map:
-        // Verify the maps have the same length
-        if (left.size() != right.size())
-          return true;
-        for (const auto &a: left) {
-          auto &key  = a.first.Scalar();
-          auto &node = a.second;
-          if (!right[key])
-            return true;
-          compare_list.push_back({ node, right[key] });
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  return false;
-}
-
-/// @brief Executes yaml_path.
-
-YAML::Node yaml_path(const YAML::Node &node, std::string path)
-{
-  YAML::Node temp = node;
-
-  std::stringstream ss(path);
-  std::string s;
-  while (std::getline(ss, s, '.'))
-    temp.reset(temp[s]);
-  return temp;
+  auto callbacks = ryml::get_callbacks();
+  callbacks.m_error = [](const char *message, size_t length, ryml::Location location, void *) {
+    throw std::invalid_argument(fmt::format("Invalid YAML at line {}, column {}: {}",
+                                          location.line + 1, location.col + 1,
+                                          std::string_view(message, length)));
+  };
+  ryml::Parser parser(callbacks);
+  auto tree = parser.parse_in_arena({}, text);
+  if (tree.crootref().is_stream())
+    throw std::invalid_argument("Expected exactly one YAML document");
+  tree.resolve();
+  return tree;
 }
 
 // static std::string unescape_ryml_pointer_segment(std::string_view segment)
@@ -402,6 +359,30 @@ static void merge_node_default(ryml::NodeRef target, ryml::ConstNodeRef source)
 
 /// @brief Executes json_node_merge.
 
+bool node_values_equal(ryml::ConstNodeRef left, ryml::ConstNodeRef right)
+{
+  if (left.is_map() != right.is_map() || left.is_seq() != right.is_seq())
+    return false;
+  if (left.is_container()) {
+    if (left.num_children() != right.num_children())
+      return false;
+    size_t index = 0;
+    for (const auto child: left.children()) {
+      if (left.is_map()) {
+        if (!right.has_child(child.key()) || !node_values_equal(child, right[child.key()]))
+          return false;
+      } else if (!node_values_equal(child, right[index++])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  ryml::Tree left_value, right_value;
+  left_value.duplicate_contents(left.tree(), left.id(), left_value.root_id());
+  right_value.duplicate_contents(right.tree(), right.id(), right_value.root_id());
+  return ryml::emitrs_json<std::string>(left_value) == ryml::emitrs_json<std::string>(right_value);
+}
+
 static bool node_as_number(ryml::ConstNodeRef node, double &result)
 {
   return node.has_val() && c4::from_chars(node.val(), &result);
@@ -488,6 +469,33 @@ static void merge_node_with_strategy(ryml::Pointer path, ryml::NodeRef target, r
 
   case schema::merge_strategy::Max:
   case schema::merge_strategy::Min: {
+    const auto definition = (*schema)[path];
+    const auto options = definition.find_child("enum");
+    if (options.valid()) {
+      if (!options.is_seq() || options.num_children() == 0) {
+        spdlog::error("Cannot apply enum merge strategy at '{}': enum must be a nonempty array", path.to_string());
+        return;
+      }
+      size_t target_rank = options.num_children();
+      size_t source_rank = options.num_children();
+      size_t rank = 0;
+      for (const auto option: options.children()) {
+        if (node_values_equal(option, target))
+          target_rank = rank;
+        if (node_values_equal(option, source))
+          source_rank = rank;
+        ++rank;
+      }
+      if (target_rank == options.num_children() || source_rank == options.num_children()) {
+        spdlog::error("Cannot apply enum merge strategy at '{}': values must be members of enum", path.to_string());
+        return;
+      }
+      const bool take_source = strategy == schema::merge_strategy::Max ? source_rank < target_rank : source_rank > target_rank;
+      if (take_source)
+        copy_node_recursive(source, target);
+      return;
+    }
+
     double target_value = 0.0;
     double source_value = 0.0;
     if (!node_as_number(target, target_value) || !node_as_number(source, source_value)) {
@@ -685,20 +693,45 @@ ryml::NodeRef aggregate_blueprint_data(inja::Environment &env, ryml::ConstNodeRe
   return output;
 }
 
-void add_common_template_commands(inja::Environment &inja_env)
+void add_common_template_commands(inja::Environment &inja_env, template_file_inputs *inputs)
 {
-  inja_env.add_callback("glob", [](inja::Arguments &args, inja::NodeRef additional_data) {
+  const auto track_file = [inputs](const std::string &path) {
+    if (inputs)
+      inputs->files.insert(fs::absolute(path).lexically_normal().generic_string());
+  };
+  inja_env.add_callback("project_name", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+    if (!args[0].is_seq())
+      throw std::invalid_argument("project_name expects an array of build string segments");
+
+    std::vector<std::string> arguments;
+    for (const auto segment: args[0].children()) {
+      if (!segment.is_val() || (!segment.is_val_quoted() && inja::query_kind(segment) != inja::NativeKind::String))
+        throw std::invalid_argument("project_name build segments must be strings");
+      arguments.push_back(ryml_string(segment.val()));
+    }
+
+    const auto requests = expand_build_requests(arguments);
+    if (!requests)
+      throw std::invalid_argument("project_name: " + requests.error());
+    if (requests->size() != 1)
+      throw std::invalid_argument("project_name expects build segments for exactly one project");
+    return additional_data["values"].append_child() << requests->front().project_name;
+  });
+
+  inja_env.add_callback("glob", [inputs](inja::Arguments &args, inja::NodeRef additional_data) {
     ryml::NodeRef aggregate = additional_data["values"].append_child();
     aggregate |= ryml::SEQ;
 
     std::vector<std::string> string_args;
     for (const auto i: args)
       string_args.push_back(i.val<std::string>().value());
+    if (inputs)
+      inputs->globs.insert(string_args);
     for (auto &p: glob::rglob(string_args))
       aggregate.append_child() << p.generic_string();
     return aggregate;
   });
-/// @brief Executes add_callback.
+  /// @brief Executes add_callback.
 
   inja_env.add_callback("absolute_dir", 1, [](inja::Arguments &args, inja::NodeRef additional_data) {
     const auto path = std::filesystem::path{ args[0].val<std::string>().value() };
@@ -731,27 +764,30 @@ void add_common_template_commands(inja::Environment &inja_env)
   });
 /// @brief Executes add_callback.
 
-  inja_env.add_callback("filesize", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+  inja_env.add_callback("filesize", 1, [track_file](const inja::Arguments &args, inja::NodeRef additional_data) {
+    track_file(args[0].val<std::string>().value());
     return additional_data["values"].append_child() << fs::file_size(args[0].val<std::string>().value());
   });
 
-/// @brief Executes add_callback.
+  /// @brief Executes add_callback.
 
-  inja_env.add_callback("file_exists", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+  inja_env.add_callback("file_exists", 1, [track_file](const inja::Arguments &args, inja::NodeRef additional_data) {
+    track_file(args[0].val<std::string>().value());
     return additional_data["values"].append_child() << fs::exists(args[0].val<std::string>().value());
   });
 
-/// @brief Executes add_callback.
+  /// @brief Executes add_callback.
 
-  inja_env.add_callback("read_file", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+  inja_env.add_callback("read_file", 1, [track_file](const inja::Arguments &args, inja::NodeRef additional_data) {
+    track_file(args[0].val<std::string>().value());
     auto file = std::ifstream(args[0].val<std::string>().value());
     return additional_data["values"].append_child() << std::string{ std::istreambuf_iterator<char>{ file }, {} };
-
   });
-/// @brief Executes add_callback.
+  /// @brief Executes add_callback.
 
-  inja_env.add_callback("load_yaml", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+  inja_env.add_callback("load_yaml", 1, [track_file](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
+    track_file(file_path);
     if (std::filesystem::exists(file_path)) {
 
       auto file_content = yakka::get_file_contents<std::string>(file_path);
@@ -761,10 +797,11 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return ryml::NodeRef{};
   });
-/// @brief Executes add_callback.
+  /// @brief Executes add_callback.
 
-  inja_env.add_callback("load_xml", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+  inja_env.add_callback("load_xml", 1, [track_file](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
+    track_file(file_path);
     if (std::filesystem::exists(file_path)) {
 
       pugi::xml_document doc;
@@ -777,10 +814,11 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return ryml::NodeRef{};
   });
-/// @brief Executes add_callback.
+  /// @brief Executes add_callback.
 
-  inja_env.add_callback("load_json", 1, [](const inja::Arguments &args, inja::NodeRef additional_data) {
+  inja_env.add_callback("load_json", 1, [track_file](const inja::Arguments &args, inja::NodeRef additional_data) {
     const auto file_path = args[0].val<std::string>().value();
+    track_file(file_path);
     if (std::filesystem::exists(file_path)) {
 
       auto file_content = yakka::get_file_contents<std::string>(file_path);
@@ -790,7 +828,7 @@ void add_common_template_commands(inja::Environment &inja_env)
     }
     return ryml::NodeRef{};
   });
-/// @brief Executes add_callback.
+  /// @brief Executes add_callback.
 
   inja_env.add_callback("merge", 2, [](const inja::Arguments &args, inja::NodeRef additional_data) {
     auto target = args[0];

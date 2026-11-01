@@ -9,9 +9,11 @@
 #include "utilities.hpp"
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/null_sink.h"
+#include "spdlog/sinks/ostream_sink.h"
 #include <filesystem>
 #include <fstream>
 #include <deque>
+#include <sstream>
 
 namespace {
 
@@ -78,6 +80,83 @@ TEST_F(SchemaValidationTest, EmptySchemaAcceptsAnything)
 {
   yakka::schema s{ std::string{} };
   EXPECT_TRUE(check(s, "anything: 1"));
+}
+
+TEST_F(SchemaValidationTest, ChoiceConditionsRequireNonemptyStringExpressions)
+{
+  yakka::schema s{ yakka::yakka_component_schema_yaml };
+  for (const auto &prefix: {"", "features:\n  active:\n    ", "supports:\n  features:\n    active:\n      ",
+                            "supports:\n  components:\n    driver:\n      "}) {
+    const auto choice = std::string("name: platform\n") + prefix +
+      "choices: {mode: {description: Mode, options: [{feature: first}, {feature: second}], condition: ";
+    for (const auto &value: {"'true'", "'false'", "'\"first\" in features'", "'data.settings.enabled'"}) {
+      SCOPED_TRACE(choice + value);
+      EXPECT_TRUE(check(s, choice + value + "}}"));
+    }
+    for (const auto &value: {"true", "1", "null", "''", "[]", "{}"}) {
+      SCOPED_TRACE(choice + value);
+      EXPECT_FALSE(check(s, choice + value + "}}"));
+    }
+  }
+}
+
+TEST_F(SchemaValidationTest, ProvidedFeaturesRequireNamesRatherThanBuildSettings)
+{
+  yakka::schema s{ yakka::yakka_component_schema_yaml };
+  for (const auto &prefix: {"", "features:\n  active:\n    ", "supports:\n  features:\n    active:\n      ",
+                            "supports:\n  components:\n    driver:\n      "}) {
+    for (const auto &value: {"[cpp23, cpp20]", "cpp23", "[]", "null"}) {
+      SCOPED_TRACE(std::string(prefix) + value);
+      EXPECT_TRUE(check(s, std::string("name: platform\n") + prefix + "provides: {features: " + value + "}\n"));
+    }
+    for (const auto &value: {"{cpp23: {flags: {cpp: {global: [-std=c++23]}}}}",
+                             "[{cpp23: {}}]", "[[cpp23]]", "[null]", "[true]", "[23]", "['']", "''"}) {
+      SCOPED_TRACE(std::string(prefix) + value);
+      EXPECT_FALSE(check(s, std::string("name: platform\n") + prefix + "provides: {features: " + value + "}\n"));
+    }
+  }
+}
+
+TEST_F(SchemaValidationTest, ProvidedFeatureErrorsIncludeFilePathAndCorrection)
+{
+  std::ostringstream output;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(output);
+  auto logger = std::make_shared<spdlog::logger>("schema_diagnostic_test", sink);
+  const auto previous_logger = spdlog::default_logger();
+  const auto previous_level = previous_logger->level();
+  spdlog::set_default_logger(logger);
+  spdlog::set_level(spdlog::level::err);
+
+  yakka::schema s{ yakka::yakka_component_schema_yaml };
+  const auto tree = ryml::parse_in_arena("name: xcode\nprovides:\n  features:\n    cpp23:\n      flags: {}\n");
+  const bool valid = s.validate(tree.crootref(), "xcode", "tools/toolchains/xcode/xcode.yakka");
+
+  spdlog::set_default_logger(previous_logger);
+  spdlog::set_level(previous_level);
+  EXPECT_FALSE(valid);
+  const auto message = output.str();
+  EXPECT_NE(message.find("tools/toolchains/xcode/xcode.yakka"), std::string::npos) << message;
+  EXPECT_NE(message.find("/provides/features"), std::string::npos) << message;
+  EXPECT_NE(message.find("features: [cpp23, cpp20]"), std::string::npos) << message;
+  EXPECT_NE(message.find("supports.features"), std::string::npos) << message;
+}
+
+TEST_F(SchemaValidationTest, ComponentFeatureDeclarationsValidateEachNamedFeature)
+{
+  yakka::schema s{ yakka::yakka_component_schema_yaml };
+  for (const auto &declaration: {"{}", "{ready: {}}", "{condition: {}}",
+                                "{ready: {condition: 'true'}}",
+                                "{ready: {condition: 'false', requires: {components: [driver]}}}"}) {
+    SCOPED_TRACE(declaration);
+    EXPECT_TRUE(check(s, std::string("name: platform\nfeatures: ") + declaration));
+  }
+  for (const auto &declaration: {"[ready]", "{ready: true}", "{ready: null}",
+                                "{ready: {condition: true}}", "{ready: {condition: 1}}",
+                                "{ready: {condition: null}}", "{ready: {condition: ''}}",
+                                "{ready: {condition: []}}", "{ready: {condition: {}}}"}) {
+    SCOPED_TRACE(declaration);
+    EXPECT_FALSE(check(s, std::string("name: platform\nfeatures: ") + declaration));
+  }
 }
 
 TEST_F(SchemaValidationTest, ConstructFromFile)
@@ -444,6 +523,67 @@ TEST_F(MergeStrategyTest, Min)
   auto s = make_schema("value:\n  type: integer\n  merge: min\n");
   EXPECT_NE(merge(s, "value: 5", "value: 9").find("value: 5"), std::string::npos);
   EXPECT_NE(merge(s, "value: 9", "value: 5").find("value: 5"), std::string::npos);
+}
+
+TEST_F(MergeStrategyTest, MergeStrategyAliasSupportsNumericMaxAndMin)
+{
+  for (const auto strategy: { "max", "min" }) {
+    auto s = make_schema(std::string("value:\n  type: integer\n  merge_strategy: ") + strategy + "\n");
+    const auto expected = strategy == std::string("max") ? "value: 9" : "value: 5";
+    EXPECT_NE(merge(s, "value: 5", "value: 9").find(expected), std::string::npos);
+    EXPECT_NE(merge(s, "value: 9", "value: 5").find(expected), std::string::npos);
+  }
+}
+
+TEST_F(MergeStrategyTest, EnumMaxAndMinUseDescendingDeclarationOrder)
+{
+  for (const auto key: { "merge", "merge_strategy" }) {
+    for (const auto strategy: { "max", "min" }) {
+      SCOPED_TRACE(std::string(key) + ": " + strategy);
+      auto s = make_schema(std::string("value:\n  enum: [c++2c, c++26, c++23, c++20, c++17, c++98]\n  ") +
+                           key + ": " + strategy + "\n");
+      const auto expected = strategy == std::string("max") ? "value: c++23" : "value: c++98";
+      EXPECT_NE(merge(s, "value: c++98", "value: c++23").find(expected), std::string::npos);
+      EXPECT_NE(merge(s, "value: c++23", "value: c++98").find(expected), std::string::npos);
+      EXPECT_NE(merge(s, "value: c++23", "value: c++23").find("value: c++23"), std::string::npos);
+    }
+  }
+}
+
+TEST_F(MergeStrategyTest, NumericEnumsUseDeclarationOrderRatherThanNumericOrder)
+{
+  auto s = make_schema("value:\n  enum: [5, 9, 1]\n  merge_strategy: max\n");
+  EXPECT_NE(merge(s, "value: 9", "value: 5").find("value: 5"), std::string::npos);
+  EXPECT_NE(merge(s, "value: 5", "value: 9").find("value: 5"), std::string::npos);
+}
+
+TEST_F(MergeStrategyTest, EnumComparisonPreservesScalarTypesAndSupportsContainers)
+{
+  for (const auto &[high, low]: { std::pair{"\"1\"", "1"}, {"{a: 1, b: 2}", "{a: 3}"}, {"[a, b]", "[c]"} }) {
+    SCOPED_TRACE(high);
+    auto s = make_schema(std::string("value:\n  enum: [") + high + ", " + low + "]\n  merge_strategy: max\n");
+    const auto definition = s[std::string("/value")]["enum"];
+    const auto result = merge(s, std::string("value: ") + low, std::string("value: ") + high);
+    const auto tree = ryml::parse_in_arena(c4::to_csubstr(result));
+    EXPECT_TRUE(yakka::node_values_equal(tree.crootref()["value"], definition[0]));
+  }
+}
+
+TEST_F(MergeStrategyTest, InvalidEnumMergesLogAndLeaveTargetUnchanged)
+{
+  std::ostringstream messages;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(messages);
+  auto logger = std::make_shared<spdlog::logger>("enum_merge_test", sink);
+  const auto previous = spdlog::default_logger();
+  spdlog::set_default_logger(logger);
+  logger->set_level(spdlog::level::err);
+  for (const auto &options: { "[high, low]", "[]", "high" }) {
+    auto s = make_schema(std::string("value:\n  enum: ") + options + "\n  merge_strategy: max\n");
+    EXPECT_NE(merge(s, "value: high", "value: unknown").find("value: high"), std::string::npos);
+    EXPECT_NE(merge(s, "value: unknown", "value: high").find("value: unknown"), std::string::npos);
+  }
+  spdlog::set_default_logger(previous);
+  EXPECT_NE(messages.str().find("Cannot apply enum merge strategy at '/value'"), std::string::npos);
 }
 
 TEST_F(MergeStrategyTest, AbortLeavesTargetUnchanged)

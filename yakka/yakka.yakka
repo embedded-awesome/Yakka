@@ -1,10 +1,13 @@
 name: Yakka
 
+cpp_standard: c++23
+
 sources:
   - build_request.cpp
   - build_session.cpp
   - yakka_project.cpp
   - project_diff.cpp
+  - file_check.cpp
   - yakka_component.cpp
   - yakka_workspace.cpp
   - component_database.cpp
@@ -14,6 +17,9 @@ sources:
   - blueprint_commands.cpp
   - utilities.cpp
   - task_engine.cpp
+  - ninja_generator.cpp
+  - ninja_runner.cpp
+  - legacy_fast_path.cpp
   - yakka_schema.cpp
 
 includes:
@@ -21,10 +27,7 @@ includes:
     - '.'
 
 requires:
-  features:
-    - cpp23
   components:
-    - yaml-cpp
     - cpp-subprocess
     - inja
     - json
@@ -42,6 +45,14 @@ requires:
     - libsodium
     - pugixml
     - valijson
+    - ninja
+    - pcre2
+
+features:
+  timestamp_file_checks:
+    defines:
+      global:
+        - YAKKA_FILE_CHECK_TIMESTAMP=1
 
 supports:
   components:
@@ -55,4 +66,3 @@ supports:
         cpp:
           global:
             - -Wno-deprecated-declarations
-

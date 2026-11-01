@@ -22,6 +22,8 @@ int remove_action(workspace &workspace, const cxxopts::ParseResult &result);
 int git_action(workspace &workspace, const cxxopts::ParseResult &result);
 int fetch_action(workspace &workspace, const cxxopts::ParseResult &result);
 int serve_action(workspace &workspace, const cxxopts::ParseResult &result);
+/// Benchmark timestamp and content-hash comparisons for a saved project's file dependencies.
+int benchmark_action(workspace &workspace, const cxxopts::ParseResult &result);
 
 // clang-format off
 const std::unordered_map<std::string, action_handler> cli_actions = { 
@@ -31,7 +33,8 @@ const std::unordered_map<std::string, action_handler> cli_actions = {
   { "remove", remove_action },
   { "git", git_action },           
   { "fetch", fetch_action }, 
-  { "serve", serve_action } 
+  { "serve", serve_action },
+  { "benchmark", benchmark_action }
 };
 // clang-format on
 

@@ -5,9 +5,11 @@
 #include "utilities.hpp"
 #include <gtest/gtest.h>
 #include <spdlog/sinks/null_sink.h>
+#include <spdlog/sinks/ostream_sink.h>
 #include <chrono>
 #include <deque>
 #include <fstream>
+#include <sstream>
 
 namespace {
 
@@ -16,6 +18,14 @@ std::vector<std::string> strings(const std::vector<c4::csubstr> &values)
   std::vector<std::string> result;
   for (const auto value: values)
     result.push_back(yakka::ryml_string(value));
+  return result;
+}
+
+std::vector<std::vector<std::string>> strings(const std::vector<std::vector<c4::csubstr>> &values)
+{
+  std::vector<std::vector<std::string>> result;
+  for (const auto &arguments: values)
+    result.push_back(strings(arguments));
   return result;
 }
 
@@ -144,6 +154,147 @@ depends:
   EXPECT_TRUE(database.find_match("prefix/out/app/main.cpp.o", summary.crootref()).empty());
 }
 
+TEST_F(BlueprintTest, RegexAndLiteralMatchesKeepTargetOrderAndRegexSuffixes)
+{
+  add("file.o", "depends: [literal]\n");
+  add(R"(.*\.o)", "regex: '.*\\.o$'\ndepends: [regex]\n");
+  const auto matches = database.find_match("file.o", summary.crootref());
+  ASSERT_EQ(matches.size(), 2u);
+  EXPECT_EQ(strings(matches[0]->dependencies), (std::vector<std::string>{"regex"}));
+  EXPECT_EQ(strings(matches[1]->dependencies), (std::vector<std::string>{"literal"}));
+}
+
+TEST_F(BlueprintTest, RegexHexEscapesAreNotMistakenForLiteralSuffixes)
+{
+  add(R"(.+\x2e)", R"(regex: '.+\x2e')");
+  const auto matches = database.find_match("file.", summary.crootref());
+  ASSERT_EQ(matches.size(), 1u);
+  EXPECT_EQ(strings(matches.front()->regex_matches), (std::vector<std::string>{"file."}));
+}
+
+TEST_F(BlueprintTest, RegexAlternativesDoNotApplyAnotherBranchSuffixFilter)
+{
+  add(R"(foo|bar\.o)", R"(regex: 'foo|bar\.o')");
+  add(R"((foo|bar)\.o)", R"(regex: '(foo|bar)\.o')");
+  EXPECT_EQ(database.find_match("foo", summary.crootref()).size(), 1u);
+  EXPECT_EQ(database.find_match("bar.o", summary.crootref()).size(), 2u);
+  EXPECT_EQ(database.find_match("foo.o", summary.crootref()).size(), 1u);
+}
+
+TEST_F(BlueprintTest, RegexBackreferencesPreserveAllCapturesAndRequireFullMatch)
+{
+  add(R"(.+/components/([^/]*)/\1\.a)", R"(
+regex: '.+/components/([^/]*)/\1\.a'
+depends: ['{{ $(1) }}.source']
+)");
+  auto matches = database.find_match("out/components/app/app.a", summary.crootref());
+  ASSERT_EQ(matches.size(), 1u);
+  EXPECT_EQ(strings(matches[0]->regex_matches),
+            (std::vector<std::string>{"out/components/app/app.a", "app"}));
+  EXPECT_EQ(strings(matches[0]->dependencies), (std::vector<std::string>{"app.source"}));
+  EXPECT_TRUE(database.find_match("out/components/app/other.a", summary.crootref()).empty());
+  EXPECT_TRUE(database.find_match("out/components/app/app.a.extra", summary.crootref()).empty());
+  EXPECT_TRUE(database.find_match("out/components/app/app.a\n", summary.crootref()).empty());
+}
+
+TEST_F(BlueprintTest, RegexUnmatchedAndEmptyCaptureGroupsKeepTheirIndices)
+{
+  add(R"((a)?()b(c)?)", R"(regex: '(a)?()b(c)?')");
+  const auto matches = database.find_match("b", summary.crootref());
+  ASSERT_EQ(matches.size(), 1u);
+  EXPECT_EQ(strings(matches[0]->regex_matches), (std::vector<std::string>{"b", "", "", ""}));
+}
+
+TEST_F(BlueprintTest, RegexPreservesUnicodeEscapesAndUnmatchedBackreferences)
+{
+  add(R"(\u0061(b)?\1)", R"(regex: '\u0061(b)?\1')");
+  EXPECT_EQ(database.find_match("a", summary.crootref()).size(), 1u);
+  EXPECT_EQ(database.find_match("abb", summary.crootref()).size(), 1u);
+  EXPECT_TRUE(database.find_match("ab", summary.crootref()).empty());
+}
+
+TEST_F(BlueprintTest, RegexEndAnchorsRequireTheActualEndOfTheTarget)
+{
+  add(R"(foo$)", R"(regex: 'foo$')");
+  EXPECT_EQ(database.find_match("foo", summary.crootref()).size(), 1u);
+  EXPECT_TRUE(database.find_match("foo\n", summary.crootref()).empty());
+}
+
+TEST_F(BlueprintTest, RegexFullMatchingBacktracksAlternativesAndExcludesCarriageReturns)
+{
+  add(R"((a|ab))", R"(regex: '(a|ab)')");
+  add(R"(x.y)", R"(regex: 'x.y')");
+  const auto matches = database.find_match("ab", summary.crootref());
+  ASSERT_EQ(matches.size(), 1u);
+  EXPECT_EQ(strings(matches[0]->regex_matches), (std::vector<std::string>{"ab", "ab"}));
+  EXPECT_TRUE(database.find_match("x\ry", summary.crootref()).empty());
+  EXPECT_TRUE(database.find_match("x\ny", summary.crootref()).empty());
+}
+
+TEST_F(BlueprintTest, RegexMatchLimitFailuresAreNotReportedAsNonMatches)
+{
+  add(R"((*NO_START_OPT)(*LIMIT_MATCH=1)(a+)+$)", R"(regex: '(*NO_START_OPT)(*LIMIT_MATCH=1)(a+)+$')");
+  EXPECT_THROW(database.find_match("aaaaaaaaaaaaaaaa!", summary.crootref()), std::runtime_error);
+}
+
+TEST_F(BlueprintTest, InvalidRegexReportsPatternAndOffset)
+{
+  try {
+    add("broken(", "regex: 'broken('\n");
+    FAIL() << "Invalid regex must throw";
+  } catch (const std::invalid_argument &error) {
+    EXPECT_NE(std::string(error.what()).find("broken("), std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("offset"), std::string::npos);
+  }
+}
+
+TEST_F(BlueprintTest, CachedTemplatesUseCurrentCapturesParentAndSummary)
+{
+  const auto definition = parse(R"(
+regex: 'unused'
+depends:
+  - '{{ curdir() }}/{{ $(1) }}/{{ name }}'
+  - '{{ render("{{ $(1) }}-{{ name }}") }}'
+  - project: [build!, '{{ $(1) }}', '{{ name }}']
+)");
+  database.create_blueprint(R"(first/(.*))", definition, "parent-one");
+  database.create_blueprint(R"(second/(.*))", definition, "parent-two");
+  auto first = database.find_match("first/one", summary.crootref());
+  ASSERT_EQ(first.size(), 1u);
+  EXPECT_EQ(strings(first[0]->dependencies), (std::vector<std::string>{"parent-one/one/example", "one-example"}));
+  auto other_summary = ryml::parse_in_arena("name: changed\n");
+  auto second = database.find_match("second/two", other_summary.crootref());
+  ASSERT_EQ(second.size(), 1u);
+  EXPECT_EQ(strings(second[0]->dependencies), (std::vector<std::string>{"parent-two/two/changed", "two-changed"}));
+  EXPECT_EQ(strings(second[0]->project_dependencies),
+            (std::vector<std::vector<std::string>>{{"build!", "two", "changed"}}));
+  EXPECT_EQ(strings(first[0]->dependencies), (std::vector<std::string>{"parent-one/one/example", "one-example"}));
+}
+
+TEST_F(BlueprintTest, CachedRendererRecoversAfterTemplateFailure)
+{
+  add("broken", R"(depends: ['{{ $("invalid") }}'])");
+  add("valid", "depends: ['{{ name }}']\n");
+  EXPECT_TRUE(database.find_match("broken", summary.crootref()).empty());
+  const auto matches = database.find_match("valid", summary.crootref());
+  ASSERT_EQ(matches.size(), 1u);
+  EXPECT_EQ(strings(matches[0]->dependencies), (std::vector<std::string>{"example"}));
+}
+
+TEST_F(BlueprintTest, CachedTemplatesReevaluateAndTrackFileCallbacks)
+{
+  const auto path = write("input.txt", "first.cpp");
+  add("build", "depends: ['{{ read_file(\"" + path.generic_string() + "\") }}']\n");
+  const auto first = database.find_match("build", summary.crootref());
+  ASSERT_EQ(first.size(), 1u);
+  EXPECT_EQ(strings(first[0]->dependencies), (std::vector<std::string>{"first.cpp"}));
+  write("input.txt", "second.cpp");
+  const auto second = database.find_match("build", summary.crootref());
+  ASSERT_EQ(second.size(), 1u);
+  EXPECT_EQ(strings(second[0]->dependencies), (std::vector<std::string>{"second.cpp"}));
+  EXPECT_TRUE(database.template_inputs.files.contains(path.generic_string()));
+}
+
 TEST_F(BlueprintTest, DependenciesExpandListsNormalizeRelativePathsAndDataPrefixes)
 {
   add("build", R"(
@@ -166,6 +317,117 @@ TEST_F(BlueprintTest, EmptyDependencyExpansionContributesNoFile)
   const auto matches = database.find_match("build", summary.crootref());
   ASSERT_EQ(matches.size(), 1u);
   EXPECT_TRUE(matches[0]->dependencies.empty());
+}
+
+TEST_F(BlueprintTest, ProjectDependenciesRenderArgumentsAndStructuredTemplateOutput)
+{
+  summary.rootref()["data"]["child"] |= ryml::MAP;
+  summary.rootref()["data"]["child"]["project"] |= ryml::SEQ;
+  for (const auto &argument: { "build!", "helper", "{{ name }}" })
+    summary.rootref()["data"]["child"]["project"].append_child() << argument;
+  add("build", R"(
+depends:
+  - project: [build!, helper, '{{ $(0) }}', '{{ name }}']
+  - '{{ data.child }}'
+  - '[source.cpp, {project: [build!, second, "{{ name }}"]}]'
+)");
+  const auto matches = database.find_match("build", summary.crootref());
+  ASSERT_EQ(matches.size(), 1u);
+  EXPECT_EQ(strings(matches[0]->dependencies), (std::vector<std::string>{"source.cpp"}));
+  EXPECT_EQ(strings(matches[0]->project_dependencies), (std::vector<std::vector<std::string>>{
+    {"build!", "helper", "build", "example"}, {"build!", "helper", "example"}, {"build!", "second", "example"}}));
+}
+
+TEST_F(BlueprintTest, GeneratedDependencyTextIsOwnedByTheBlueprintArena)
+{
+  add("build", R"(
+depends:
+  - '{{ "[./generated.cpp, {project: [build!, helper, example]}]" }}'
+  - project: [build!, '{{ name }}']
+)");
+  const auto matches = database.find_match("build", summary.crootref());
+  ASSERT_EQ(matches.size(), 1u);
+  const auto &match = matches.front();
+  ASSERT_EQ(match->dependencies.size(), 1u);
+  EXPECT_EQ(match->dependencies.front(), c4::to_csubstr("generated.cpp"));
+  EXPECT_TRUE(database.database.arena().is_super(match->dependencies.front()));
+  ASSERT_EQ(match->project_dependencies.size(), 2u);
+  for (const auto &arguments: match->project_dependencies)
+    for (const auto argument: arguments)
+      EXPECT_TRUE(database.database.arena().is_super(argument));
+  EXPECT_EQ(strings(match->project_dependencies),
+            (std::vector<std::vector<std::string>>{{"build!", "helper", "example"}, {"build!", "example"}}));
+}
+
+TEST(RapidYamlParsingTest, OwnsInputAndReportsInvalidYamlWithoutChangingGlobalCallbacks)
+{
+  const auto callbacks = ryml::get_callbacks();
+  const auto document = yakka::ryml_parse_yaml(c4::to_csubstr(std::string("{value: owned}")));
+  EXPECT_EQ(document.crootref()["value"].val(), c4::to_csubstr("owned"));
+  EXPECT_TRUE(document.arena().is_super(document.crootref()["value"].val()));
+  for (const auto text: {"[first, {broken]", "{value: [unterminated}", "---\nfirst\n---\nsecond\n"}) {
+    SCOPED_TRACE(text);
+    EXPECT_THROW(yakka::ryml_parse_yaml(c4::to_csubstr(text)), std::invalid_argument);
+  }
+  EXPECT_TRUE(ryml::get_callbacks() == callbacks);
+}
+
+TEST(RapidYamlParsingTest, ResolvesAliasesAndPreservesQuotedScalars)
+{
+  const auto document = yakka::ryml_parse_yaml("original: &value 'null'\ncopy: *value\n");
+  EXPECT_EQ(document.crootref()["copy"].val(), c4::to_csubstr("null"));
+  EXPECT_FALSE(document.crootref()["copy"].val_is_null());
+}
+
+TEST_F(BlueprintTest, InvalidProjectDependenciesAreRejected)
+{
+  for (const auto &yaml: { "depends: [{project: helper}]", "depends: [{project: []}]",
+                          "depends: [{project: [build!, {nested: invalid}]}]" })
+    EXPECT_THROW(yakka::blueprint("build", parse(yaml), ""), std::invalid_argument);
+  add("build", R"(depends: ['{project: [build!, []]}'])");
+  EXPECT_THROW(database.find_match("build", summary.crootref()), std::runtime_error);
+}
+
+TEST_F(BlueprintTest, GeneratedDependenciesRejectMalformedYamlAndInvalidProjectArguments)
+{
+  for (const auto &dependency: {"[first,,second]", "{project: [build!, null]}", "{project: []}"}) {
+    yakka::blueprint_database invalid;
+    invalid.create_blueprint("build", parse("depends: ['" + std::string(dependency) + "']"), "");
+    EXPECT_THROW(invalid.find_match("build", summary.crootref()), std::runtime_error);
+  }
+}
+
+TEST_F(BlueprintTest, NativeContainerTemplatesEmitValuesWithoutTheirKeys)
+{
+  auto data = parse("object: {project: [build!, helper]}\narray: [first, second]\nempty: []\n");
+  inja::Environment environment;
+  EXPECT_EQ(environment.render("{{ object }}", data), R"({"project": ["build!","helper"]})");
+  EXPECT_EQ(environment.render("{{ array }}", data), R"(["first","second"])");
+  EXPECT_EQ(environment.render("{{ empty }}", data), "[]");
+}
+
+TEST_F(BlueprintTest, ProjectDependenciesSurviveBlueprintAndTargetPersistence)
+{
+  add("build", "depends: [{project: [build!, helper, '{{ name }}']}]\n");
+  const auto blueprints_path = directory / "blueprints.json";
+  database.save(blueprints_path);
+  yakka::blueprint_database restored_blueprints;
+  restored_blueprints.load(blueprints_path);
+  yakka::target_database targets;
+  const auto matches = targets.add_target("build", restored_blueprints, summary.crootref());
+  ASSERT_EQ(matches.size(), 1u);
+  const std::vector<std::vector<std::string>> expected{{"build!", "helper", "example"}};
+  EXPECT_EQ(strings(matches[0]->project_dependencies), expected);
+  const auto targets_path = directory / "targets.json";
+  ASSERT_EQ(targets.save(targets_path), yakka::yakka_status::SUCCESS);
+  yakka::target_database restored_targets;
+  ASSERT_EQ(restored_targets.load(targets_path), yakka::yakka_status::SUCCESS);
+  ASSERT_EQ(restored_targets.get_target("build").size(), 1u);
+  const auto &restored = restored_targets.get_target("build")[0];
+  EXPECT_EQ(strings(restored->project_dependencies), expected);
+  ASSERT_EQ(restored->blueprint->dependencies.size(), 1u);
+  EXPECT_EQ(strings(restored->blueprint->dependencies[0].arguments),
+            (std::vector<std::string>{"build!", "helper", "{{ name }}"}));
 }
 
 TEST_F(BlueprintTest, InvalidDependencyTemplateDoesNotProducePartialMatch)
@@ -342,6 +604,74 @@ TEST_F(BlueprintTest, TargetPersistencePreservesExecutableBlueprintAndOptionalRe
   EXPECT_TRUE(restored.get_target("missing").empty());
 }
 
+TEST_F(BlueprintTest, TargetPersistenceKeepsStringFieldsQuotedAndProcessTypesUnchanged)
+{
+  const std::vector<c4::csubstr> values = {
+    "123", "-42", "1.25", "1e3", "true", "false", "null", "", "00123",
+    "path\\with\\slashes", "a\"quote", "line\nbreak", "tab\tvalue"
+  };
+  const auto data = parse(R"(
+process:
+  - echo: {number: 123, boolean: true, nothing: null, text: hello}
+)");
+  auto blueprint = std::make_shared<yakka::blueprint>("123", data, "null");
+  blueprint->task_group = "true";
+  blueprint->requirements = values;
+  yakka::blueprint::dependency dependency{ yakka::blueprint::dependency::PROJECT_DEPENDENCY, "false" };
+  dependency.arguments = values;
+  blueprint->dependencies.push_back(dependency);
+  auto match = std::make_shared<yakka::blueprint_match>();
+  match->blueprint = blueprint;
+  match->dependencies = values;
+  match->dependency_files = values;
+  match->regex_matches = values;
+  match->project_dependencies = { values };
+  yakka::target_database targets;
+  targets.targets.emplace("123", std::vector{ match });
+  const auto path = directory / "targets.json";
+  ASSERT_EQ(targets.save(path), yakka::yakka_status::SUCCESS);
+
+  auto saved = yakka::ryml_load_file(path);
+  ASSERT_TRUE(saved.has_value());
+  const auto root = saved->crootref();
+  EXPECT_FALSE(root["format"].is_val_quoted());
+  const auto target = root["targets"][0];
+  EXPECT_TRUE(target["target"].is_val_quoted());
+  const auto saved_match = target["matches"][0];
+  const auto saved_blueprint = saved_match["blueprint"];
+  for (const auto key: { "target", "regex", "parent_path", "task_group" })
+    EXPECT_TRUE(saved_blueprint[key].is_val_quoted()) << key;
+  EXPECT_TRUE(saved_blueprint["dependencies"][0]["name"].is_val_quoted());
+  EXPECT_FALSE(saved_blueprint["dependencies"][0]["type"].is_val_quoted());
+  for (const auto sequence: {
+         saved_match["dependencies"], saved_match["dependency_files"], saved_match["regex_matches"],
+         saved_match["projects"][0], saved_blueprint["requirements"],
+         saved_blueprint["dependencies"][0]["arguments"] }) {
+    ASSERT_EQ(sequence.num_children(), values.size());
+    size_t index = 0;
+    for (const auto child: sequence.children()) {
+      EXPECT_TRUE(child.is_val_quoted()) << index;
+      EXPECT_EQ(child.val(), values[index++]);
+    }
+  }
+  const auto process = saved_blueprint["process"][0]["echo"];
+  EXPECT_FALSE(process["number"].is_val_quoted());
+  EXPECT_FALSE(process["boolean"].is_val_quoted());
+  EXPECT_TRUE(process["nothing"].val_is_null());
+  EXPECT_TRUE(process["text"].is_val_quoted());
+
+  yakka::target_database restored;
+  ASSERT_EQ(restored.load(path), yakka::yakka_status::SUCCESS);
+  ASSERT_EQ(restored.get_target("123").size(), 1u);
+  const auto &restored_match = restored.get_target("123")[0];
+  EXPECT_EQ(strings(restored_match->dependencies), strings(values));
+  EXPECT_EQ(strings(restored_match->dependency_files), strings(values));
+  EXPECT_EQ(strings(restored_match->regex_matches), strings(values));
+  EXPECT_EQ(strings(restored_match->project_dependencies), strings(match->project_dependencies));
+  EXPECT_EQ(strings(restored_match->blueprint->requirements), strings(values));
+  EXPECT_EQ(strings(restored_match->blueprint->dependencies[0].arguments), strings(values));
+}
+
 TEST_F(BlueprintTest, TargetLoadingReportsMissingAndInvalidDocumentShape)
 {
   yakka::target_database targets;
@@ -440,6 +770,66 @@ TEST_F(BlueprintExecutionTest, ToolSuccessCodesAcceptConfiguredNonzeroAndRejectO
   EXPECT_EQ(run("process: [{finish: '7'}]", tools).second, 0);
   EXPECT_NE(run("process: [{finish: '8'}]", tools).second, 0);
   EXPECT_NE(run("process: [{finish: '7'}]", "finish: exit").second, 0);
+}
+
+class BlueprintToolLoggingTest : public BlueprintExecutionTest {
+protected:
+  void SetUp() override
+  {
+    BlueprintExecutionTest::SetUp();
+    previous_logger = spdlog::default_logger();
+    auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(log_output);
+    auto logger = std::make_shared<spdlog::logger>("blueprint_tool_logging_test", sink);
+    logger->set_level(spdlog::level::err);
+    logger->set_pattern("%v");
+    spdlog::set_default_logger(logger);
+  }
+
+  void TearDown() override
+  {
+    spdlog::set_default_logger(previous_logger);
+    BlueprintExecutionTest::TearDown();
+  }
+
+#if defined(_WIN64) || defined(_WIN32) || defined(__CYGWIN__)
+  const std::string tool = "printer:\n  command: 'cmd /c echo stdout-marker & echo stderr-marker 1>&2 & exit /b'\n";
+#else
+  const std::string tool = "printer:\n  command: 'echo stdout-marker; echo stderr-marker >&2; exit'\n";
+#endif
+  std::ostringstream log_output;
+  std::shared_ptr<spdlog::logger> previous_logger;
+};
+
+TEST_F(BlueprintToolLoggingTest, RejectedExitCodesLogCapturedStdoutAndStderr)
+{
+  for (const auto &success_values: {"", "  tool_return_success: [7]\n"}) {
+    for (const auto &code: {"0", "8"}) {
+      if (std::string(success_values).empty() && std::string(code) == "0")
+        continue;
+      SCOPED_TRACE(std::string(success_values) + "exit code: " + code);
+      log_output.str("");
+      const auto result = run("process:\n  - printer: '" + std::string(code) +
+                              "'\n  - echo: wrong\n", tool + success_values);
+      EXPECT_NE(result.second, 0);
+      EXPECT_NE(result.first.find("stdout-marker"), std::string::npos);
+      EXPECT_NE(result.first.find("stderr-marker"), std::string::npos);
+      EXPECT_NE(log_output.str().find("stdout-marker"), std::string::npos);
+      EXPECT_NE(log_output.str().find("stderr-marker"), std::string::npos);
+    }
+  }
+}
+
+TEST_F(BlueprintToolLoggingTest, AcceptedExitCodesRetainOutputWithoutErrorLogging)
+{
+  for (const auto &code: {"0", "7"}) {
+    SCOPED_TRACE(code);
+    const auto result = run("process: [{printer: '" + std::string(code) + "'}]",
+                            tool + "  tool_return_success: [0, 7]\n");
+    EXPECT_EQ(result.second, 0);
+    EXPECT_NE(result.first.find("stdout-marker"), std::string::npos);
+    EXPECT_NE(result.first.find("stderr-marker"), std::string::npos);
+    EXPECT_TRUE(log_output.str().empty());
+  }
 }
 
 TEST_F(BlueprintExecutionTest, MalformedProcessContainerFailsRatherThanSilentlySkipping)

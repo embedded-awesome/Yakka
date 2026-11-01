@@ -9,6 +9,11 @@ sources:
   - yakka_cli_actions.cpp
 
 requires:
+  data:
+    - '/library'
   components:
     - yakka
     - cpp-httplib
+
+toolchain:
+  cpp_standard: c++23

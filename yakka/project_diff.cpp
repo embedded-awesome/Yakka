@@ -6,6 +6,7 @@
 #include "project_diff.hpp"
 #include "yakka.hpp"
 #include "utilities.hpp"
+#include "file_check.hpp"
 
 #include "../components/rapidhash/v3/rapidhash.h"
 
@@ -193,8 +194,15 @@ void project_diff::take_snapshot(ryml::ConstNodeRef summary, snapshot &target)
 
 void project_diff::capture_baseline(ryml::ConstNodeRef summary)
 {
+  summary_reused = false;
   take_snapshot(summary, baseline);
   had_previous_state = true;
+}
+
+void project_diff::use_cached_summary()
+{
+  had_previous_state = true;
+  summary_reused = true;
 }
 
 void project_diff::detect_component_changes(std::filesystem::file_time_type summary_last_modified)
@@ -216,15 +224,13 @@ void project_diff::detect_component_changes(std::filesystem::file_time_type summ
       continue;
     }
 
-    // Fast path: the recorded timestamp still matches, so the contents cannot have changed
-    if (file_state.has_timestamp) {
-      if (file_state.timestamp == static_cast<int64_t>(last_modified.time_since_epoch().count()))
-        continue;
-    } else if (last_modified <= summary_last_modified) {
+    if constexpr (use_timestamp_file_checks) {
+      if (file_state.has_timestamp ? file_state.timestamp != static_cast<int64_t>(last_modified.time_since_epoch().count())
+                                   : last_modified > summary_last_modified)
+        components_modified.insert(name);
       continue;
     }
 
-    // Timestamp moved; fall back to content hashing so a touched file does not force a rebuild
     if (!file_state.has_hash) {
       components_modified.insert(name);
       continue;
@@ -321,6 +327,8 @@ bool project_diff::hash_differs(const std::string &path) const
 
 bool project_diff::has_data_changed(ryml::csubstr data_path) const
 {
+  if (summary_reused)
+    return false;
   if (!had_previous_state || !has_current)
     return true;
 
@@ -376,6 +384,8 @@ bool project_diff::has_data_changed(ryml::csubstr data_path) const
 
 bool project_diff::empty() const
 {
+  if (summary_reused)
+    return true;
   if (!had_previous_state)
     return false;
 

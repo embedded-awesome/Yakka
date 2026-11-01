@@ -10,6 +10,7 @@ sources:
   - task_engine_tests.cpp
   - incremental_build_tests.cpp
   - schema_validation_tests.cpp
+  - ninja_generator_tests.cpp
 
 requires:
   components:

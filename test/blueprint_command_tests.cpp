@@ -634,6 +634,38 @@ TEST_F(BlueprintCommandTest, RegexToYamlPreservesCapturedFieldValues)
   }
 }
 
+TEST_F(BlueprintCommandTest, RegexToYamlQuotesStringsAndHandlesNoMatches)
+{
+  for (const auto &split: {"", "split: true\n"}) {
+    auto tree = make_map(std::string("search: '(.*)'\nto_yaml: [value]\n") + split);
+    const auto result = invoke_command("regex", "", tree.crootref(), "null", project_summary, project_data);
+    ASSERT_EQ(result.retcode, 0);
+    const auto output = yakka::ryml_parse_yaml(c4::to_csubstr(result.result));
+    EXPECT_FALSE(output.crootref()[0]["value"].val_is_null());
+    EXPECT_EQ(output.crootref()[0]["value"].val(), c4::to_csubstr("null"));
+  }
+  auto no_match = make_map("search: '(missing)'\nto_yaml: [value]\n");
+  const auto result = invoke_command("regex", "", no_match.crootref(), "other", project_summary, project_data);
+  ASSERT_EQ(result.retcode, 0);
+  EXPECT_EQ(result.result, "\n");
+}
+
+TEST_F(BlueprintCommandTest, RegexToYamlRejectsMoreFieldsThanCaptures)
+{
+  for (const auto &split: {"", "split: true\n"}) {
+    auto tree = make_map(std::string("search: '(value)'\nto_yaml: [first, second]\n") + split);
+    EXPECT_NE(invoke_command("regex", "", tree.crootref(), "value", project_summary, project_data).retcode, 0);
+  }
+}
+
+TEST_F(BlueprintCommandTest, RmRejectsMalformedAndNonScalarGeneratedLists)
+{
+  for (const auto &list: {"[first,,second]", "[{nested: invalid}]", "[null]", "{{ \"\" }}"}) {
+    auto tree = make_scalar(list);
+    EXPECT_NE(invoke_command("rm", "", tree.crootref(), "", project_summary, project_data).retcode, 0);
+  }
+}
+
 TEST_F(BlueprintCommandTest, RegexWithoutAnOperationFails)
 {
   auto tree = make_map("search: foo");

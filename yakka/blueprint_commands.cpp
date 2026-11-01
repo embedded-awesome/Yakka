@@ -150,41 +150,59 @@ process_return regex_command(std::string target, ryml::ConstNodeRef command, std
         std::smatch s;
         if (!std::regex_match(line, s, regex_search))
           continue;
-        YAML::Node node;
-        node[0]                 = YAML::Node();
+        ryml::Tree output;
+        output.rootref() |= ryml::SEQ;
+        auto node = output.rootref().append_child();
         int i                   = 1;
         const auto to_yaml_node = command.find_child("to_yaml");
+        if (to_yaml_node.num_children() == 0)
+          node << nullptr;
+        else
+          node |= ryml::MAP;
         for (const auto &v: to_yaml_node.children()) {
-          node[0][v.val<std::string>().value()] = s[i++].str();
+          if (static_cast<size_t>(i) >= s.size()) {
+            spdlog::error("'regex' to_yaml has more fields than capture groups");
+            return { "", -1 };
+          }
+          const auto key = v.val();
+          auto field = node.append_child() << ryml::key(key);
+          field << s[i++].str();
+          field |= ryml::VALQUO;
         }
 
         if (prefix_node.valid())
           captured_output.append(try_render(inja_env, prefix_node.val<std::string>().value(), project_summary));
-        captured_output.append(YAML::Dump(node));
-        captured_output.append("\n");
+        captured_output.append(ryml::emitrs_yaml<std::string>(output));
         if (suffix_node.valid())
           captured_output.append(try_render(inja_env, suffix_node.val<std::string>().value(), project_summary));
       }
     }
   } else if (command.has_child("to_yaml")) {
-    YAML::Node yaml;
+    ryml::Tree yaml;
+    yaml.rootref() |= ryml::SEQ;
     for (auto it = std::sregex_iterator(captured_output.begin(), captured_output.end(), regex_search); it != std::sregex_iterator{}; ++it) {
       const auto &sm = *it;
-      YAML::Node new_node;
+      auto new_node = yaml.rootref().append_child();
       int i                   = 1;
       const auto to_yaml_node = command.find_child("to_yaml");
+      if (to_yaml_node.num_children() == 0)
+        new_node << nullptr;
+      else
+        new_node |= ryml::MAP;
       for (const auto &v: to_yaml_node.children()) {
-        new_node[v.val<std::string>().value()] = sm[i++].str();
+        if (static_cast<size_t>(i) >= sm.size()) {
+          spdlog::error("'regex' to_yaml has more fields than capture groups");
+          return { "", -1 };
+        }
+        const auto key = v.val();
+        auto field = new_node.append_child() << ryml::key(key);
+        field << sm[i++].str();
+        field |= ryml::VALQUO;
       }
-      yaml.push_back(new_node);
     }
 
     captured_output.erase();
-    captured_output = prefix + YAML::Dump(yaml) + "\n" + suffix;
-    // captured_output.append(prefix);
-    // captured_output.append(YAML::Dump(yaml));
-    // captured_output.append("\n");
-    // captured_output.append(suffix);
+    captured_output = prefix + (yaml.crootref().num_children() == 0 ? "\n" : ryml::emitrs_yaml<std::string>(yaml)) + suffix;
   } else if (command.has_child("replace")) {
     const auto replace_node = command.find_child("replace");
     captured_output         = prefix + std::regex_replace(captured_output, regex_search, replace_node.val<std::string>().value()) + suffix;
@@ -362,6 +380,16 @@ process_return save_command(std::string target, ryml::ConstNodeRef command, std:
       }
     }
 
+    if (save_preserves_unchanged_files) {
+      std::error_code ec;
+      if (fs::file_size(save_filename, ec) == captured_output.size() && !ec) {
+        std::ifstream existing(save_filename, std::ios_base::binary);
+        const std::string existing_content((std::istreambuf_iterator<char>(existing)), std::istreambuf_iterator<char>());
+        if (existing_content == captured_output)
+          return { captured_output, 0 };
+      }
+    }
+
     std::ofstream save_file(save_filename, std::ios_base::binary);
     if (!save_file.is_open()) {
       spdlog::error("Failed to save file: '{}'", save_filename);
@@ -390,7 +418,11 @@ process_return create_command(std::string target, ryml::ConstNodeRef command, st
       filename = try_render(inja_env, filename, project_summary);
       if (!filename.empty()) {
         std::filesystem::path p(filename);
-        fs::create_directories(p);
+        // Toolchains pass the target file ({{$(0)}}) to mean "ensure the target's directory exists"
+        if (p.lexically_normal() == std::filesystem::path(target).lexically_normal())
+          p = p.parent_path();
+        if (!p.empty())
+          fs::create_directories(p);
       }
     } catch (std::exception &e) {
       spdlog::error("Couldn't create directory for '{}'", filename);
@@ -431,21 +463,24 @@ process_return rm_command(std::string target, ryml::ConstNodeRef command, std::s
   }
   std::string filename = command.val<std::string>().value();
   filename             = try_render(inja_env, filename, project_summary);
+  if (filename.empty()) {
+    spdlog::error("'rm' rendered an empty filename");
+    return { "", -1 };
+  }
   // Check if the input was a YAML array construct
   if (filename.front() == '[' && filename.back() == ']') {
     // Load the generated dependency string as YAML and push each item individually
     try {
-      auto file_list = YAML::Load(filename);
-      for (auto i: file_list) {
-        if (!i.IsScalar()) {
+      const auto file_list = ryml_parse_yaml(c4::to_csubstr(filename));
+      for (const auto i: file_list.crootref().children()) {
+        if (!i.is_val() || i.val_is_null()) {
           spdlog::error("'rm' file list entries must be scalar filenames");
           return { "", -1 };
         }
-        const auto file = i.Scalar();
-        fs::remove(file);
+        fs::remove(ryml_path(i.val()));
       }
     } catch (std::exception &e) {
-      spdlog::error("Failed to parse file list: {}", filename);
+      spdlog::error("Failed to process file list '{}': {}", filename, e.what());
       return { "", -1 };
     }
   } else {

@@ -8,7 +8,6 @@
 #include "utilities.hpp"
 #include "slcc_schema.hpp"
 
-
 #include <valijson/adapters/rapidyaml_adapter.hpp>
 #include <valijson/schema.hpp>
 #include <valijson/schema_parser.hpp>
@@ -117,10 +116,14 @@ bool schema::validate(ryml::ConstNodeRef data, ryml::csubstr id, const std::file
 
     valijson::ValidationResults::Error error;
     while (results.popError(error)) {
-      if (error.jsonPointer.empty()) {
-        spdlog::error("Validation error in '{}': {}", ryml_string(id), error.description);
-      } else {
-        spdlog::error("Validation error in '{}': {} ({})", ryml_string(id), error.description, error.jsonPointer);
+      const auto source = data_path.empty() ? ryml_string(id) : data_path.generic_string();
+      spdlog::error("Validation error in '{}' at '{}': {}", source,
+                    error.jsonPointer.empty() ? "/" : error.jsonPointer, error.description);
+      if (error.jsonPointer.find("/provides/features") != std::string::npos) {
+        spdlog::error("provides.features must be a feature name or a list of feature names, e.g. "
+                      "'features: [cpp23, cpp20]', not a map of build settings. "
+                      "Put per-feature flags under top-level 'features' declarations (enabled when selected or required), "
+                      "or under 'supports.features' to react to a selected feature.");
       }
     }
 
@@ -206,7 +209,7 @@ schema::merge_strategy schema::get_merge_strategy(const ryml::Pointer &path) con
     return schema::merge_strategy::Default;
   }
 
-  const auto merge = node.find_child("merge");
+  const auto merge = node.has_child("merge_strategy") ? node.find_child("merge_strategy") : node.find_child("merge");
   if (!merge.valid() || !merge.has_val()) {
     return schema::merge_strategy::Default;
   }
