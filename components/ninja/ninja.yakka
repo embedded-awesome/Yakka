@@ -1,0 +1,71 @@
+name: ninja
+version: 1.13.1
+description: Ninja build system core (upstream ninja-build/ninja v1.13.1, Apache-2.0) used as Yakka's build executor
+
+# Upstream library sources only. ninja.cc (the CLI), tests, perftests and the browse tool are not vendored.
+# Local changes: Plan::ready_edge_count() in src/build.h.
+sources:
+  - ninja-1.13.1/src/build_log.cc
+  - ninja-1.13.1/src/build.cc
+  - ninja-1.13.1/src/clean.cc
+  - ninja-1.13.1/src/clparser.cc
+  - ninja-1.13.1/src/debug_flags.cc
+  - ninja-1.13.1/src/depfile_parser.cc
+  - ninja-1.13.1/src/deps_log.cc
+  - ninja-1.13.1/src/disk_interface.cc
+  - ninja-1.13.1/src/dyndep.cc
+  - ninja-1.13.1/src/dyndep_parser.cc
+  - ninja-1.13.1/src/edit_distance.cc
+  - ninja-1.13.1/src/elide_middle.cc
+  - ninja-1.13.1/src/eval_env.cc
+  - ninja-1.13.1/src/graph.cc
+  - ninja-1.13.1/src/jobserver.cc
+  - ninja-1.13.1/src/json.cc
+  - ninja-1.13.1/src/lexer.cc
+  - ninja-1.13.1/src/line_printer.cc
+  - ninja-1.13.1/src/manifest_parser.cc
+  - ninja-1.13.1/src/metrics.cc
+  - ninja-1.13.1/src/missing_deps.cc
+  - ninja-1.13.1/src/parser.cc
+  - ninja-1.13.1/src/real_command_runner.cc
+  - ninja-1.13.1/src/state.cc
+  - ninja-1.13.1/src/status_printer.cc
+  - ninja-1.13.1/src/string_piece_util.cc
+  - ninja-1.13.1/src/util.cc
+  - ninja-1.13.1/src/version.cc
+
+includes:
+  global:
+    - ninja-1.13.1/src
+
+flags:
+  cpp:
+    local:
+      - -Wno-deprecated
+      - -Wno-format-pedantic
+
+supports:
+  components:
+    xcode:
+      sources:
+        - ninja-1.13.1/src/jobserver-posix.cc
+        - ninja-1.13.1/src/subprocess-posix.cc
+    gcc:
+      sources:
+        - ninja-1.13.1/src/jobserver-posix.cc
+        - ninja-1.13.1/src/subprocess-posix.cc
+      defines:
+        local:
+          - USE_PPOLL=1
+    msvc:
+      sources:
+        - ninja-1.13.1/src/subprocess-win32.cc
+        - ninja-1.13.1/src/includes_normalize-win32.cc
+        - ninja-1.13.1/src/jobserver-win32.cc
+        - ninja-1.13.1/src/msvc_helper-win32.cc
+        - ninja-1.13.1/src/getopt.c
+        - ninja-1.13.1/src/minidump-win32.cc
+      defines:
+        local:
+          - NOMINMAX
+          - _CRT_SECURE_NO_WARNINGS
