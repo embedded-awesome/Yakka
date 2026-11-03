@@ -121,9 +121,9 @@ static std::string current_executable_path(const char *argv0)
       return path.generic_string();
   }
 #elif defined(__linux__)
-  const auto path = fs::read_symlink("/proc/self/exe", ec);
+  const auto self_path = fs::read_symlink("/proc/self/exe", ec);
   if (!ec)
-    return path.generic_string();
+    return self_path.generic_string();
 #endif
   const auto path = fs::absolute(argv0, ec);
   return ec ? std::string(argv0) : path.generic_string();

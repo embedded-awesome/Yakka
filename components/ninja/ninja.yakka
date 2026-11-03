@@ -38,19 +38,24 @@ includes:
   global:
     - ninja-1.13.1/src
 
-flags:
-  cpp:
-    local:
-      - -Wno-deprecated
-      - -Wno-format-pedantic
-
 supports:
   components:
     xcode:
+      flags:
+          cpp:
+            local:
+              - -Wno-deprecated
+              - -Wno-format-pedantic
       sources:
         - ninja-1.13.1/src/jobserver-posix.cc
         - ninja-1.13.1/src/subprocess-posix.cc
     gcc:
+      flags:
+        cpp:
+          local:
+            - -Wno-deprecated
+            - -Wno-format
+            - -Wno-attribute-warning
       sources:
         - ninja-1.13.1/src/jobserver-posix.cc
         - ninja-1.13.1/src/subprocess-posix.cc

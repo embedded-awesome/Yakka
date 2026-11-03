@@ -136,7 +136,7 @@ blueprints:
       - ':/*/sources'
       - ':/*/flags/ld/global'
     process:
-      - inja: "-MAP:\"{{project_output}}/{{project_name}}.map\" {% for name,component in components %}{% for flag in component.flags.ld.global %}{{render(flag)}} {% endfor %}{%endfor%} -PDB:\"{{project_output}}/{{project_name}}.pdb\" {% for name, component in components %}{%if existsIn(component,\"sources\") %}{% for source in component/sources %}{{project_output}}/components/{{name}}/{{source}}.o {% endfor %}{% endif %}{% endfor %} Shlwapi.lib"
+      - inja: '-MAP:"{{project_output}}/{{project_name}}.map" {% for name,component in components %}{% for flag in component.flags.ld.global %}{{render(flag)}} {% endfor %}{%endfor%} -PDB:"{{project_output}}/{{project_name}}.pdb" {% for name, component in components %}{%if existsIn(component,"sources") %}{% for source in component/sources %}{{project_output}}/components/{{name}}/{{source}}.o {% endfor %}{% endif %}{% endfor %} Shlwapi.lib'
       - save:
     
   global_compiler_options:
@@ -146,13 +146,13 @@ blueprints:
       - ':/*/includes/global'
       - ':/*/defines/global'
     process:
-      - inja: "{% for name,component in components %}
-          {% if existsIn(component, \"flags\") and existsIn(component.flags, $(1)) %}{% for flag in at(component.flags, $(1)).global %}{{render(flag)}} {% endfor %}{%endif%}
-          {%- for include in component.includes.global %}-I{{component.directory}}/{{include}} {% endfor %}
-          {%- for define in component.defines.global %}-D{{define}} {% endfor %}
-          {%endfor%}
-          {%- for feature in features %}-D{{feature}}_FEATURE_REQUIRED {% endfor %}
-          -I{{project_output}}"
+      - inja: |
+          {% for name,component in components -%}
+          {% if existsIn(component, "flags") and existsIn(component.flags, $(1)) %}{% for flag in at(component.flags, $(1)).global %}{{render(flag)}} {% endfor %}{% endif -%}
+          {%- for include in component.includes.global %}-I{{component.directory}}/{{include}} {% endfor -%}
+          {%- for define in component.defines.global %}-D{{define}} {% endfor -%}
+          {% endfor -%}
+          -I{{project_output}}
       - save:
       
   compiler_option_files:
@@ -163,8 +163,9 @@ blueprints:
       - ':/{{$(1)}}/defines/local'
     process:
       - create_directory: '{{$(0)}}'
-      - inja: "{% set component=at(components,$(1)) %}
-          {% if existsIn(component, \"flags\")%}{% for flag in at(component.flags, $(2)).local %}{{render(flag)}} {% endfor %}{%endif%}
-          {% for include in component.includes.local %}-I{{component.directory}}/{{include}} {% endfor %}
-          {% for define in component.defines.local %}-D{{define}} {% endfor %}"
+      - inja: |
+          {% set component=at(components,$(1)) -%}
+          {% if existsIn(component, "flags")%}{% for flag in at(component.flags, $(2)).local %}{{render(flag)}} {% endfor %}{% endif -%}
+          {% for include in component.includes.local %}-I{{component.directory}}/{{include}} {% endfor -%}
+          {% for define in component.defines.local %}-D{{define}} {% endfor -%}
       - save:

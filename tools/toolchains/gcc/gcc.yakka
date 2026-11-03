@@ -41,7 +41,7 @@ blueprints:
       - g++: "@{{project_output}}/{{project_name}}.global_ld_options -o {{$(0)}}"
 
   cpp_object_files:
-    regex: .+/components/([^/]*)/(.*)\.(cpp|cxx)\.o
+    regex: .+/components/([^/]*)/(.*)\.(cpp|cxx|cc)\.o
     depends:
       - '{{project_output}}/components/{{$(1)}}/{{$(1)}}.cpp_options'
       - '{{at(components, $(1)).directory}}/{{$(2)}}.{{$(3)}}'
