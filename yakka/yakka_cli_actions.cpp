@@ -366,7 +366,7 @@ void download_unknown_components(yakka::workspace &workspace, yakka::project &pr
     std::map<ryml::csubstr, std::shared_ptr<ProgressBar>> fetch_progress_bars;
 
     std::map<ryml::csubstr, std::future<std::filesystem::path>> fetch_list;
-    int largest_name_length = 16;
+    std::string::size_type largest_name_length = 16;
     do {
       // Ask the workspace to fetch them
       for (const auto &i: project.unknown_components) {

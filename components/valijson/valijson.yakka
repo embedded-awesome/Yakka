@@ -4,9 +4,10 @@ includes:
   global:
     - include
 
+# toolchain:
+#   cpp_standard: c++20
+
 requires:
-  features:
-    - cpp20
   components:
     - rapidyaml
 

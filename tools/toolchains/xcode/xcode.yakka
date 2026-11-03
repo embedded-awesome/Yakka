@@ -49,6 +49,7 @@ flags:
       - -Werror -Wpedantic -Wall
       - -Wno-deprecated-literal-operator
       - -g
+      - -std=c++23 # Temporary hardcoded C++ standard, should be replaced with selected option from choices
 
   ld:
     global: 

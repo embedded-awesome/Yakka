@@ -60,7 +60,7 @@ supports:
       flags:
         cpp:
           global:
-          - -Wno-error=sign-compare
+            - -Wno-error=sign-compare
     xcode:
       flags:
         cpp:
