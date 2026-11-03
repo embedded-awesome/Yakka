@@ -30,6 +30,10 @@ toolchain:
 #       - c90
 #     default: c18
 
+toolchain:
+  cpp_standard: c++23
+  c_standard: c18
+
 flags:
   c:
     global:
