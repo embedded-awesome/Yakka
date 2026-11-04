@@ -174,7 +174,6 @@ blueprints:
           -D{{render(define, component.directory)}}
           {%   endfor -%}
           {% endfor -%}
-          -std={% if $(1) == "cpp" %}{{ data.toolchain.cpp_standard }}{% else %}{{ data.toolchain.c_standard }}{% endif %}
           {%- for feature in features %}-D{{feature}}_FEATURE_REQUIRED {% endfor %}
           -I{{project_output}}
       - save: 
@@ -191,7 +190,6 @@ blueprints:
       - inja: |
           {% set component=at(components,$(1)) %}
           {% if existsIn(component, "flags")%}{% for flag in at(component.flags, $(2)).local %}{{flag}} {% endfor %}{% endif %}
-          -std={% if $(2) == "cpp" %}{{ data.toolchain.cpp_standard }}{% else %}{{ data.toolchain.c_standard }}{% endif %}
           {% for include in component.includes.local %}-I{{component.directory}}/{{include}} {% endfor %}
           {% for define in component.defines.local %}-D{{define}} {% endfor %}
       - save:
